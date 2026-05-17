@@ -4,11 +4,8 @@ import logging
 import signal
 import sys
 
-import config
-import executor
-import fetcher
-import notifier
-from positions import PositionTracker, RiskManager
+from bot import config, executor, fetcher, notifier
+from bot.positions import PositionTracker, RiskManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +44,7 @@ def main() -> None:
     # Build execution stack
     client = executor.build_client()
     tracker = PositionTracker()
+    tracker.init_paper_balance(config.PAPER_STARTING_BALANCE)
     risk = RiskManager(tracker)
 
     mode = "PAPER" if (config.PAPER_TRADE or client is None) else "LIVE"

@@ -8,8 +8,8 @@ from typing import Callable, Optional
 
 import requests
 
-import config
-from models import Trade
+from . import config
+from .models import Trade
 
 logger = logging.getLogger(__name__)
 

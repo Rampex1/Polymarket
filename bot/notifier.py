@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import requests as http
 
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

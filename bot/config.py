@@ -11,7 +11,7 @@ TARGET_ADDRESS = os.getenv("TARGET_ADDRESS", "")
 POLL_INTERVAL_SECONDS = 20
 
 # Trade filters
-MIN_TRADE_SIZE_USDC = 50.0
+MIN_TRADE_SIZE_USDC = 0.0
 
 # Polymarket API base URLs
 GAMMA_API = "https://gamma-api.polymarket.com"
@@ -23,14 +23,20 @@ CLOB_API = "https://clob.polymarket.com"
 # Set to True to log orders without sending them to the exchange
 PAPER_TRADE: bool = os.getenv("PAPER_TRADE", "true").lower() != "false"
 
-# Proportion of surfandturf's size to copy (0.05 = 5%)
-SCALE_FACTOR: float = float(os.getenv("SCALE_FACTOR", "0.05"))
+# Starting virtual balance for paper trading
+PAPER_STARTING_BALANCE: float = float(os.getenv("PAPER_STARTING_BALANCE", "20.0"))
+
+# Proportion of surfandturf's size to copy
+SCALE_FACTOR: float = float(os.getenv("SCALE_FACTOR", "0.01"))
+
+# Hard cap per trade as a fraction of paper balance
+MAX_TRADE_PCT: float = float(os.getenv("MAX_TRADE_PCT", "0.20"))
 
 # Order type: "market" (FOK) or "limit" (GTC at signal price)
 ORDER_TYPE: str = os.getenv("ORDER_TYPE", "market")
 
 # Per-order floor — skip if scaled size is below this
-MIN_ORDER_SIZE_USDC: float = float(os.getenv("MIN_ORDER_SIZE_USDC", "5.0"))
+MIN_ORDER_SIZE_USDC: float = float(os.getenv("MIN_ORDER_SIZE_USDC", "0.0"))
 
 # Max allowed price movement since signal (fraction, e.g. 0.05 = 5%)
 MAX_SLIPPAGE: float = float(os.getenv("MAX_SLIPPAGE", "0.05"))

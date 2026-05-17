@@ -9,10 +9,10 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client.constants import POLYGON
 
-import config
-import notifier
-from models import Trade
-from positions import PositionTracker, RiskManager
+from . import config
+from . import notifier
+from .models import Trade
+from .positions import PositionTracker, RiskManager
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,17 @@ def _handle_buy(
     paper: bool,
 ) -> None:
     scaled_usdc = trade.size_usdc * config.SCALE_FACTOR
+
+    # For paper trading, also cap to MAX_TRADE_PCT of remaining balance
+    if paper:
+        balance = tracker.paper_balance()
+        max_trade = balance * config.MAX_TRADE_PCT
+        if scaled_usdc > max_trade:
+            logger.info(
+                "Capping trade $%.2f → $%.2f (%.0f%% of $%.2f balance)",
+                scaled_usdc, max_trade, config.MAX_TRADE_PCT * 100, balance,
+            )
+            scaled_usdc = max_trade
 
     if scaled_usdc < config.MIN_ORDER_SIZE_USDC:
         logger.info(

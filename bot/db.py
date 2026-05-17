@@ -1,5 +1,5 @@
 import sqlite3
-import config
+from . import config
 
 _conn: sqlite3.Connection | None = None
 
@@ -43,6 +43,11 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS daily_stats (
             date              TEXT PRIMARY KEY,
             realized_pnl_usdc REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS paper_account (
+            id      INTEGER PRIMARY KEY CHECK (id = 1),
+            balance REAL NOT NULL
         );
     """)
     conn.commit()

@@ -3,7 +3,7 @@ One-time script to generate Polymarket CLOB API keys from your private key.
 Run once, then save the output values to your .env file.
 
 Usage:
-    POLY_PRIVATE_KEY=0x... python setup_keys.py
+    POLY_PRIVATE_KEY=0x... python scripts/setup_keys.py
 """
 
 import os
