@@ -120,12 +120,15 @@ class PositionTracker:
 
         conn.execute(
             """INSERT INTO trade_log
-               (market_id, asset_id, action, shares, price, usdc_amount, paper, ts)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               (market_id, asset_id, action, outcome, question, shares, price,
+                usdc_amount, paper, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade.market_id,
                 trade.asset_id,
                 "BUY",
+                trade.outcome,
+                trade.question,
                 shares,
                 trade.price,
                 scaled_usdc,
@@ -175,13 +178,15 @@ class PositionTracker:
 
         conn.execute(
             """INSERT INTO trade_log
-               (market_id, asset_id, action, shares, price, usdc_amount,
-                realized_pnl, paper, ts)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               (market_id, asset_id, action, outcome, question, shares, price,
+                usdc_amount, realized_pnl, paper, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade.market_id,
                 trade.asset_id,
                 "SELL",
+                trade.outcome,
+                trade.question,
                 shares,
                 trade.price,
                 proceeds_usdc,

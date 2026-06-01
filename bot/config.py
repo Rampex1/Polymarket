@@ -24,13 +24,15 @@ CLOB_API = "https://clob.polymarket.com"
 PAPER_TRADE: bool = os.getenv("PAPER_TRADE", "true").lower() != "false"
 
 # Starting virtual balance for paper trading
-PAPER_STARTING_BALANCE: float = float(os.getenv("PAPER_STARTING_BALANCE", "20.0"))
+PAPER_STARTING_BALANCE: float = float(os.getenv("PAPER_STARTING_BALANCE", "10000.0"))
 
-# Proportion of surfandturf's size to copy
-SCALE_FACTOR: float = float(os.getenv("SCALE_FACTOR", "0.01"))
-
-# Hard cap per trade as a fraction of paper balance
-MAX_TRADE_PCT: float = float(os.getenv("MAX_TRADE_PCT", "0.20"))
+# Tiered bet sizing based on surfandturf's total position in a market
+# If his holding is below TIER1_MIN, skip the trade entirely
+TIER1_MIN:  float = float(os.getenv("TIER1_MIN",  "80000"))   # $80k–$150k → $1
+TIER1_MAX:  float = float(os.getenv("TIER1_MAX",  "150000"))
+TIER1_SIZE: float = float(os.getenv("TIER1_SIZE", "1.0"))
+TIER2_MAX:  float = float(os.getenv("TIER2_MAX",  "500000"))  # $150k–$500k+ → $2
+TIER2_SIZE: float = float(os.getenv("TIER2_SIZE", "2.0"))
 
 # Order type: "market" (FOK) or "limit" (GTC at signal price)
 ORDER_TYPE: str = os.getenv("ORDER_TYPE", "market")

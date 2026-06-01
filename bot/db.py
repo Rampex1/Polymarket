@@ -32,6 +32,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             market_id    TEXT,
             asset_id     TEXT,
             action       TEXT,
+            outcome      TEXT,
+            question     TEXT,
             shares       REAL,
             price        REAL,
             usdc_amount  REAL,
@@ -50,4 +52,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             balance REAL NOT NULL
         );
     """)
+    conn.commit()
+    _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
+    for col in ("outcome", "question"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE trade_log ADD COLUMN {col} TEXT")
     conn.commit()

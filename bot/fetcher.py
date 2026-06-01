@@ -87,35 +87,88 @@ def fetch_recent_trades(address: str, limit: int = 100) -> list[Trade]:
 def _parse_trade(item: dict) -> Optional[Trade]:
     """Parse a raw activity item into a Trade. Returns None if it should be skipped."""
     try:
-        # Only TRADE type is actionable; skip REDEEM, MAKER_REBATE, REWARD, etc.
-        if item.get("type") != "TRADE":
-            return None
+        trade_type = item.get("type")
 
-        size = float(item.get("usdcSize") or 0)
-        if size < config.MIN_TRADE_SIZE_USDC:
-            return None
+        if trade_type == "TRADE":
+            size = float(item.get("usdcSize") or 0)
+            if size < config.MIN_TRADE_SIZE_USDC:
+                return None
+            action = item.get("side", "").upper()
+            if action not in ("BUY", "SELL"):
+                return None
+            return Trade(
+                id=item.get("transactionHash", ""),
+                market_id=item.get("conditionId", ""),
+                question=item.get("title", ""),
+                side=action,
+                size_usdc=size,
+                price=float(item.get("price") or 0),
+                action=action,
+                timestamp=int(item.get("timestamp") or time.time()),
+                outcome=item.get("outcome", ""),
+                asset_id=item.get("asset"),
+            )
 
-        action = item.get("side", "").upper()  # "BUY" or "SELL"
-        if action not in ("BUY", "SELL"):
-            return None
+        if trade_type == "REDEEM":
+            return Trade(
+                id=item.get("transactionHash", ""),
+                market_id=item.get("conditionId", ""),
+                question=item.get("title", ""),
+                side="REDEEM",
+                size_usdc=float(item.get("usdcSize") or 0),
+                price=0.0,
+                action="REDEEM",
+                timestamp=int(item.get("timestamp") or time.time()),
+                outcome=item.get("outcome", ""),
+                asset_id=item.get("asset") or None,
+            )
 
-        outcome = item.get("outcome", "")
-
-        return Trade(
-            id=item.get("transactionHash", ""),
-            market_id=item.get("conditionId", ""),
-            question=item.get("title", ""),
-            side=action,
-            size_usdc=size,
-            price=float(item.get("price") or 0),
-            action=action,
-            timestamp=int(item.get("timestamp") or time.time()),
-            outcome=outcome,
-            asset_id=item.get("asset"),
-        )
+        return None
     except (TypeError, ValueError, KeyError) as e:
         logger.debug("Skipping unparseable trade item: %s — %s", item, e)
         return None
+
+
+def fetch_target_position_value(address: str, market_id: str) -> float:
+    """
+    Returns the total USDC value of the target user's current position
+    in a given market (conditionId). Returns 0.0 if no position or on error.
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/positions",
+            params={"user": address, "market": market_id},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data if isinstance(data, list) else data.get("data", [])
+        total = sum(float(r.get("value") or r.get("currentValue") or 0) for r in rows)
+        return total
+    except Exception as e:
+        logger.warning("Could not fetch position for %s in %s: %s", address, market_id, e)
+        return 0.0
+
+
+def fetch_resolution_price(asset_id: str) -> Optional[float]:
+    """
+    Returns the last traded price for a token via the public CLOB endpoint.
+    A resolved winning token trades at ~1.0; a losing token at ~0.0.
+    Returns None if the price cannot be determined.
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.CLOB_API}/last-trade-price",
+            params={"token_id": asset_id},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            price = float(resp.json().get("price", -1))
+            if price >= 0:
+                return price
+    except Exception as e:
+        logger.warning("Could not fetch resolution price for %s: %s", asset_id, e)
+    return None
 
 
 # ---------------------------------------------------------------------------

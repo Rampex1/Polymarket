@@ -22,7 +22,14 @@ print("Connecting to Polymarket CLOB...")
 client = ClobClient(host=CLOB_API, key=private_key, chain_id=POLYGON)
 
 print("Generating API key...")
-creds = client.create_api_key()
+creds = None
+for nonce in range(5):
+    try:
+        creds = client.create_api_key(nonce=nonce)
+        if creds:
+            break
+    except Exception as e:
+        print(f"  nonce={nonce} failed: {e}")
 
 if creds is None:
     print("Failed to generate API key. Check that your private key is correct.")

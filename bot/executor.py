@@ -9,8 +9,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client.constants import POLYGON
 
-from . import config
-from . import notifier
+from . import config, fetcher, notifier
 from .models import Trade
 from .positions import PositionTracker, RiskManager
 
@@ -52,7 +51,7 @@ def execute(
     BUY  → scale by SCALE_FACTOR, run risk checks, place order, record position.
     SELL → close our full position in that market (mirror close).
     """
-    if not trade.asset_id:
+    if not trade.asset_id and trade.action != "REDEEM":
         logger.warning("Trade missing asset_id, skipping: %s", trade)
         return
 
@@ -64,6 +63,8 @@ def execute(
         _handle_buy(trade, client, tracker, risk, paper)
     elif trade.action == "SELL":
         _handle_sell(trade, client, tracker, risk, paper)
+    elif trade.action == "REDEEM":
+        _handle_redeem(trade, tracker, paper)
 
 
 # ---------------------------------------------------------------------------
@@ -77,25 +78,29 @@ def _handle_buy(
     risk: RiskManager,
     paper: bool,
 ) -> None:
-    scaled_usdc = trade.size_usdc * config.SCALE_FACTOR
+    # Look up surfandturf's total position value in this market to determine tier
+    holding = fetcher.fetch_target_position_value(
+        config.TARGET_ADDRESS, trade.market_id
+    )
+    logger.info(
+        "Target holding in market: $%.0f | %s", holding, trade.question[:55]
+    )
 
-    # For paper trading, also cap to MAX_TRADE_PCT of remaining balance
-    if paper:
-        balance = tracker.paper_balance()
-        max_trade = balance * config.MAX_TRADE_PCT
-        if scaled_usdc > max_trade:
-            logger.info(
-                "Capping trade $%.2f → $%.2f (%.0f%% of $%.2f balance)",
-                scaled_usdc, max_trade, config.MAX_TRADE_PCT * 100, balance,
-            )
-            scaled_usdc = max_trade
-
-    if scaled_usdc < config.MIN_ORDER_SIZE_USDC:
+    if holding < config.TIER1_MIN:
         logger.info(
-            "Scaled size $%.2f below min $%.2f, skipping: %s",
-            scaled_usdc, config.MIN_ORDER_SIZE_USDC, trade.question[:50],
+            "Holding $%.0f below tier 1 min $%.0f, skipping: %s",
+            holding, config.TIER1_MIN, trade.question[:50],
         )
         return
+    elif holding <= config.TIER1_MAX:
+        scaled_usdc = config.TIER1_SIZE
+    else:
+        scaled_usdc = config.TIER2_SIZE  # covers TIER1_MAX–TIER2_MAX and above
+
+    logger.info(
+        "Tier bet: $%.2f (target holding $%.0f) | %s",
+        scaled_usdc, holding, trade.question[:55],
+    )
 
     approved, reason = risk.check(trade, scaled_usdc)
     if not approved:
@@ -163,6 +168,60 @@ def _handle_sell(
     notifier.on_sell_executed(trade, shares, pnl, paper)
     tracker.record_sell(trade, shares, proceeds_usdc, paper=paper)
     tracker.print_summary()
+
+
+# ---------------------------------------------------------------------------
+# REDEEM (market resolved)
+# ---------------------------------------------------------------------------
+
+def _handle_redeem(trade: Trade, tracker: PositionTracker, paper: bool) -> None:
+    position = tracker.get(trade.market_id)
+    if position is None or position.shares <= 0:
+        return
+
+    # Determine resolution price from the CLOB last-trade-price endpoint.
+    # Winning token → ~1.0, losing token → ~0.0.
+    resolution_price = fetcher.fetch_resolution_price(position.asset_id)
+
+    if resolution_price is None:
+        logger.warning(
+            "Could not determine resolution for %s — position left open.",
+            trade.question[:60],
+        )
+        return
+
+    if resolution_price > 0.9:
+        close_price = 1.0
+        result = "WIN"
+    elif resolution_price < 0.1:
+        close_price = 0.0
+        result = "LOSS"
+    else:
+        logger.warning(
+            "Ambiguous resolution price %.3f for %s — position left open.",
+            resolution_price, trade.question[:60],
+        )
+        return
+
+    proceeds = position.shares * close_price
+    pnl = (close_price - position.avg_price) * position.shares
+
+    logger.info(
+        "%sREDEEM %s | %.2f shares → $%.2f | P&L $%.2f | %s",
+        "PAPER " if paper else "", result, position.shares,
+        proceeds, pnl, trade.question[:55],
+    )
+
+    tracker.record_sell(trade, position.shares, proceeds, paper=paper)
+    tracker.print_summary()
+
+    sign = "+" if pnl >= 0 else ""
+    notifier.send(
+        f"{'📄 PAPER ' if paper else ''}{'✅ WIN' if result == 'WIN' else '❌ LOSS'}\n"
+        f"{position.outcome} resolved | {position.shares:.2f} shares "
+        f"→ ${proceeds:.2f} | P&L {sign}${pnl:.2f}\n"
+        f"{trade.question[:80]}"
+    )
 
 
 # ---------------------------------------------------------------------------
