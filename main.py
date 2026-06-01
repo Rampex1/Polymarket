@@ -49,9 +49,9 @@ def main() -> None:
 
     mode = "PAPER" if (config.PAPER_TRADE or client is None) else "LIVE"
     logger.info(
-        "Execution mode: %s | scale=%.0f%% | order=%s | max_slippage=%.0f%%",
-        mode, config.SCALE_FACTOR * 100, config.ORDER_TYPE.upper(),
-        config.MAX_SLIPPAGE * 100,
+        "Execution mode: %s | tiers=$%.0f/$%.0f/$%.0f | order=%s | max_slippage=%.0f%%",
+        mode, config.TIER1_SIZE, config.TIER2_SIZE, config.TIER3_SIZE,
+        config.ORDER_TYPE.upper(), config.MAX_SLIPPAGE * 100,
     )
     logger.info(
         "Risk limits: per-position $%.0f | total exposure $%.0f | daily loss $%.0f",
@@ -76,7 +76,7 @@ def main() -> None:
     notifier.start_daily_summary(tracker)
 
     # Notify startup
-    notifier.on_startup(mode, config.SCALE_FACTOR * 100, tracker.total_exposure_usdc())
+    notifier.on_startup(mode, tracker.total_exposure_usdc())
 
     # Start polling
     logger.info(

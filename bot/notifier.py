@@ -80,10 +80,10 @@ def on_slippage_skipped(trade, drift_pct: float) -> None:
     )
 
 
-def on_startup(mode: str, scale_pct: float, exposure: float) -> None:
+def on_startup(mode: str, exposure: float) -> None:
     send(
         f"🚀 <b>Bot started</b> — {mode} mode\n"
-        f"Scale: {scale_pct:.0f}% | Exposure: ${exposure:.2f}"
+        f"Exposure: ${exposure:.2f}"
     )
 
 
