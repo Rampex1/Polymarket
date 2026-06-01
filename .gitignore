@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 positions.db
 *.key
+.DS_Store
