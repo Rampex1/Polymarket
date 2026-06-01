@@ -93,9 +93,11 @@ def _handle_buy(
         )
         return
     elif holding <= config.TIER1_MAX:
-        scaled_usdc = config.TIER1_SIZE
+        scaled_usdc = config.TIER1_SIZE   # $80k–$150k  → $1
+    elif holding <= config.TIER2_MAX:
+        scaled_usdc = config.TIER2_SIZE   # $150k–$300k → $2
     else:
-        scaled_usdc = config.TIER2_SIZE  # covers TIER1_MAX–TIER2_MAX and above
+        scaled_usdc = config.TIER3_SIZE   # $300k+      → $3
 
     logger.info(
         "Tier bet: $%.2f (target holding $%.0f) | %s",

@@ -28,11 +28,12 @@ PAPER_STARTING_BALANCE: float = float(os.getenv("PAPER_STARTING_BALANCE", "10000
 
 # Tiered bet sizing based on surfandturf's total position in a market
 # If his holding is below TIER1_MIN, skip the trade entirely
-TIER1_MIN:  float = float(os.getenv("TIER1_MIN",  "80000"))   # $80k–$150k → $1
+TIER1_MIN:  float = float(os.getenv("TIER1_MIN",  "80000"))   # $80k–$150k  → $1
 TIER1_MAX:  float = float(os.getenv("TIER1_MAX",  "150000"))
 TIER1_SIZE: float = float(os.getenv("TIER1_SIZE", "1.0"))
-TIER2_MAX:  float = float(os.getenv("TIER2_MAX",  "500000"))  # $150k–$500k+ → $2
+TIER2_MAX:  float = float(os.getenv("TIER2_MAX",  "300000"))  # $150k–$300k → $2
 TIER2_SIZE: float = float(os.getenv("TIER2_SIZE", "2.0"))
+TIER3_SIZE: float = float(os.getenv("TIER3_SIZE", "3.0"))     # $300k+      → $3
 
 # Order type: "market" (FOK) or "limit" (GTC at signal price)
 ORDER_TYPE: str = os.getenv("ORDER_TYPE", "market")
