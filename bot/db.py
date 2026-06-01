@@ -16,7 +16,8 @@ def get() -> sqlite3.Connection:
 def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS positions (
-            market_id        TEXT PRIMARY KEY,
+            market_id        TEXT,
+            paper            INTEGER NOT NULL DEFAULT 0,
             asset_id         TEXT NOT NULL,
             question         TEXT,
             outcome          TEXT,
@@ -24,7 +25,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             avg_price        REAL NOT NULL DEFAULT 0,
             total_cost_usdc  REAL NOT NULL DEFAULT 0,
             opened_at        INTEGER,
-            updated_at       INTEGER
+            updated_at       INTEGER,
+            PRIMARY KEY (market_id, paper)
         );
 
         CREATE TABLE IF NOT EXISTS trade_log (
@@ -57,8 +59,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
+    trade_cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
     for col in ("outcome", "question"):
-        if col not in cols:
+        if col not in trade_cols:
             conn.execute(f"ALTER TABLE trade_log ADD COLUMN {col} TEXT")
+
+    pos_cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+    if "paper" not in pos_cols:
+        conn.execute("ALTER TABLE positions ADD COLUMN paper INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()

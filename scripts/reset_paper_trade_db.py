@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Deletes positions.db and reinitialises it with a fresh $20 paper balance.
 """

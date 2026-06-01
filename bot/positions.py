@@ -78,7 +78,7 @@ class PositionTracker:
             return
         shares = scaled_usdc / trade.price
         conn = db.get()
-        existing = self.get(trade.market_id)
+        existing = self.get(trade.market_id, paper)
 
         if existing:
             new_shares = existing.shares + shares
@@ -88,7 +88,7 @@ class PositionTracker:
                 """UPDATE positions
                    SET shares=?, avg_price=?, total_cost_usdc=?, updated_at=?,
                        asset_id=?, outcome=?
-                   WHERE market_id=?""",
+                   WHERE market_id=? AND paper=?""",
                 (
                     new_shares,
                     new_avg,
@@ -97,16 +97,18 @@ class PositionTracker:
                     trade.asset_id,
                     trade.outcome,
                     trade.market_id,
+                    int(paper),
                 ),
             )
         else:
             conn.execute(
                 """INSERT INTO positions
-                   (market_id, asset_id, question, outcome, shares, avg_price,
+                   (market_id, paper, asset_id, question, outcome, shares, avg_price,
                     total_cost_usdc, opened_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trade.market_id,
+                    int(paper),
                     trade.asset_id,
                     trade.question,
                     trade.outcome,
@@ -156,7 +158,7 @@ class PositionTracker:
         paper: bool = False,
     ) -> None:
         conn = db.get()
-        existing = self.get(trade.market_id)
+        existing = self.get(trade.market_id, paper)
         realized_pnl = 0.0
 
         if existing and existing.shares > 0:
@@ -166,14 +168,15 @@ class PositionTracker:
 
             if new_shares <= 0.0001:
                 conn.execute(
-                    "DELETE FROM positions WHERE market_id=?", (trade.market_id,)
+                    "DELETE FROM positions WHERE market_id=? AND paper=?",
+                    (trade.market_id, int(paper)),
                 )
             else:
                 conn.execute(
                     """UPDATE positions
                        SET shares=?, total_cost_usdc=?, updated_at=?
-                       WHERE market_id=?""",
-                    (new_shares, new_cost, int(time.time()), trade.market_id),
+                       WHERE market_id=? AND paper=?""",
+                    (new_shares, new_cost, int(time.time()), trade.market_id, int(paper)),
                 )
 
         conn.execute(
@@ -216,30 +219,41 @@ class PositionTracker:
             trade.question[:50],
         )
 
-    def get(self, market_id: str) -> Optional[Position]:
+    def get(self, market_id: str, paper: bool = False) -> Optional[Position]:
         row = (
             db.get()
-            .execute("SELECT * FROM positions WHERE market_id=?", (market_id,))
+            .execute(
+                "SELECT * FROM positions WHERE market_id=? AND paper=?",
+                (market_id, int(paper)),
+            )
             .fetchone()
         )
         return _row_to_position(row) if row else None
 
-    def all_open(self) -> list[Position]:
-        rows = (
-            db.get()
-            .execute("SELECT * FROM positions WHERE shares > 0 ORDER BY opened_at DESC")
-            .fetchall()
-        )
+    def all_open(self, paper: Optional[bool] = None) -> list[Position]:
+        conn = db.get()
+        if paper is None:
+            rows = conn.execute(
+                "SELECT * FROM positions WHERE shares > 0 ORDER BY opened_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM positions WHERE shares > 0 AND paper=? ORDER BY opened_at DESC",
+                (int(paper),),
+            ).fetchall()
         return [_row_to_position(r) for r in rows]
 
-    def total_exposure_usdc(self) -> float:
-        row = (
-            db.get()
-            .execute(
+    def total_exposure_usdc(self, paper: Optional[bool] = None) -> float:
+        conn = db.get()
+        if paper is None:
+            row = conn.execute(
                 "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions WHERE shares > 0"
-            )
-            .fetchone()
-        )
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions WHERE shares > 0 AND paper=?",
+                (int(paper),),
+            ).fetchone()
         return float(row[0])
 
     def today_pnl_usdc(self) -> float:
