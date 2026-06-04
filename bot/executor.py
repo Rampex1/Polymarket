@@ -48,7 +48,7 @@ def execute(
     """
     Copy a trade from surfandturf.
 
-    BUY  → scale by SCALE_FACTOR, run risk checks, place order, record position.
+    BUY  → tier-size by target holding, run risk checks, place order, record position.
     SELL → close our full position in that market (mirror close).
     """
     if not trade.asset_id and trade.action != "REDEEM":
@@ -115,9 +115,8 @@ def _handle_buy(
 
     if paper:
         logger.info(
-            "PAPER BUY | $%.2f (%.0f%% of $%.2f) @ %.3f | %s — %s",
-            scaled_usdc, config.SCALE_FACTOR * 100, trade.size_usdc,
-            trade.price, trade.outcome, trade.question[:55],
+            "PAPER BUY | $%.2f @ %.3f | %s — %s",
+            scaled_usdc, trade.price, trade.outcome, trade.question[:55],
         )
     else:
         _place_buy(trade, scaled_usdc, client)
