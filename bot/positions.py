@@ -315,7 +315,7 @@ class RiskManager:
     def __init__(self, tracker: PositionTracker) -> None:
         self.tracker = tracker
 
-    def check(self, trade: Trade, scaled_usdc: float) -> tuple[bool, str]:
+    def check(self, trade: Trade, scaled_usdc: float, paper: bool = False) -> tuple[bool, str]:
         """Return (approved, reason). Sells bypass most checks — they reduce risk."""
         if trade.action == "SELL":
             return self._check_daily_loss()
@@ -325,11 +325,11 @@ class RiskManager:
         if not ok:
             return False, reason
 
-        ok, reason = self._check_position_size(trade, scaled_usdc)
+        ok, reason = self._check_position_size(trade, scaled_usdc, paper)
         if not ok:
             return False, reason
 
-        ok, reason = self._check_total_exposure(scaled_usdc)
+        ok, reason = self._check_total_exposure(scaled_usdc, paper)
         if not ok:
             return False, reason
 
@@ -349,9 +349,9 @@ class RiskManager:
         return True, ""
 
     def _check_position_size(
-        self, trade: Trade, scaled_usdc: float
+        self, trade: Trade, scaled_usdc: float, paper: bool = False
     ) -> tuple[bool, str]:
-        position = self.tracker.get(trade.market_id)
+        position = self.tracker.get(trade.market_id, paper)
         current = position.total_cost_usdc if position else 0.0
         if current + scaled_usdc > config.MAX_POSITION_SIZE_USDC:
             return (
@@ -361,8 +361,8 @@ class RiskManager:
             )
         return True, ""
 
-    def _check_total_exposure(self, scaled_usdc: float) -> tuple[bool, str]:
-        total = self.tracker.total_exposure_usdc()
+    def _check_total_exposure(self, scaled_usdc: float, paper: bool = False) -> tuple[bool, str]:
+        total = self.tracker.total_exposure_usdc(paper)
         if total + scaled_usdc > config.MAX_TOTAL_EXPOSURE_USDC:
             return (
                 False,

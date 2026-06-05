@@ -104,7 +104,7 @@ def _handle_buy(
         scaled_usdc, holding, trade.question[:55],
     )
 
-    approved, reason = risk.check(trade, scaled_usdc)
+    approved, reason = risk.check(trade, scaled_usdc, paper)
     if not approved:
         logger.warning("Risk check failed — %s | %s", reason, trade.question[:50])
         notifier.on_risk_blocked(reason, trade)
