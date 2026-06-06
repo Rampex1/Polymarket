@@ -7,8 +7,112 @@ finer-grained ranking is **P0 → P3**.
 
 At the bottom you'll find:
   * **Strategic open questions** — design decisions, not unit tasks.
+  * **Uncertain but possible** — findings flagged by review that aren't
+    confirmed bugs but warrant verification.
   * **What got fixed** — a checklist of what shipped on this branch, so you
     can verify nothing was silently dropped.
+
+---
+
+## ⚠️ UNCERTAIN BUT POSSIBLE — Findings under follow-up
+
+These items came out of an independent second-pass review. Some I disagree
+with on the merits but couldn't dismiss with high confidence; others are
+genuinely unknowable without information we don't have. Listed here so a
+future maintainer (or live deployment) can verify rather than assume.
+
+### Likely real, awaiting live-traffic confirmation
+
+#### `_parse_fill` field names against a real CLOB response
+The parser accepts `takingAmount`/`makingAmount` *and* `taker_amount`/
+`maker_amount` *and* `size_matched`/`filled_amount`. At least one of these
+should match Polymarket's actual schema, but I have not confirmed which.
+Pre-fix, a wrong field name = silent zero-fill record. Post-fix,
+`_parse_fill` *refuses* to record on parseable-but-empty responses — so
+the fail mode is now "real fill, no record" (false negative), which is
+recoverable. Still: capture a single live response to pin this down.
+**Verify in:** `bot/executor.py:_parse_fill`, around lines 545–575.
+
+#### Gamma `condition_ids` vs `condition_id` parameter name
+Code now tries both forms via fallback (`fetcher.fetch_market_resolution`).
+If Gamma rejects unknown params with 400 (rather than ignoring them),
+the first form fails and we move on. If it 401s or rate-limits, we may
+prematurely return None. Worth a one-time curl to confirm the canonical
+param name.
+**Verify in:** `bot/fetcher.py:fetch_market_resolution`.
+
+#### Target-holding cache staleness on long price moves with no new trades
+The SELL ratio is computed against the cached pre-trade USD holding
+populated on the last BUY signal. If the target makes no buys for a long
+stretch but the price moves substantially (their USD holding is mark-to-
+market), our cached value becomes stale and the ratio is wrong. The
+fallback (full close on cache miss) doesn't fire here because we *have*
+a cached value — it's just outdated.
+*Why we accepted this:* the alternative — re-fetching on SELL — re-opens
+the eventual-consistency race the cache was designed to defeat, and
+USD-vs-USDC notional drift is mathematically unsound in any case.
+*Mitigation:* with the small bet sizes currently configured, over- or
+under-closing by 2x is small money. Won't matter until sizes scale up.
+**Document/fix in:** `bot/executor.py:_compute_sell_ratio`.
+
+#### `seen_ids` LRU sizing
+The dedupe ring is capped at 5000 IDs. For very high-volume targets that
+churn through > 5000 trades between restarts, an evicted-then-re-seen
+trade ID will be processed twice. Current target's velocity is far below
+this, but worth re-evaluating per-target.
+**Verify in:** `bot/fetcher.py:SEEN_IDS_MAX`.
+
+### Plausible critique, accepted intentionally
+
+#### `_check_position_size` measures cost basis, not gross spend
+After a partial sell, `total_cost_usdc` is recomputed (`new_shares *
+avg_price`), so `MAX_POSITION_SIZE_USDC` caps current cost-basis exposure
+rather than cumulative dollars-in. A trader could sell 50% then re-buy
+50% back without tripping the cap.
+*Position taken:* this is correct for the named limit (max *position*
+size), not max throughput. If the goal is to cap turnover, that needs a
+separate gate. Documented here so it isn't quietly re-interpreted later.
+
+#### `_get_current_price` returning trade.price on outage
+Now returns `None` on failure (good); `_slippage_ok` refuses to trade
+when price is None. Side effect: a transient CLOB outage halts trading
+entirely until the next signal. That's the conservative posture and is
+desirable, but in a high-availability target deployment you might prefer
+to fall back to the orderbook mid instead of refusing outright.
+*Position taken:* fail-closed is the right default for retail-scale bets.
+A 2nd-tier fallback can be added if needed.
+
+#### Schema defined in two places (init + migrate)
+`bot/db.py:_init_schema` defines the canonical schema; `_migrate` patches
+older DBs. Drift between the two is possible if someone changes one
+without the other. A migration-only approach (always run migrations,
+never create from scratch) would prevent this but is more code for what
+is presently a 4-table DB.
+*Position taken:* tolerable for current scope; reconsider at ~10 tables.
+
+#### `_simulate_sell.amount_usdc = gross` dual-use naming
+`FillResult.amount_usdc` means "USDC spent" on BUY and "USDC proceeds"
+on SELL. The doc on `FillResult` calls this out, but it's still a
+load-bearing context dependency. A separate `proceeds_usdc` field would
+remove ambiguity at the cost of more boilerplate.
+*Position taken:* documented explicitly in the dataclass docstring;
+acceptable.
+
+### Speculative — verify if behavior gets weird
+
+#### py_clob_client may return dataclasses, not dicts, from `post_order`
+`_parse_fill` checks `isinstance(resp, dict)` and returns failure on
+mismatch. If the client wraps responses in a typed object,
+**every live order will be incorrectly recorded as failed**. Worth a
+quick check before live deployment.
+**Verify in:** `bot/executor.py:_parse_fill` top-of-function isinstance check.
+
+#### `fee_usdc` from response uses `feeRateBps`
+If the CLOB doesn't surface a fee rate in the order response (likely),
+this field stays 0 and live fee accounting silently relies on
+`PAPER_FEE_BPS`-equivalent logic *not existing*. Live P&L will be off by
+the fee amount until a live fee source is wired in.
+**Verify in:** `bot/executor.py:_parse_fill` fee parsing.
 
 ---
 

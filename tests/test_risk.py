@@ -87,10 +87,8 @@ def test_buy_blocked_by_total_exposure(risk, tracker, default_config, monkeypatc
 
 def test_buy_blocked_by_paper_balance(risk, default_config):
     t = make_trade(action="BUY")
-    # Cap balance at 5, request 6.
+    # _adjust_paper_balance now commits internally — no manual commit needed.
     risk.tracker._adjust_paper_balance(-(10_000.0 - 5.0))   # leave 5
-    import bot.db as db
-    db.get().commit()
     ok, reason = risk.check(t, 6.0, paper=True)
     assert not ok
     assert "Insufficient paper balance" in reason
@@ -99,10 +97,7 @@ def test_buy_blocked_by_paper_balance(risk, default_config):
 def test_paper_balance_not_checked_in_live(risk, default_config):
     """Live mode delegates balance enforcement to the exchange."""
     t = make_trade(action="BUY")
-    # Even with $0 paper balance, live BUY should not be balance-blocked.
     risk.tracker._adjust_paper_balance(-10_000.0)
-    import bot.db as db
-    db.get().commit()
     ok, _ = risk.check(t, 5.0, paper=False)
     assert ok
 

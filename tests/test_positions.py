@@ -145,12 +145,18 @@ def test_paper_and_live_positions_are_isolated(tracker):
     assert tracker.total_exposure_usdc(paper=None) == 30.0
 
 
-def test_cost_basis_property_returns_shares_times_avg(tracker):
+def test_total_cost_usdc_is_canonical_cost_basis(tracker):
+    """`total_cost_usdc` is the single source of truth for cost basis.
+    The earlier `cost_basis_usdc` property was removed because it could drift
+    from this value under floating-point rounding on partial sells."""
     buy = make_trade(action="BUY", price=0.4)
     tracker.record_buy(buy, spent_usdc=10.0, shares=25.0, fill_price=0.4, paper=True)
     p = tracker.get("m1", paper=True)
-    # Renamed from current_value_usdc — verifies the property still computes.
-    assert p.cost_basis_usdc == 25.0 * 0.4
+    assert p.total_cost_usdc == 10.0
+    # The property no longer exists — accessing it should AttributeError.
+    import pytest
+    with pytest.raises(AttributeError):
+        _ = p.cost_basis_usdc
 
 
 def test_today_pnl_filters_by_paper_flag(tracker):

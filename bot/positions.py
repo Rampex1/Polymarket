@@ -11,6 +11,13 @@ Two important design rules enforced here:
   2. Sells/redeems never block on risk checks. A sell *reduces* exposure
      and any associated risk; blocking it (e.g. because we're down on the
      day) would lock us into a losing position. Only BUYs are gated.
+
+Cost-basis source of truth
+--------------------------
+`total_cost_usdc` is the *only* persisted record of how much we spent on
+the position. Anything that needs cost basis must read it, not recompute
+`shares * avg_price` (which drifts under floating-point rounding on
+partial sells).
 """
 
 import logging
@@ -38,19 +45,9 @@ class Position:
     outcome: str
     shares: float
     avg_price: float
-    total_cost_usdc: float
+    total_cost_usdc: float       # the canonical cost basis
     opened_at: int
     updated_at: int
-
-    @property
-    def cost_basis_usdc(self) -> float:
-        """USDC originally spent acquiring these shares (not mark-to-market).
-
-        Renamed from the old `current_value_usdc` which was misleading —
-        mark-to-market value requires a live mid-price lookup; this property
-        is just the recorded cost basis (`shares * avg_price`).
-        """
-        return self.shares * self.avg_price
 
     def __str__(self) -> str:
         return (
@@ -71,8 +68,9 @@ class PositionTracker:
         """Seed balance only on first run; subsequent calls are no-ops."""
         conn = db.get()
         conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
-            (starting,),
+            "INSERT OR IGNORE INTO paper_account (id, balance, updated_at) "
+            "VALUES (1, ?, ?)",
+            (starting, int(time.time())),
         )
         conn.commit()
 
@@ -83,11 +81,21 @@ class PositionTracker:
         return float(row[0]) if row else 0.0
 
     def _adjust_paper_balance(self, delta: float) -> None:
-        # NOTE: caller is responsible for committing — this method is always
-        # invoked inside a larger transaction (e.g. record_buy).
-        db.get().execute(
-            "UPDATE paper_account SET balance = balance + ? WHERE id=1", (delta,)
+        """Atomically adjust + commit the paper balance.
+
+        Standalone callers (tests, scripts) get auto-commit behavior. Inside
+        record_buy/record_sell we do NOT use this — we inline the balance
+        UPDATE into the same transaction as the position/trade_log writes,
+        so the whole record is atomic. Splitting into two commits would
+        risk a half-recorded trade on crash.
+        """
+        conn = db.get()
+        conn.execute(
+            "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
+            "WHERE id=1",
+            (delta, int(time.time())),
         )
+        conn.commit()
 
     # ── Trade recording ──────────────────────────────────────────────────────
 
@@ -102,14 +110,13 @@ class PositionTracker:
     ) -> None:
         """Record a completed BUY.
 
-        The caller (executor) provides the *actual* spent_usdc, shares, and
-        fill_price returned by the exchange — we no longer derive shares
-        from `trade.price` (which is the target's fill, not ours).
+        Caller (executor) provides the *actual* spent_usdc, shares, and
+        fill_price from the exchange. We no longer derive shares from
+        `trade.price` — that's the target's fill, not ours.
         """
         if shares <= 0 or fill_price <= 0:
-            # Refuse to record a phantom position. The caller has already
-            # placed the order; better to surface this loudly than to write
-            # garbage into the cost-basis math.
+            # Refuse to write a phantom position. The order may have been
+            # sent already; surfacing loudly beats garbage in cost-basis math.
             logger.error(
                 "record_buy refused: shares=%.4f price=%.4f (trade %s)",
                 shares, fill_price, trade.id,
@@ -158,9 +165,14 @@ class PositionTracker:
             ),
         )
         if paper:
-            # Subtract spend *plus* fee from the virtual balance so paper
-            # accounting reflects what live would actually cost.
-            self._adjust_paper_balance(-(spent_usdc + fee_usdc))
+            # Inline the balance update so position + trade_log + balance
+            # all land in ONE transaction. Splitting into two commits would
+            # leave a half-recorded trade if the process dies mid-flight.
+            conn.execute(
+                "UPDATE paper_account SET balance = balance - ?, updated_at = ? "
+                "WHERE id=1",
+                (spent_usdc + fee_usdc, now),
+            )
         conn.commit()
         logger.info(
             "%sBUY recorded: %.2f shares @ %.3f ($%.2f, fee $%.2f) | %s",
@@ -177,10 +189,10 @@ class PositionTracker:
         paper: bool = False,
         fee_usdc: float = 0.0,
     ) -> None:
-        """Record a completed SELL.
+        """Record a completed SELL or REDEEM.
 
-        Caller provides the *actual* shares sold and proceeds. We compute
-        realized P&L against the stored avg_price.
+        Caller provides the *actual* shares closed and proceeds received.
+        Realized P&L is computed against the stored avg_price.
         """
         conn = db.get()
         existing = self.get(trade.market_id, paper)
@@ -188,13 +200,12 @@ class PositionTracker:
         now = int(time.time())
 
         if existing and existing.shares > 0:
-            # P&L is on the proceeds net of fees minus cost basis for the
-            # shares being sold.
             cost_basis_sold = existing.avg_price * shares
+            # Net proceeds (proceeds minus fee) minus cost basis = realized P&L.
             realized_pnl = (proceeds_usdc - fee_usdc) - cost_basis_sold
 
             new_shares = max(existing.shares - shares, 0.0)
-            # Cost basis for remaining shares scales with shares — avg_price is preserved.
+            # Total cost scales linearly; avg_price is preserved.
             new_cost = new_shares * existing.avg_price
 
             if new_shares <= 0.0001:
@@ -231,9 +242,12 @@ class PositionTracker:
             (today, realized_pnl),
         )
         if paper:
-            # Proceeds are already net-of-fee on the exchange side; we model
-            # the fee separately so paper balances stay self-consistent.
-            self._adjust_paper_balance(proceeds_usdc - fee_usdc)
+            # Inline for atomicity — see record_buy for the rationale.
+            conn.execute(
+                "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
+                "WHERE id=1",
+                (proceeds_usdc - fee_usdc, now),
+            )
         conn.commit()
         logger.info(
             "%s%s recorded: %.2f shares @ %.3f | P&L $%.2f | %s",
@@ -277,12 +291,7 @@ class PositionTracker:
         return float(row[0])
 
     def today_pnl_usdc(self, paper: Optional[bool] = None) -> float:
-        """Realized P&L for today. Filter by paper-flag if provided.
-
-        Pulled from `trade_log` (not `daily_stats`) so paper and live can be
-        separated cleanly — `daily_stats` is intentionally a combined number
-        for legacy compatibility.
-        """
+        """Realized P&L for today. Filter by paper-flag if provided."""
         today = date.today().isoformat()
         conn = db.get()
         if paper is None:
@@ -350,13 +359,11 @@ class RiskManager:
         """Return (approved, reason).
 
         Sells and redeems unconditionally pass — they reduce exposure and the
-        daily loss limit should not be able to lock the bot into a losing
-        position.
+        daily loss limit must not lock the bot into a losing position.
         """
         if trade.action != "BUY":
             return True, ""
 
-        # ── BUY checks (in escalation order) ────────────────────────────────
         ok, reason = self._check_min_order(scaled_usdc)
         if not ok:
             return False, reason
@@ -380,11 +387,6 @@ class RiskManager:
         return True, ""
 
     def _check_min_order(self, scaled_usdc: float) -> tuple[bool, str]:
-        """Enforce Polymarket's protocol-level order minimum.
-
-        Without this, sub-$1 tier bets get sent to CLOB and bounce — wasting
-        an API round trip and producing a spurious "BUY order failed" log.
-        """
         if scaled_usdc < config.MIN_ORDER_SIZE_USDC:
             return (
                 False,
@@ -430,8 +432,8 @@ class RiskManager:
     def _check_paper_balance(
         self, scaled_usdc: float, paper: bool
     ) -> tuple[bool, str]:
-        # Live mode has its own on-chain balance check via the exchange; only
-        # paper needs us to gate manually.
+        # Live mode delegates balance enforcement to the exchange; only paper
+        # needs manual gating.
         if not paper:
             return True, ""
         balance = self.tracker.paper_balance()

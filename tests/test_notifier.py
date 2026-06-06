@@ -96,13 +96,29 @@ def test_skip_when_creds_missing(monkeypatch):
     assert not posted
 
 
-def test_seconds_until_midnight_uses_configured_timezone(monkeypatch):
-    """Midnight is computed in config.TIMEZONE — not the VPS local time."""
+def test_seconds_until_midnight_differs_between_timezones(monkeypatch):
+    """Midnight is computed in config.TIMEZONE. To prove the timezone is
+    actually consulted (rather than ignored and falling through to local),
+    measure the seconds-until-midnight in two timezones whose UTC offsets
+    differ by 4+ hours and verify the values disagree by a corresponding
+    margin. A bug where TIMEZONE is silently dropped would return the same
+    value for both."""
     from bot import config, notifier
 
-    fixed_tz = ZoneInfo("America/New_York")
-    monkeypatch.setattr(config, "TIMEZONE", fixed_tz)
+    monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("America/New_York"))
+    ny_secs = notifier._seconds_until_midnight()
 
-    secs = notifier._seconds_until_midnight()
-    # Sanity bounds: less than 24h, more than 0.
-    assert 0 < secs <= 24 * 3600
+    monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("Asia/Tokyo"))
+    tokyo_secs = notifier._seconds_until_midnight()
+
+    assert 0 < ny_secs <= 24 * 3600
+    assert 0 < tokyo_secs <= 24 * 3600
+    # NY and Tokyo are 13–14h apart depending on DST. The seconds-until-
+    # midnight values must differ by *at least* a few hours, modulo the
+    # 24-hour wraparound. We compare the *minimum* circular distance.
+    diff = abs(ny_secs - tokyo_secs)
+    circular_diff = min(diff, 24 * 3600 - diff)
+    assert circular_diff > 3 * 3600, (
+        f"ny={ny_secs}, tokyo={tokyo_secs} — timezone appears not to "
+        f"affect the computation"
+    )

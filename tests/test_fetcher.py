@@ -90,30 +90,22 @@ def test_parse_trade_malformed_returns_none():
 # ---------------------------------------------------------------------------
 
 
-def test_poll_loop_dedupes_and_bounds_memory(monkeypatch):
-    """Re-fetching the same trades doesn't double-process. seen_ids is bounded."""
+def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
+    """Re-fetching the same trades must not double-process."""
     from bot import fetcher
-
-    # We construct an ever-growing trade stream and verify it gets bounded.
-    monkeypatch.setattr(fetcher, "SEEN_IDS_MAX", 5)
-
-    call_log = []
-    seen_handled = []
 
     next_id = [0]
 
     def fake_fetch(address, limit=100):
-        # Each poll yields one new trade plus the last few.
         new = next_id[0]
         next_id[0] += 1
         return [_fake_trade(f"id{i}") for i in range(max(0, new - 3), new + 1)]
 
     monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
-
-    # Tight interval so the test runs fast.
     monkeypatch.setattr(fetcher.config, "POLL_INTERVAL_SECONDS", 0)
 
     stop = threading.Event()
+    seen_handled = []
 
     def on_trade(t):
         seen_handled.append(t.id)
@@ -122,9 +114,48 @@ def test_poll_loop_dedupes_and_bounds_memory(monkeypatch):
 
     fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop)
 
-    # Each id processed exactly once.
     assert len(seen_handled) == len(set(seen_handled))
     assert len(seen_handled) >= 8
+
+
+def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
+    """Stronger than the dedupe test: forces the LRU to overflow with brand-
+    new IDs every cycle and verifies that an *old* ID re-appearing AFTER the
+    set has rolled past it triggers re-execution (proving the oldest entries
+    are actually being evicted, not just held forever)."""
+    from bot import fetcher
+
+    # Tight cap so we can prove eviction in a few iterations.
+    monkeypatch.setattr(fetcher, "SEEN_IDS_MAX", 3)
+    monkeypatch.setattr(fetcher.config, "POLL_INTERVAL_SECONDS", 0)
+
+    # Seed phase: poll 1 returns id0; then we'll force-evict id0 by feeding
+    # 3 distinct new IDs (so the ring is full of ids 1,2,3) and re-present id0.
+    timeline = [
+        [_fake_trade("id0")],         # seed at startup
+        [_fake_trade("id1")],         # poll 1
+        [_fake_trade("id2")],         # poll 2
+        [_fake_trade("id3")],         # poll 3 — ring is now {id1,id2,id3}; id0 evicted
+        [_fake_trade("id0")],         # poll 4 — should re-execute id0
+    ]
+
+    def fake_fetch(address, limit=100):
+        return timeline.pop(0) if timeline else []
+
+    monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
+
+    stop = threading.Event()
+    handled = []
+
+    def on_trade(t):
+        handled.append(t.id)
+        if not timeline:
+            stop.set()
+
+    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop)
+
+    # id0 was seeded (not handled), then evicted, then handled on re-appearance.
+    assert "id0" in handled, "id0 should have been re-executed after eviction"
 
 
 def _fake_trade(tx_id):

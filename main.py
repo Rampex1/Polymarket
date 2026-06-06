@@ -34,13 +34,21 @@ def main() -> None:
     # ── Resolve wallet address ──────────────────────────────────────────────
     address = config.TARGET_ADDRESS
     if not address:
+        if not config.TARGET_USERNAME:
+            # Fail loud — with TARGET_USERNAME no longer defaulted, an empty
+            # config means the user forgot to set it. Don't silently make a
+            # garbage HTTP call.
+            logger.error(
+                "Neither TARGET_ADDRESS nor TARGET_USERNAME is set in .env."
+            )
+            sys.exit(1)
         logger.info("Looking up wallet for '%s'...", config.TARGET_USERNAME)
         address = fetcher.lookup_wallet(config.TARGET_USERNAME)
 
     if not address:
         logger.error(
             "Could not resolve wallet for '%s'. Set TARGET_ADDRESS in .env.",
-            config.TARGET_USERNAME,
+            config.TARGET_USERNAME or "<unset>",
         )
         sys.exit(1)
 
@@ -99,7 +107,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _shutdown)
 
     # ── Background threads ──────────────────────────────────────────────────
-    notifier.start_daily_summary(tracker, stop_event=stop_event)
+    # Pass paper_mode through so the daily summary filters out leftover rows
+    # from the other mode (paper rows leaking into a live deployment, etc).
+    notifier.start_daily_summary(tracker, paper=paper_mode, stop_event=stop_event)
     notifier.on_startup(mode, tracker.total_exposure_usdc(paper=paper_mode))
 
     # ── Poll loop ───────────────────────────────────────────────────────────

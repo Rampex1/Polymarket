@@ -11,9 +11,16 @@ Hard rules enforced here (these were bugs before):
     slippage and fees overstates profitability vs. live by enough to
     invalidate any decision based on its P&L.
 
-  * The mirror SELL is *proportional* to the target's sell ratio, not a
-    blanket full-close. Mirrors target conviction (a 10% trim is not a full
-    exit).
+  * The mirror SELL is *proportional* to the target's sell ratio, computed
+    using a cached pre-trade holding (populated on BUY). Cache miss falls
+    back to a full close — the safe choice when in doubt.
+
+  * Slippage check fails *closed* when current price is unavailable. The
+    previous version silently filled at the signal price when CLOB was
+    unreachable, defeating slippage protection exactly when it mattered.
+
+  * REDEEM resolution requires the market to actually be closed/resolved
+    on Gamma. Live mids in the 0.1–0.9 range no longer book P&L.
 """
 
 import logging
@@ -32,20 +39,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# FillResult — what `_place_*` returns to the caller
+# FillResult — what `_place_*` and `_simulate_*` return to the caller
 # ---------------------------------------------------------------------------
 
 @dataclass
 class FillResult:
     """Outcome of an order placement.
 
-    `success=False` means nothing was filled — caller MUST NOT record a
-    position. For partial fills `success=True` and `shares`/`spent_usdc`
-    reflect what actually filled.
+    `success=False` means nothing filled — caller MUST NOT record a position.
+    For partial fills `success=True` and `shares`/`amount_usdc` reflect what
+    actually filled.
+
+    `amount_usdc` is dual-use by side:
+      * BUY  → USDC spent acquiring shares
+      * SELL → USDC proceeds received from closing shares
     """
     success: bool
     shares: float
-    spent_usdc: float       # for BUY: amount spent; for SELL: proceeds received
+    amount_usdc: float
     fill_price: float
     fee_usdc: float = 0.0
     reason: str = ""
@@ -91,8 +102,8 @@ def execute(
     """Copy a target trade.
 
     BUY    → tier-size, run risk checks, place order, record position.
-    SELL   → mirror-close *proportionally* to the target's sell ratio.
-    REDEEM → settle our matching position at the resolution price.
+    SELL   → mirror-close *proportionally* using the cached pre-sell holding.
+    REDEEM → settle our matching position at the actual resolution price.
     """
     if not trade.asset_id and trade.action != "REDEEM":
         logger.warning("Trade missing asset_id, skipping: %s", trade)
@@ -121,12 +132,16 @@ def _handle_buy(
     risk: RiskManager,
     paper: bool,
 ) -> None:
-    # Look up the target's total position value in this market to pick a tier.
-    # We pass `expected_min=trade.size_usdc` because the trade we just observed
-    # *must* be reflected in the holding; if the API hasn't caught up, retry.
+    # Look up the target's total position value to pick a tier.
+    # `expected_min=trade.size_usdc` defeats the Data API's eventual
+    # consistency: the trade we observed must be reflected.
     holding = fetcher.fetch_target_position_value(
         config.TARGET_ADDRESS, trade.market_id, expected_min=trade.size_usdc,
     )
+    # Cache the freshly-observed holding so the SELL path can compute an
+    # accurate close ratio without trying to reconstruct it from the API.
+    fetcher.target_holding_cache.set(trade.market_id, holding)
+
     logger.info(
         "Target holding in market: $%.0f | %s", holding, trade.question[:55]
     )
@@ -150,13 +165,12 @@ def _handle_buy(
         notifier.on_risk_blocked(reason, trade)
         return
 
-    # Slippage check runs in BOTH paper and live so paper accounting reflects
-    # what live would actually do. Get the current mid for fill simulation too.
+    # Slippage check runs in BOTH paper and live so paper accounting
+    # reflects what live would actually do.
     current_price = _get_current_price(trade, client)
     if not _slippage_ok(trade, current_price):
         return
 
-    # Place (or simulate) the order. fill is None on failure.
     if paper:
         fill = _simulate_buy(trade, scaled_usdc, current_price)
     else:
@@ -168,15 +182,17 @@ def _handle_buy(
         notifier.on_buy_failed(trade, reason_str)
         return
 
-    notifier.on_buy_executed(trade, fill.spent_usdc, paper, fill.fill_price)
+    # Record BEFORE notifying so a Telegram alert never claims a position
+    # exists if the DB write somehow fails (the record_buy guard fires).
     tracker.record_buy(
         trade,
-        spent_usdc=fill.spent_usdc,
+        spent_usdc=fill.amount_usdc,
         shares=fill.shares,
         fill_price=fill.fill_price,
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
+    notifier.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price)
     tracker.print_summary(paper=paper)
 
 
@@ -190,7 +206,7 @@ def _tier_for_holding(holding: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# SELL (proportional mirror close)
+# SELL (proportional mirror close, cache-driven)
 # ---------------------------------------------------------------------------
 
 def _handle_sell(
@@ -206,26 +222,13 @@ def _handle_sell(
         logger.info("No position to close for: %s", trade.question[:60])
         return
 
-    # Risk checks for sells are effectively no-ops (see RiskManager.check)
-    # because a sell *reduces* risk. We still call it so any future per-sell
-    # gating (e.g. "halt during a market freeze") has a single place to live.
     approved, reason = risk.check(trade, 0, paper)
     if not approved:
         logger.warning("Risk check blocked sell — %s", reason)
         notifier.on_risk_blocked(reason, trade)
         return
 
-    # Proportional mirror: scale our close by the same fraction the target
-    # is closing. We need their prior-trade holding to compute the ratio.
-    target_holding_after = fetcher.fetch_target_position_value(
-        config.TARGET_ADDRESS, trade.market_id,
-    )
-    target_holding_before = target_holding_after + trade.size_usdc
-
-    if target_holding_before <= 0:
-        sell_ratio = 1.0   # fallback: full close
-    else:
-        sell_ratio = max(0.0, min(1.0, trade.size_usdc / target_holding_before))
+    sell_ratio = _compute_sell_ratio(trade)
 
     shares_to_sell = position.shares * sell_ratio
     if shares_to_sell < 1e-6:
@@ -251,18 +254,49 @@ def _handle_sell(
         logger.warning("SELL did not fill (%s) — position unchanged.", reason_str)
         return
 
-    # Realized P&L is computed inside record_sell against our stored avg_price.
-    pnl = (fill.spent_usdc - fill.fee_usdc) - (position.avg_price * fill.shares)
-    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price)
+    pnl = (fill.amount_usdc - fill.fee_usdc) - (position.avg_price * fill.shares)
     tracker.record_sell(
         trade,
         shares=fill.shares,
-        proceeds_usdc=fill.spent_usdc,
+        proceeds_usdc=fill.amount_usdc,
         fill_price=fill.fill_price,
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
+    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price)
     tracker.print_summary(paper=paper)
+
+
+def _compute_sell_ratio(trade: Trade) -> float:
+    """Determine what fraction of *our* position to close, mirroring the target.
+
+    Strategy:
+      * Look up the cached pre-sell holding (populated on every BUY signal).
+      * If present: ratio = sell_notional / cached_pre_value. Decrement the
+        cache so subsequent partial sells in the same market still compute
+        correctly. Clamp to [0, 1].
+      * If absent (e.g. first signal we've seen for this market, or cache
+        cleared on restart): full close. This is the safe default — we
+        de-risk completely rather than guess a partial.
+
+    We deliberately do NOT reconstruct the pre-sell value as
+    `holding_after + trade.size_usdc`. Holding values are mark-to-market at
+    the current price; trade notional is at the fill price; they don't add
+    cleanly. And the API is eventually-consistent so `holding_after` may
+    actually still be the pre-sell value.
+    """
+    cached_pre = fetcher.target_holding_cache.get(trade.market_id)
+    if cached_pre is None or cached_pre <= 0:
+        logger.info(
+            "No cached holding for %s — falling back to full close.",
+            trade.market_id[:12],
+        )
+        return 1.0
+
+    ratio = trade.size_usdc / cached_pre
+    # Update the cache to reflect the post-sell holding for subsequent partials.
+    fetcher.target_holding_cache.decrement(trade.market_id, trade.size_usdc)
+    return max(0.0, min(1.0, ratio))
 
 
 # ---------------------------------------------------------------------------
@@ -274,9 +308,6 @@ def _handle_redeem(trade: Trade, tracker: PositionTracker, paper: bool) -> None:
     if position is None or position.shares <= 0:
         return
 
-    # Prefer Gamma's canonical resolution when available; fall back to the
-    # CLOB last-trade-price heuristic. This avoids the previous bug where a
-    # stale mid-price between 0.1 and 0.9 left positions open forever.
     close_price = _resolve_close_price(trade.market_id, position.asset_id)
     if close_price is None:
         logger.warning(
@@ -301,9 +332,11 @@ def _handle_redeem(trade: Trade, tracker: PositionTracker, paper: bool) -> None:
         proceeds_usdc=proceeds,
         fill_price=close_price,
         paper=paper,
-        fee_usdc=0.0,   # redemptions don't pay trade fees
+        fee_usdc=0.0,
     )
     tracker.print_summary(paper=paper)
+    # Cache is no longer meaningful for a settled market — clear it.
+    fetcher.target_holding_cache.set(trade.market_id, 0.0)
 
     sign = "+" if pnl >= 0 else ""
     notifier.send(
@@ -317,36 +350,58 @@ def _handle_redeem(trade: Trade, tracker: PositionTracker, paper: bool) -> None:
 def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     """Determine the final price for a redeemed position.
 
-    Strategy:
-      1. Ask Gamma for the market's resolution and find which outcome won.
-         If our asset_id matches the winning token, price = 1.0; else 0.0.
-      2. Fall back to the CLOB last-trade-price (~1.0 = win, ~0.0 = loss).
+    Strategy (in order):
+      1. Ask Gamma for the market and *only* trust outcomePrices if the
+         market is explicitly closed/resolved. A live market exposes the
+         same field, but it's the *current mid*, not the settlement value.
+      2. Fall back to CLOB last-trade-price binarized to {0, 1}.
+      3. If neither yields a confident answer, return None and leave the
+         position open (caller logs a warning).
     """
     market = fetcher.fetch_market_resolution(market_id)
-    if market:
-        # Resolved markets expose either a `outcomePrices` JSON string
-        # ("[1.0, 0.0]") or per-outcome token info — try to match by token.
-        tokens = market.get("clobTokenIds")
-        prices = market.get("outcomePrices")
-        if tokens and prices:
-            try:
-                import json
-                token_list = json.loads(tokens) if isinstance(tokens, str) else tokens
-                price_list = json.loads(prices) if isinstance(prices, str) else prices
-                for tok, pr in zip(token_list, price_list):
-                    if tok == asset_id:
-                        return float(pr)
-            except (ValueError, TypeError) as e:
-                logger.debug("Gamma resolution parse failed: %s", e)
+    if market and _market_is_resolved(market):
+        outcome_price = _gamma_outcome_price(market, asset_id)
+        if outcome_price is not None:
+            return outcome_price
 
-    # Fallback: CLOB last-trade-price (binarized).
+    # Fallback: CLOB last-trade-price binarized. Settled markets trade at ~0
+    # or ~1 once resolved; ambiguous mids should refuse to book P&L.
     price = fetcher.fetch_resolution_price(asset_id)
     if price is None:
         return None
-    if price > 0.9:
+    if price > 0.95:
         return 1.0
-    if price < 0.1:
+    if price < 0.05:
         return 0.0
+    return None
+
+
+def _market_is_resolved(market: dict) -> bool:
+    """Check Gamma's closed/resolved flags. Either being truthy implies finality."""
+    for key in ("closed", "resolved", "archived"):
+        val = market.get(key)
+        if isinstance(val, bool) and val:
+            return True
+        if isinstance(val, str) and val.lower() in ("true", "1", "yes"):
+            return True
+    return False
+
+
+def _gamma_outcome_price(market: dict, asset_id: str) -> Optional[float]:
+    """Extract the settlement price for a specific token from a resolved market."""
+    tokens = market.get("clobTokenIds")
+    prices = market.get("outcomePrices")
+    if not (tokens and prices):
+        return None
+    try:
+        import json
+        token_list = json.loads(tokens) if isinstance(tokens, str) else tokens
+        price_list = json.loads(prices) if isinstance(prices, str) else prices
+        for tok, pr in zip(token_list, price_list):
+            if tok == asset_id:
+                return float(pr)
+    except (ValueError, TypeError) as e:
+        logger.debug("Gamma resolution parse failed: %s", e)
     return None
 
 
@@ -354,25 +409,33 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
 # Slippage + price lookup
 # ---------------------------------------------------------------------------
 
-def _get_current_price(trade: Trade, client: Optional[ClobClient]) -> float:
+def _get_current_price(trade: Trade, client: Optional[ClobClient]) -> Optional[float]:
     """Best-effort current market price for this asset.
 
-    Uses the authenticated client when available (lower latency); falls back
-    to the public CLOB endpoint. Returns `trade.price` if everything fails
-    so we don't accidentally treat a price-fetch outage as 100% drift.
+    Returns None on failure so the slippage check can refuse the trade.
+    This is the safer choice: an outage that returns trade.price would
+    silently disable slippage protection, which is when it matters most.
     """
     if client is not None:
         try:
             resp = client.get_last_trade_price(trade.asset_id)
-            return float(resp.get("price", trade.price))
+            return float(resp.get("price"))
         except Exception as e:
             logger.warning("Authenticated price fetch failed: %s", e)
 
     price = fetcher.fetch_resolution_price(trade.asset_id)
-    return price if price is not None else trade.price
+    return price
 
 
-def _slippage_ok(trade: Trade, current_price: float) -> bool:
+def _slippage_ok(trade: Trade, current_price: Optional[float]) -> bool:
+    """Fail closed when price data is unavailable."""
+    if current_price is None:
+        logger.warning(
+            "No current price for slippage check — refusing trade: %s",
+            trade.question[:50],
+        )
+        notifier.on_slippage_skipped(trade, drift_pct=float("nan"))
+        return False
     if trade.price <= 0:
         return True
     drift = abs(current_price - trade.price) / trade.price
@@ -390,38 +453,37 @@ def _slippage_ok(trade: Trade, current_price: float) -> bool:
 # Paper-mode fill simulation
 # ---------------------------------------------------------------------------
 
-def _simulate_buy(trade: Trade, scaled_usdc: float, current_price: float) -> FillResult:
+def _simulate_buy(trade: Trade, scaled_usdc: float, current_price: Optional[float]) -> FillResult:
     """Simulate a market BUY at the current price, charging the modeled fee.
 
     Without this, paper P&L systematically overstates live P&L because every
-    paper buy fills at the target's `trade.price` regardless of how the
-    market has moved.
+    paper buy would fill at the target's signal price regardless of drift.
     """
-    fill_price = current_price if current_price > 0 else trade.price
-    if fill_price <= 0:
-        return FillResult(False, 0, 0, 0, reason="zero fill price")
+    if current_price is None or current_price <= 0:
+        return FillResult(False, 0, 0, 0, reason="no current price")
     fee = scaled_usdc * (config.PAPER_FEE_BPS / 10_000.0)
-    shares = (scaled_usdc - fee) / fill_price
+    if scaled_usdc - fee <= 0:
+        return FillResult(False, 0, 0, 0, reason="fee exceeds order size")
+    shares = (scaled_usdc - fee) / current_price
     return FillResult(
         success=True,
         shares=shares,
-        spent_usdc=scaled_usdc,
-        fill_price=fill_price,
+        amount_usdc=scaled_usdc,
+        fill_price=current_price,
         fee_usdc=fee,
     )
 
 
-def _simulate_sell(trade: Trade, shares: float, current_price: float) -> FillResult:
-    fill_price = current_price if current_price > 0 else trade.price
-    if fill_price <= 0:
-        return FillResult(False, 0, 0, 0, reason="zero fill price")
-    gross = shares * fill_price
+def _simulate_sell(trade: Trade, shares: float, current_price: Optional[float]) -> FillResult:
+    if current_price is None or current_price <= 0:
+        return FillResult(False, 0, 0, 0, reason="no current price")
+    gross = shares * current_price
     fee = gross * (config.PAPER_FEE_BPS / 10_000.0)
     return FillResult(
         success=True,
         shares=shares,
-        spent_usdc=gross,
-        fill_price=fill_price,
+        amount_usdc=gross,             # proceeds (gross of fee)
+        fill_price=current_price,
         fee_usdc=fee,
     )
 
@@ -452,7 +514,7 @@ def _place_buy(trade: Trade, scaled_usdc: float, client: ClobClient) -> FillResu
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
         logger.info("BUY order response: %s", resp)
-        return _parse_fill(resp, scaled_usdc, trade.price, side="BUY")
+        return _parse_fill(resp, side="BUY")
     except Exception as e:
         logger.error("BUY order failed: %s", e)
         return FillResult(False, 0, 0, 0, reason=str(e))
@@ -463,7 +525,7 @@ def _place_sell(trade: Trade, shares: float, client: ClobClient) -> FillResult:
         if config.ORDER_TYPE == "market":
             args = MarketOrderArgs(
                 token_id=trade.asset_id,
-                amount=shares,   # SELL amount is in shares
+                amount=shares,
                 side="SELL",
                 price=trade.price,
             )
@@ -479,25 +541,24 @@ def _place_sell(trade: Trade, shares: float, client: ClobClient) -> FillResult:
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
         logger.info("SELL order response: %s", resp)
-        # For sells, the "spent" is actually the proceeds — same plumbing.
-        return _parse_fill(resp, shares * trade.price, trade.price, side="SELL")
+        return _parse_fill(resp, side="SELL")
     except Exception as e:
         logger.error("SELL order failed: %s", e)
         return FillResult(False, 0, 0, 0, reason=str(e))
 
 
-def _parse_fill(
-    resp: dict,
-    requested_usdc: float,
-    signal_price: float,
-    side: str,
-) -> FillResult:
+def _parse_fill(resp, side: str) -> FillResult:
     """Pull the actual fill out of a CLOB order response.
 
-    The CLOB returns fields like `success`, `status`, `takingAmount`, and
-    `makingAmount`. We accept either name and fall back to the requested
-    values so a malformed response still produces a sensible record — but
-    a `success=False` status is honored as a hard fail.
+    Conservative posture: a success=True response with no parseable fill
+    data is treated as **failure**, not silently trusted to match the
+    request. This avoids the "phantom position from an async-accepted
+    order" bug.
+
+    The field names assumed here (takingAmount / makingAmount) are
+    documented for the 0x-style relayer; py_clob_client may surface them
+    under different names. This function and its assumptions need to be
+    validated against a real captured CLOB response — see TODO.
     """
     if not isinstance(resp, dict):
         return FillResult(False, 0, 0, 0, reason="non-dict response")
@@ -510,30 +571,46 @@ def _parse_fill(
             reason=f"status={status or 'rejected'} | {resp.get('errorMsg', '')}",
         )
 
-    # Polymarket reports filled amounts as `takingAmount` / `makingAmount`.
-    # For a market BUY, takingAmount = USDC spent and makingAmount = shares.
-    # For a market SELL, makingAmount = USDC received and takingAmount = shares.
+    # Try multiple field-name conventions before giving up.
+    taking_raw = resp.get("takingAmount") or resp.get("taker_amount") or resp.get("size_matched")
+    making_raw = resp.get("makingAmount") or resp.get("maker_amount") or resp.get("filled_amount")
     try:
-        taking = float(resp.get("takingAmount") or 0)
-        making = float(resp.get("makingAmount") or 0)
+        taking = float(taking_raw) if taking_raw is not None else 0.0
+        making = float(making_raw) if making_raw is not None else 0.0
     except (TypeError, ValueError):
-        taking = making = 0.0
+        return FillResult(False, 0, 0, 0, reason="unparseable amounts")
+
+    if taking <= 0 and making <= 0:
+        # success=True but no fill data → treat as failure rather than
+        # silently book a phantom position at request-derived numbers.
+        return FillResult(
+            False, 0, 0, 0,
+            reason="success but no fill amounts in response",
+        )
 
     if side == "BUY":
-        spent = taking or requested_usdc
-        shares = making or (spent / signal_price if signal_price > 0 else 0)
+        spent = taking
+        shares = making
     else:
-        spent = making or requested_usdc          # proceeds
-        shares = taking or (requested_usdc / signal_price if signal_price > 0 else 0)
+        spent = making
+        shares = taking
 
-    fill_price = (spent / shares) if shares > 0 else signal_price
-    if shares <= 0 or fill_price <= 0:
-        return FillResult(False, 0, 0, 0, reason="zero-fill response")
+    if shares <= 0 or spent <= 0:
+        return FillResult(False, 0, 0, 0, reason="zero fill")
+
+    fill_price = spent / shares
+    fee = 0.0
+    fee_raw = resp.get("feeRateBps") or resp.get("fee_rate_bps")
+    if fee_raw:
+        try:
+            fee = float(fee_raw) * spent / 10_000.0
+        except (TypeError, ValueError):
+            pass
 
     return FillResult(
         success=True,
         shares=shares,
-        spent_usdc=spent,
+        amount_usdc=spent,
         fill_price=fill_price,
-        fee_usdc=float(resp.get("feeRateBps") or 0) * spent / 10_000.0,
+        fee_usdc=fee,
     )

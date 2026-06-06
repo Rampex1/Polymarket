@@ -16,9 +16,10 @@ load_dotenv()
 
 # ── Target to copy ───────────────────────────────────────────────────────────
 
-# TARGET_USERNAME is now read from env so switching targets does not require
-# a code edit. TARGET_ADDRESS still wins if set (skips the username lookup).
-TARGET_USERNAME: str = os.getenv("TARGET_USERNAME", "surfandturf")
+# TARGET_USERNAME is read from env. TARGET_ADDRESS wins if set (skips
+# the username lookup). Default empty so we fail loudly with a missing-
+# config error instead of silently following a hardcoded handle.
+TARGET_USERNAME: str = os.getenv("TARGET_USERNAME", "")
 TARGET_ADDRESS: str = os.getenv("TARGET_ADDRESS", "")
 
 # ── Polling ──────────────────────────────────────────────────────────────────

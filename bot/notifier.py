@@ -124,36 +124,46 @@ def on_shutdown() -> None:
 # Daily summary background thread
 # ---------------------------------------------------------------------------
 
-def start_daily_summary(tracker, stop_event: threading.Event | None = None) -> None:
-    """Send a portfolio summary every day at midnight (config.TIMEZONE)."""
+def start_daily_summary(
+    tracker,
+    paper: bool,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Send a portfolio summary every day at midnight (config.TIMEZONE).
+
+    `paper` is the execution mode resolved once at startup — the summary
+    filters all numbers (positions, exposure, P&L) by this flag so a live
+    deployment with leftover paper rows in the DB doesn't render a mixed
+    view.
+    """
     def _loop() -> None:
         while True:
             wait_s = _seconds_until_midnight()
-            # If we have a stop_event, wake on shutdown signal instead of
-            # blocking the daemon for hours past the real exit.
             if stop_event is not None:
                 if stop_event.wait(wait_s):
                     return
             else:
-                # Use Event-less sleep as a fallback for callers that
-                # don't pass one. Daemon thread dies with the process.
                 threading.Event().wait(wait_s)
-            _send_daily_summary(tracker)
+            _send_daily_summary(tracker, paper=paper)
 
     t = threading.Thread(target=_loop, daemon=True, name="daily-summary")
     t.start()
-    logger.info("Daily summary thread started (timezone=%s).", config.TIMEZONE.key)
+    logger.info(
+        "Daily summary thread started (timezone=%s, mode=%s).",
+        config.TIMEZONE.key, "PAPER" if paper else "LIVE",
+    )
 
 
-def _send_daily_summary(tracker) -> None:
-    positions = tracker.all_open()
-    exposure = tracker.total_exposure_usdc()
-    pnl = tracker.today_pnl_usdc()
+def _send_daily_summary(tracker, paper: bool) -> None:
+    positions = tracker.all_open(paper=paper)
+    exposure = tracker.total_exposure_usdc(paper=paper)
+    pnl = tracker.today_pnl_usdc(paper=paper)
     sign = "+" if pnl >= 0 else ""
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
+    mode_tag = "📄 PAPER" if paper else "💵 LIVE"
 
     lines = [
-        f"📊 <b>Daily Summary — {today_str}</b>",
+        f"📊 <b>Daily Summary — {today_str}</b> ({mode_tag})",
         f"Realized P&amp;L: {sign}${pnl:.2f}",
         f"Open positions: {len(positions)} | Exposure: ${exposure:.2f}",
     ]

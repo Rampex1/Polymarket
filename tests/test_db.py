@@ -37,11 +37,9 @@ def test_wal_mode_enabled(fresh_db):
 
 def test_migration_is_idempotent(fresh_db, tmp_db_path):
     """Re-initializing against an existing DB shouldn't blow up."""
-    # First init.
     fresh_db.get()
-    # Force a re-init by clearing the cached connection.
-    fresh_db._conn = None
-    # Should succeed without raising even though tables/indexes exist.
+    # Force a re-init by closing the cached connection.
+    fresh_db.reset_for_tests()
     conn = fresh_db.get()
     cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
     assert "fee_usdc" in cols
@@ -53,7 +51,7 @@ def test_migration_adds_fee_usdc_on_legacy_schema(tmp_db_path, monkeypatch):
     from bot import config
     import bot.db as dbmod
 
-    # Hand-build a legacy trade_log without fee_usdc.
+    # Hand-build a legacy trade_log without fee_usdc, outcome, question.
     conn = sqlite3.connect(tmp_db_path)
     conn.executescript(
         """
@@ -75,9 +73,27 @@ def test_migration_adds_fee_usdc_on_legacy_schema(tmp_db_path, monkeypatch):
     conn.close()
 
     monkeypatch.setattr(config, "DB_PATH", tmp_db_path)
-    dbmod._conn = None
+    dbmod.reset_for_tests()
     conn = dbmod.get()
     cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
     assert "fee_usdc" in cols
     assert "outcome" in cols
     assert "question" in cols
+
+
+def test_threadlocal_connection_isolation(fresh_db):
+    """Each thread must get its own connection. Two threads getting the same
+    object would mean WAL gives no benefit and writes can interleave."""
+    import threading
+
+    main_conn = fresh_db.get()
+    other_conn = []
+
+    def get_in_thread():
+        other_conn.append(fresh_db.get())
+
+    t = threading.Thread(target=get_in_thread)
+    t.start()
+    t.join()
+
+    assert other_conn[0] is not main_conn

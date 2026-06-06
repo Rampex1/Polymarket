@@ -4,15 +4,19 @@ Trade fetcher — discovers the target wallet and polls for new trades.
 Design notes:
   * `SESSION` is a shared requests.Session() with a retry-backoff adapter so
     transient 429/5xx errors don't silently drop trades.
-  * `seen_ids` in `poll()` is bounded to avoid an unbounded memory leak —
-    we only need to remember the *recent* trades to deduplicate against.
+  * `seen_ids` in `poll()` is bounded so the long-running process doesn't
+    leak memory.
   * `fetch_target_position_value` accepts an `expected_min` hint so callers
-    can defeat the Data API's eventual-consistency race (the freshly-seen
-    BUY may not yet be reflected when we ask about the wallet's holdings).
+    can defeat the Data API's eventual-consistency race.
+  * A small in-memory cache (`target_holding_cache`) tracks the target's
+    last observed holding per market. The SELL path relies on it to compute
+    an accurate close ratio without trusting the volatile combination of
+    "post-sell value reported by the API" and "USDC notional of the sell".
 """
 
 import collections
 import logging
+import threading
 import time
 from typing import Callable, Optional
 
@@ -36,7 +40,7 @@ def _build_session() -> requests.Session:
     session.headers.update({"Accept": "application/json"})
     retry = Retry(
         total=3,
-        backoff_factor=0.5,         # 0.5s, 1s, 2s between retries
+        backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset(["GET"]),
         raise_on_status=False,
@@ -48,6 +52,54 @@ def _build_session() -> requests.Session:
 
 
 SESSION = _build_session()
+
+
+# ---------------------------------------------------------------------------
+# Target-holding cache
+# ---------------------------------------------------------------------------
+#
+# Why this exists
+# ---------------
+# The SELL path needs to know what fraction of their position the target is
+# closing, so we can mirror it proportionally. Reconstructing "holding before
+# sell" from "holding after sell" + "USD notional of sell" is unsafe:
+#   (a) the Data API is eventually consistent — "after" may still show the
+#       pre-sell value, so adding the notional double-counts;
+#   (b) holding values are at *current* price, while sell notional is at the
+#       *fill* price, so they can't be added cleanly when the price drifts.
+#
+# Instead we cache the last observed holding per market. The BUY path
+# populates the cache (we already fetch it for tier sizing). On SELL, the
+# cached value IS the pre-sell holding — no reconstruction needed. The cache
+# is then decremented in place. Cache miss → safe fallback (full close).
+
+
+class TargetHoldingCache:
+    """Thread-safe in-memory cache of the target's last-observed holding."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: dict[str, float] = {}
+
+    def set(self, market_id: str, value: float) -> None:
+        with self._lock:
+            self._data[market_id] = max(0.0, float(value))
+
+    def get(self, market_id: str) -> Optional[float]:
+        with self._lock:
+            return self._data.get(market_id)
+
+    def decrement(self, market_id: str, amount: float) -> None:
+        with self._lock:
+            if market_id in self._data:
+                self._data[market_id] = max(0.0, self._data[market_id] - float(amount))
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
+target_holding_cache = TargetHoldingCache()
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +171,8 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         trade_type = item.get("type")
 
         if trade_type == "TRADE":
-            # Defensive: reject rows missing fields we *must* have to act on the
-            # signal. A row with no transactionHash can't be deduped; a row
-            # with no conditionId or asset can't be routed to an order.
+            # Reject rows missing fields we *must* have to act on the signal.
+            # No tx hash → can't dedupe; no conditionId/asset → can't route.
             tx_hash = item.get("transactionHash")
             condition_id = item.get("conditionId")
             asset_id = item.get("asset")
@@ -176,9 +227,9 @@ def fetch_target_position_value(
 ) -> float:
     """Total USDC value of the target's current position in a market.
 
-    `expected_min` defeats the Data API's eventual consistency: we just saw a
-    BUY on this market, so the wallet's holding *cannot* be smaller than that
-    trade size. If the API hasn't caught up yet, retry briefly until it has.
+    `expected_min` defeats the Data API's eventual consistency: when we know
+    the holding *must* be at least N USD (e.g. the BUY we just observed),
+    we retry until the API agrees.
     """
     last_value = 0.0
     for attempt in range(retries):
@@ -205,10 +256,10 @@ def fetch_target_position_value(
 
 
 def fetch_resolution_price(asset_id: str) -> Optional[float]:
-    """
-    Returns the last traded price for a token via the public CLOB endpoint.
-    A resolved winning token trades at ~1.0; a losing token at ~0.0.
-    Returns None if the price cannot be determined.
+    """Last traded price for a token via the public CLOB endpoint.
+
+    Used as a fallback resolution signal — a winning token trades at ~1.0,
+    a losing token at ~0.0. Returns None if unavailable.
     """
     try:
         resp = SESSION.get(
@@ -226,35 +277,38 @@ def fetch_resolution_price(asset_id: str) -> Optional[float]:
 
 
 def fetch_market_resolution(market_id: str) -> Optional[dict]:
-    """Best-effort canonical resolution status from the Gamma API.
+    """Canonical resolution snapshot from Gamma.
 
-    Used as a fallback when the CLOB last-trade-price is ambiguous (between
-    0.1 and 0.9). Returns a dict with at least `closed`/`resolved` flags when
-    the market is finalized; returns None on lookup failure.
+    Returns the raw market dict (with `closed`/`resolved` flags and
+    `outcomePrices`) so callers can decide whether the market is *actually*
+    settled before booking P&L. Returns None on lookup failure.
     """
     try:
-        resp = SESSION.get(
-            f"{config.GAMMA_API}/markets",
-            params={"condition_ids": market_id},
-            timeout=8,
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        rows = data if isinstance(data, list) else [data]
-        return rows[0] if rows else None
+        # Try both the plural and singular forms — Gamma's parameter naming
+        # has varied across versions; whichever matches will return the row.
+        for param in ("condition_ids", "condition_id"):
+            resp = SESSION.get(
+                f"{config.GAMMA_API}/markets",
+                params={param: market_id},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            rows = data if isinstance(data, list) else [data]
+            if rows:
+                return rows[0]
     except Exception as e:
         logger.debug("Gamma market lookup failed for %s: %s", market_id, e)
-        return None
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Polling loop
 # ---------------------------------------------------------------------------
 
-# Cap on the dedupe ring — we only need enough history that we don't replay
-# trades. 5000 is ~weeks of activity for an active trader; the actual memory
-# footprint is tiny but it keeps the set from growing unbounded.
+# Bound on the dedupe ring. Sized for ~weeks of an active trader's history;
+# tune up if monitoring a high-frequency target.
 SEEN_IDS_MAX = 5000
 
 
@@ -269,7 +323,6 @@ def poll(
     sleep instead of relying on signal-driven sys.exit, which can land
     in the middle of an order placement.
     """
-    # Bounded LRU set — old trade IDs fall off the back automatically.
     seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
 
     def _mark_seen(trade_id: str) -> None:
@@ -280,7 +333,6 @@ def poll(
             if len(seen_ids) > SEEN_IDS_MAX:
                 seen_ids.popitem(last=False)
 
-    # Seed with existing trades so we don't replay history on startup.
     for t in fetch_recent_trades(address):
         _mark_seen(t.id)
     logger.info(
@@ -288,7 +340,6 @@ def poll(
     )
 
     while True:
-        # Use an Event-based wait when available so shutdown is instant.
         if stop_event is not None:
             if stop_event.wait(config.POLL_INTERVAL_SECONDS):
                 logger.info("Poll loop received stop signal, exiting.")
@@ -306,8 +357,7 @@ def poll(
                 try:
                     on_trade(trade)
                 except Exception:
-                    # Surface but don't crash the poll loop — one bad trade
-                    # shouldn't take down the bot.
+                    # One bad trade must not kill the loop.
                     logger.exception("on_trade handler raised for %s", trade.id)
 
         if not new_trades:
