@@ -1,15 +1,27 @@
 """
-Phase 5: Telegram notifications + daily portfolio summary thread.
+Telegram notifications + midnight daily summary thread.
+
+Two fixes vs. the previous version:
+
+  * All user-injected strings (market titles, outcomes) are HTML-escaped
+    before being sent with `parse_mode=HTML`. A title containing `<`, `>`,
+    or `&` was previously rejected by Telegram and the exception swallowed
+    — meaning critical buy/sell alerts could silently disappear.
+
+  * The midnight summary thread uses `config.TIMEZONE` instead of naive
+    `datetime.now()`. Without an explicit tz the rollover happened at
+    whatever the VPS local time happened to be.
 """
 
+import html
 import logging
 import threading
-import time
 from datetime import datetime, timedelta
 
 import requests as http
 
 from . import config
+from .models import Trade
 
 logger = logging.getLogger(__name__)
 
@@ -34,55 +46,72 @@ def send(text: str) -> None:
         logger.warning("Telegram send failed: %s", e)
 
 
+def _esc(s: str) -> str:
+    """HTML-escape user-controlled strings before interpolating into a message."""
+    return html.escape(s or "", quote=False)
+
+
 # ---------------------------------------------------------------------------
 # Canned message helpers
 # ---------------------------------------------------------------------------
 
-def on_trade_detected(trade) -> None:
+def on_trade_detected(trade: Trade) -> None:
     send(
         f"👀 <b>Signal detected</b>\n"
-        f"{trade.action} {trade.outcome} — ${trade.size_usdc:,.0f} @ {trade.price:.3f}\n"
-        f"{trade.question[:80]}"
+        f"{_esc(trade.action)} {_esc(trade.outcome)} — "
+        f"${trade.size_usdc:,.0f} @ {trade.price:.3f}\n"
+        f"{_esc(trade.question[:80])}"
     )
 
 
-def on_buy_executed(trade, scaled_usdc: float, paper: bool) -> None:
+def on_buy_executed(trade: Trade, spent_usdc: float, paper: bool, fill_price: float) -> None:
     tag = "📄 PAPER" if paper else "✅ BUY"
     send(
         f"{tag}\n"
-        f"${scaled_usdc:.2f} of {trade.outcome} @ {trade.price:.3f}\n"
-        f"{trade.question[:80]}"
+        f"${spent_usdc:.2f} of {_esc(trade.outcome)} @ {fill_price:.3f}\n"
+        f"{_esc(trade.question[:80])}"
     )
 
 
-def on_sell_executed(trade, shares: float, pnl: float, paper: bool) -> None:
+def on_buy_failed(trade: Trade, reason: str) -> None:
+    send(
+        f"❌ <b>BUY failed</b>\n"
+        f"{_esc(reason)}\n"
+        f"{_esc(trade.question[:80])}"
+    )
+
+
+def on_sell_executed(
+    trade: Trade, shares: float, pnl: float, paper: bool, fill_price: float
+) -> None:
     tag = "📄 PAPER" if paper else "✅ SELL"
     sign = "+" if pnl >= 0 else ""
     send(
         f"{tag}\n"
-        f"{shares:.2f} shares of {trade.outcome} @ {trade.price:.3f} | P&L {sign}${pnl:.2f}\n"
-        f"{trade.question[:80]}"
+        f"{shares:.2f} shares of {_esc(trade.outcome)} @ {fill_price:.3f} "
+        f"| P&amp;L {sign}${pnl:.2f}\n"
+        f"{_esc(trade.question[:80])}"
     )
 
 
-def on_risk_blocked(reason: str, trade) -> None:
+def on_risk_blocked(reason: str, trade: Trade) -> None:
     send(
         f"⚠️ <b>Risk block</b>\n"
-        f"{reason}\n"
-        f"{trade.question[:80]}"
+        f"{_esc(reason)}\n"
+        f"{_esc(trade.question[:80])}"
     )
 
 
-def on_slippage_skipped(trade, drift_pct: float) -> None:
+def on_slippage_skipped(trade: Trade, drift_pct: float) -> None:
     send(
         f"⏭ <b>Slippage skip</b> ({drift_pct:.1f}%)\n"
-        f"{trade.question[:80]}"
+        f"{_esc(trade.question[:80])}"
     )
 
 
 def on_startup(mode: str, exposure: float) -> None:
     send(
-        f"🚀 <b>Bot started</b> — {mode} mode\n"
+        f"🚀 <b>Bot started</b> — {_esc(mode)} mode\n"
         f"Exposure: ${exposure:.2f}"
     )
 
@@ -95,38 +124,62 @@ def on_shutdown() -> None:
 # Daily summary background thread
 # ---------------------------------------------------------------------------
 
-def start_daily_summary(tracker) -> None:
-    """Sends a portfolio summary every day at midnight. Runs as a daemon thread."""
+def start_daily_summary(
+    tracker,
+    paper: bool,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Send a portfolio summary every day at midnight (config.TIMEZONE).
+
+    `paper` is the execution mode resolved once at startup — the summary
+    filters all numbers (positions, exposure, P&L) by this flag so a live
+    deployment with leftover paper rows in the DB doesn't render a mixed
+    view.
+    """
     def _loop() -> None:
         while True:
-            time.sleep(_seconds_until_midnight())
-            _send_daily_summary(tracker)
+            wait_s = _seconds_until_midnight()
+            if stop_event is not None:
+                if stop_event.wait(wait_s):
+                    return
+            else:
+                threading.Event().wait(wait_s)
+            _send_daily_summary(tracker, paper=paper)
 
     t = threading.Thread(target=_loop, daemon=True, name="daily-summary")
     t.start()
-    logger.info("Daily summary thread started.")
+    logger.info(
+        "Daily summary thread started (timezone=%s, mode=%s).",
+        config.TIMEZONE.key, "PAPER" if paper else "LIVE",
+    )
 
 
-def _send_daily_summary(tracker) -> None:
-    positions = tracker.all_open()
-    exposure = tracker.total_exposure_usdc()
-    pnl = tracker.today_pnl_usdc()
+def _send_daily_summary(tracker, paper: bool) -> None:
+    positions = tracker.all_open(paper=paper)
+    exposure = tracker.total_exposure_usdc(paper=paper)
+    pnl = tracker.today_pnl_usdc(paper=paper)
     sign = "+" if pnl >= 0 else ""
+    today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
+    mode_tag = "📄 PAPER" if paper else "💵 LIVE"
 
     lines = [
-        f"📊 <b>Daily Summary — {datetime.now().strftime('%Y-%m-%d')}</b>",
-        f"Realized P&L: {sign}${pnl:.2f}",
+        f"📊 <b>Daily Summary — {today_str}</b> ({mode_tag})",
+        f"Realized P&amp;L: {sign}${pnl:.2f}",
         f"Open positions: {len(positions)} | Exposure: ${exposure:.2f}",
     ]
     for p in positions:
-        lines.append(f"  • {p.outcome} {p.shares:.1f}sh @ {p.avg_price:.3f} — {p.question[:45]}")
+        lines.append(
+            f"  • {_esc(p.outcome)} {p.shares:.1f}sh @ {p.avg_price:.3f} — "
+            f"{_esc(p.question[:45])}"
+        )
 
     send("\n".join(lines))
 
 
 def _seconds_until_midnight() -> float:
-    now = datetime.now()
+    """Time until the next midnight in the configured timezone."""
+    now = datetime.now(tz=config.TIMEZONE)
     midnight = (now + timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-    return (midnight - now).total_seconds()
+    return max(1.0, (midnight - now).total_seconds())
