@@ -119,15 +119,24 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         trade_type = item.get("type")
 
         if trade_type == "TRADE":
+            # Defensive: reject rows missing fields we *must* have to act on the
+            # signal. A row with no transactionHash can't be deduped; a row
+            # with no conditionId or asset can't be routed to an order.
+            tx_hash = item.get("transactionHash")
+            condition_id = item.get("conditionId")
+            asset_id = item.get("asset")
+            if not (tx_hash and condition_id and asset_id):
+                return None
+
             size = float(item.get("usdcSize") or 0)
-            if size < config.MIN_TRADE_SIZE_USDC:
+            if size <= 0 or size < config.MIN_TRADE_SIZE_USDC:
                 return None
             action = item.get("side", "").upper()
             if action not in ("BUY", "SELL"):
                 return None
             return Trade(
-                id=item.get("transactionHash", ""),
-                market_id=item.get("conditionId", ""),
+                id=tx_hash,
+                market_id=condition_id,
                 question=item.get("title", ""),
                 side=action,
                 size_usdc=size,
@@ -135,7 +144,7 @@ def _parse_trade(item: dict) -> Optional[Trade]:
                 action=action,
                 timestamp=int(item.get("timestamp") or time.time()),
                 outcome=item.get("outcome", ""),
-                asset_id=item.get("asset"),
+                asset_id=asset_id,
             )
 
         if trade_type == "REDEEM":
