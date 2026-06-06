@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
+"""
+Entry point — wires modules together and runs the poll loop.
+
+Two notable changes vs. the previous version:
+
+  * `paper` is resolved exactly once here (`paper_mode = ...`) and the result
+    is the single source of truth used everywhere downstream. Previously some
+    modules read `config.PAPER_TRADE` while others used a per-call argument,
+    producing inconsistent behavior when callers expected one and got the other.
+
+  * Shutdown is driven by a `threading.Event` rather than `sys.exit` from a
+    signal handler. This guarantees we never interrupt an in-flight order
+    placement, and the daily-summary thread also notices the shutdown.
+"""
 
 import logging
 import signal
 import sys
+import threading
 
 from bot import config, executor, fetcher, notifier
 from bot.positions import PositionTracker, RiskManager
@@ -16,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    # Resolve wallet address
+    # ── Resolve wallet address ──────────────────────────────────────────────
     address = config.TARGET_ADDRESS
     if not address:
         logger.info("Looking up wallet for '%s'...", config.TARGET_USERNAME)
@@ -31,7 +46,7 @@ def main() -> None:
 
     logger.info("Monitoring address: %s", address)
 
-    # Show recent trade history to confirm feed is live
+    # Show recent trade history to confirm feed is live.
     logger.info("Fetching recent trade history...")
     recent = fetcher.fetch_recent_trades(address, limit=10)
     if recent:
@@ -41,53 +56,67 @@ def main() -> None:
     else:
         logger.warning("No recent trades found — address may be wrong or API is slow.")
 
-    # Build execution stack
+    # ── Build execution stack ───────────────────────────────────────────────
     client = executor.build_client()
+    # Resolve paper-mode exactly once so every module agrees.
+    paper_mode = config.PAPER_TRADE or client is None
+
     tracker = PositionTracker()
-    tracker.init_paper_balance(config.PAPER_STARTING_BALANCE)
+    if paper_mode:
+        tracker.init_paper_balance(config.PAPER_STARTING_BALANCE)
     risk = RiskManager(tracker)
 
-    mode = "PAPER" if (config.PAPER_TRADE or client is None) else "LIVE"
+    mode = "PAPER" if paper_mode else "LIVE"
     logger.info(
         "Execution mode: %s | tiers=$%.0f/$%.0f/$%.0f | order=%s | max_slippage=%.0f%%",
         mode, config.TIER1_SIZE, config.TIER2_SIZE, config.TIER3_SIZE,
         config.ORDER_TYPE.upper(), config.MAX_SLIPPAGE * 100,
     )
     logger.info(
-        "Risk limits: per-position $%.0f | total exposure $%.0f | daily loss $%.0f",
+        "Risk limits: per-position $%.2f | total exposure $%.2f | daily loss $%.2f "
+        "| min order $%.2f",
         config.MAX_POSITION_SIZE_USDC,
         config.MAX_TOTAL_EXPOSURE_USDC,
         config.DAILY_LOSS_LIMIT_USDC,
+        config.MIN_ORDER_SIZE_USDC,
     )
 
-    tracker.print_summary()
+    tracker.print_summary(paper=paper_mode)
 
-    # Graceful shutdown on SIGINT / SIGTERM
+    # ── Shutdown coordination ───────────────────────────────────────────────
+    # Use an Event instead of sys.exit() in a signal handler. This lets the
+    # poll loop and daily-summary thread finish their current iteration
+    # cleanly — critical so we don't interrupt mid-order.
+    stop_event = threading.Event()
+
     def _shutdown(signum, frame):
-        logger.info("Shutdown signal received, exiting...")
-        tracker.print_summary()
-        notifier.on_shutdown()
-        sys.exit(0)
+        if stop_event.is_set():
+            return   # second Ctrl-C: let default handler kill us
+        logger.info("Shutdown signal received, finishing current cycle...")
+        stop_event.set()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Start daily summary background thread
-    notifier.start_daily_summary(tracker)
+    # ── Background threads ──────────────────────────────────────────────────
+    notifier.start_daily_summary(tracker, stop_event=stop_event)
+    notifier.on_startup(mode, tracker.total_exposure_usdc(paper=paper_mode))
 
-    # Notify startup
-    notifier.on_startup(mode, tracker.total_exposure_usdc())
-
-    # Start polling
+    # ── Poll loop ───────────────────────────────────────────────────────────
     logger.info(
-        "Starting poll loop (every %ds, min size $%.0f)...",
+        "Starting poll loop (every %ds, min target-trade size $%.2f)...",
         config.POLL_INTERVAL_SECONDS,
         config.MIN_TRADE_SIZE_USDC,
     )
-    fetcher.poll(
-        address,
-        on_trade=lambda t: executor.execute(t, client, tracker, risk),
-    )
+    try:
+        fetcher.poll(
+            address,
+            on_trade=lambda t: executor.execute(t, client, tracker, risk),
+            stop_event=stop_event,
+        )
+    finally:
+        tracker.print_summary(paper=paper_mode)
+        notifier.on_shutdown()
 
 
 if __name__ == "__main__":
