@@ -14,7 +14,7 @@ from tests.conftest import make_trade
 # ---------------------------------------------------------------------------
 
 
-def test_sell_bypasses_daily_loss(risk, tracker, default_config):
+def test_sell_bypasses_daily_loss(risk, tracker, default_params):
     """The critical fix: a SELL must not be blocked by the daily-loss limit."""
     # Engineer a loss large enough to trip the limit.
     buy = make_trade(action="BUY", price=0.5)
@@ -23,7 +23,7 @@ def test_sell_bypasses_daily_loss(risk, tracker, default_config):
     tracker.record_sell(big_sell, shares=200.0, proceeds_usdc=20.0,
                         fill_price=0.1, paper=True)
     # Now today_pnl is -80, below the limit.
-    assert tracker.today_pnl_usdc(paper=True) < -default_config.DAILY_LOSS_LIMIT_USDC
+    assert tracker.today_pnl_usdc(paper=True) < -default_params.daily_loss_limit_usdc
 
     sell = make_trade(action="SELL", price=0.5, trade_id="exit")
     ok, reason = risk.check(sell, 0, paper=True)
@@ -61,8 +61,8 @@ def test_buy_blocked_by_daily_loss(risk, tracker, default_config):
     assert "Daily loss" in reason
 
 
-def test_buy_blocked_by_position_size(risk, tracker, default_config, monkeypatch):
-    monkeypatch.setattr(default_config, "MAX_POSITION_SIZE_USDC", 5.0)
+def test_buy_blocked_by_position_size(risk, tracker, default_params, monkeypatch):
+    monkeypatch.setattr(default_params, "max_position_size_usdc", 5.0)
     buy = make_trade(action="BUY", price=0.5)
     tracker.record_buy(buy, spent_usdc=4.0, shares=8.0, fill_price=0.5, paper=True)
     t = make_trade(action="BUY", trade_id="tx2")
@@ -71,9 +71,9 @@ def test_buy_blocked_by_position_size(risk, tracker, default_config, monkeypatch
     assert "Position size" in reason
 
 
-def test_buy_blocked_by_total_exposure(risk, tracker, default_config, monkeypatch):
-    monkeypatch.setattr(default_config, "MAX_TOTAL_EXPOSURE_USDC", 10.0)
-    monkeypatch.setattr(default_config, "MAX_POSITION_SIZE_USDC", 100.0)
+def test_buy_blocked_by_total_exposure(risk, tracker, default_params, monkeypatch):
+    monkeypatch.setattr(default_params, "max_total_exposure_usdc", 10.0)
+    monkeypatch.setattr(default_params, "max_position_size_usdc", 100.0)
     # Two positions adding up to $9 already.
     b1 = make_trade(action="BUY", market_id="m1", price=0.5)
     b2 = make_trade(action="BUY", market_id="m2", price=0.5)

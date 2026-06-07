@@ -75,7 +75,12 @@ SESSION = _build_session()
 
 
 class TargetHoldingCache:
-    """Thread-safe in-memory cache of the target's last-observed holding."""
+    """Thread-safe in-memory cache of the target's last-observed holding.
+
+    One instance per algorithm — algorithms that copy a wallet hold this as
+    instance state so multiple copy-trade algorithms (different targets) can
+    run in parallel without sharing cache.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -97,9 +102,6 @@ class TargetHoldingCache:
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
-
-
-target_holding_cache = TargetHoldingCache()
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +182,9 @@ def _parse_trade(item: dict) -> Optional[Trade]:
                 return None
 
             size = float(item.get("usdcSize") or 0)
-            if size <= 0 or size < config.MIN_TRADE_SIZE_USDC:
+            # Min-size filtering is per-algorithm; the fetcher emits every
+            # parseable trade and the algorithm decides what to ignore.
+            if size <= 0:
                 return None
             action = item.get("side", "").upper()
             if action not in ("BUY", "SELL"):
@@ -341,12 +345,16 @@ def poll(
     address: str,
     on_trade: Callable[[Trade], None] = None,
     stop_event=None,
+    poll_interval_seconds: int = 20,
 ) -> None:
     """Continuously poll for new trades and invoke on_trade for each one.
 
-    `stop_event` (a threading.Event) lets main.py cleanly interrupt the
-    sleep instead of relying on signal-driven sys.exit, which can land
-    in the middle of an order placement.
+    Now a *utility* — production runs use per-algorithm worker threads
+    in main.py rather than this single-target loop. Still useful for
+    backfilling, scripts, and the dedup tests.
+
+    `stop_event` (a threading.Event) lets the caller cleanly interrupt
+    the sleep instead of relying on signal-driven sys.exit.
     """
     seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
 
@@ -366,11 +374,11 @@ def poll(
 
     while True:
         if stop_event is not None:
-            if stop_event.wait(config.POLL_INTERVAL_SECONDS):
+            if stop_event.wait(poll_interval_seconds):
                 logger.info("Poll loop received stop signal, exiting.")
                 return
         else:
-            time.sleep(config.POLL_INTERVAL_SECONDS)
+            time.sleep(poll_interval_seconds)
 
         trades = fetch_recent_trades(address)
         new_trades = [t for t in trades if t.id and t.id not in seen_ids]

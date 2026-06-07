@@ -3,14 +3,20 @@ Position tracking + risk management.
 
 Two important design rules enforced here:
 
-  1. The `paper` flag is *passed in* by the caller (it is resolved once in
-     main.py at startup). This module never reads `config.PAPER_TRADE`
-     directly — that was a source of subtle bugs where some checks read
-     global config while others used the per-call argument.
+  1. The `paper` flag is *passed in* by the caller (resolved once at startup
+     and threaded through). This module never reads `config.PAPER_TRADE`
+     directly.
 
-  2. Sells/redeems never block on risk checks. A sell *reduces* exposure
-     and any associated risk; blocking it (e.g. because we're down on the
-     day) would lock us into a losing position. Only BUYs are gated.
+  2. Sells/redeems never block on risk checks. A sell *reduces* exposure;
+     blocking it (e.g. because we're down on the day) would lock the bot
+     into a losing position. Only BUYs are gated.
+
+Multi-algorithm awareness
+-------------------------
+Each algorithm runs with its own `PositionTracker(algo="...")` instance.
+Every query is filtered by that algo so two algorithms can be long the same
+market simultaneously without clobbering each other. `paper_account` is
+keyed by algo, so each strategy has its own paper bankroll.
 
 Cost-basis source of truth
 --------------------------
@@ -26,7 +32,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-from . import config, db
+from . import db
 from .models import Trade
 
 logger = logging.getLogger(__name__)
@@ -62,21 +68,31 @@ class Position:
 
 
 class PositionTracker:
+    """Per-algorithm view of positions, trade log, and paper bankroll.
+
+    Always pass an `algo` name in the constructor. Every read/write query
+    filters by that algo so two trackers (one per algorithm) operate on
+    disjoint slices of the same DB.
+    """
+
+    def __init__(self, algo: str = "copy_trade") -> None:
+        self.algo = algo
+
     # ── Paper balance ────────────────────────────────────────────────────────
 
     def init_paper_balance(self, starting: float) -> None:
         """Seed balance only on first run; subsequent calls are no-ops."""
         conn = db.get()
         conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance, updated_at) "
-            "VALUES (1, ?, ?)",
-            (starting, int(time.time())),
+            "INSERT OR IGNORE INTO paper_account (algo, balance, updated_at) "
+            "VALUES (?, ?, ?)",
+            (self.algo, starting, int(time.time())),
         )
         conn.commit()
 
     def paper_balance(self) -> float:
         row = db.get().execute(
-            "SELECT balance FROM paper_account WHERE id=1"
+            "SELECT balance FROM paper_account WHERE algo=?", (self.algo,),
         ).fetchone()
         return float(row[0]) if row else 0.0
 
@@ -92,8 +108,8 @@ class PositionTracker:
         conn = db.get()
         conn.execute(
             "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
-            "WHERE id=1",
-            (delta, int(time.time())),
+            "WHERE algo=?",
+            (delta, int(time.time()), self.algo),
         )
         conn.commit()
 
@@ -110,7 +126,7 @@ class PositionTracker:
     ) -> None:
         """Record a completed BUY.
 
-        Caller (executor) provides the *actual* spent_usdc, shares, and
+        Caller (runner) provides the *actual* spent_usdc, shares, and
         fill_price from the exchange. We no longer derive shares from
         `trade.price` — that's the target's fill, not ours.
         """
@@ -135,43 +151,45 @@ class PositionTracker:
                 """UPDATE positions
                    SET shares=?, avg_price=?, total_cost_usdc=?, updated_at=?,
                        asset_id=?, outcome=?
-                   WHERE market_id=? AND paper=?""",
+                   WHERE market_id=? AND paper=? AND algo=?""",
                 (
                     new_shares, new_avg, new_cost, now,
                     trade.asset_id, trade.outcome,
-                    trade.market_id, int(paper),
+                    trade.market_id, int(paper), self.algo,
                 ),
             )
         else:
             conn.execute(
                 """INSERT INTO positions
-                   (market_id, paper, asset_id, question, outcome, shares, avg_price,
-                    total_cost_usdc, opened_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   (market_id, paper, algo, asset_id, question, outcome,
+                    shares, avg_price, total_cost_usdc, opened_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    trade.market_id, int(paper), trade.asset_id, trade.question,
-                    trade.outcome, shares, fill_price, spent_usdc, now, now,
+                    trade.market_id, int(paper), self.algo, trade.asset_id,
+                    trade.question, trade.outcome, shares, fill_price,
+                    spent_usdc, now, now,
                 ),
             )
 
         conn.execute(
             """INSERT INTO trade_log
                (market_id, asset_id, action, outcome, question, shares, price,
-                usdc_amount, fee_usdc, paper, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                usdc_amount, fee_usdc, paper, algo, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade.market_id, trade.asset_id, "BUY", trade.outcome, trade.question,
-                shares, fill_price, spent_usdc, fee_usdc, int(paper), now,
+                shares, fill_price, spent_usdc, fee_usdc,
+                int(paper), self.algo, now,
             ),
         )
         if paper:
             # Inline the balance update so position + trade_log + balance
-            # all land in ONE transaction. Splitting into two commits would
-            # leave a half-recorded trade if the process dies mid-flight.
+            # all land in ONE transaction. Splitting would leave a half-
+            # recorded trade if the process dies mid-flight.
             conn.execute(
                 "UPDATE paper_account SET balance = balance - ?, updated_at = ? "
-                "WHERE id=1",
-                (spent_usdc + fee_usdc, now),
+                "WHERE algo=?",
+                (spent_usdc + fee_usdc, now, self.algo),
             )
         conn.commit()
         logger.info(
@@ -210,43 +228,46 @@ class PositionTracker:
 
             if new_shares <= 0.0001:
                 conn.execute(
-                    "DELETE FROM positions WHERE market_id=? AND paper=?",
-                    (trade.market_id, int(paper)),
+                    "DELETE FROM positions WHERE market_id=? AND paper=? AND algo=?",
+                    (trade.market_id, int(paper), self.algo),
                 )
             else:
                 conn.execute(
                     """UPDATE positions
                        SET shares=?, total_cost_usdc=?, updated_at=?
-                       WHERE market_id=? AND paper=?""",
-                    (new_shares, new_cost, now, trade.market_id, int(paper)),
+                       WHERE market_id=? AND paper=? AND algo=?""",
+                    (
+                        new_shares, new_cost, now,
+                        trade.market_id, int(paper), self.algo,
+                    ),
                 )
 
         conn.execute(
             """INSERT INTO trade_log
                (market_id, asset_id, action, outcome, question, shares, price,
-                usdc_amount, fee_usdc, realized_pnl, paper, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                usdc_amount, fee_usdc, realized_pnl, paper, algo, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade.market_id, trade.asset_id, trade.action, trade.outcome,
                 trade.question, shares, fill_price, proceeds_usdc, fee_usdc,
-                realized_pnl, int(paper), now,
+                realized_pnl, int(paper), self.algo, now,
             ),
         )
 
         today = date.today().isoformat()
         conn.execute(
-            """INSERT INTO daily_stats (date, realized_pnl_usdc)
-               VALUES (?, ?)
-               ON CONFLICT(date) DO UPDATE SET
+            """INSERT INTO daily_stats (date, algo, realized_pnl_usdc)
+               VALUES (?, ?, ?)
+               ON CONFLICT(date, algo) DO UPDATE SET
                  realized_pnl_usdc = realized_pnl_usdc + excluded.realized_pnl_usdc""",
-            (today, realized_pnl),
+            (today, self.algo, realized_pnl),
         )
         if paper:
             # Inline for atomicity — see record_buy for the rationale.
             conn.execute(
                 "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
-                "WHERE id=1",
-                (proceeds_usdc - fee_usdc, now),
+                "WHERE algo=?",
+                (proceeds_usdc - fee_usdc, now, self.algo),
             )
         conn.commit()
         logger.info(
@@ -258,8 +279,8 @@ class PositionTracker:
 
     def get(self, market_id: str, paper: bool = False) -> Optional["Position"]:
         row = db.get().execute(
-            "SELECT * FROM positions WHERE market_id=? AND paper=?",
-            (market_id, int(paper)),
+            "SELECT * FROM positions WHERE market_id=? AND paper=? AND algo=?",
+            (market_id, int(paper), self.algo),
         ).fetchone()
         return _row_to_position(row) if row else None
 
@@ -267,12 +288,15 @@ class PositionTracker:
         conn = db.get()
         if paper is None:
             rows = conn.execute(
-                "SELECT * FROM positions WHERE shares > 0 ORDER BY opened_at DESC"
+                "SELECT * FROM positions WHERE shares > 0 AND algo=? "
+                "ORDER BY opened_at DESC",
+                (self.algo,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM positions WHERE shares > 0 AND paper=? ORDER BY opened_at DESC",
-                (int(paper),),
+                "SELECT * FROM positions WHERE shares > 0 AND paper=? AND algo=? "
+                "ORDER BY opened_at DESC",
+                (int(paper), self.algo),
             ).fetchall()
         return [_row_to_position(r) for r in rows]
 
@@ -280,13 +304,15 @@ class PositionTracker:
         conn = db.get()
         if paper is None:
             row = conn.execute(
-                "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions WHERE shares > 0"
+                "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions "
+                "WHERE shares > 0 AND algo=?",
+                (self.algo,),
             ).fetchone()
         else:
             row = conn.execute(
                 "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions "
-                "WHERE shares > 0 AND paper=?",
-                (int(paper),),
+                "WHERE shares > 0 AND paper=? AND algo=?",
+                (int(paper), self.algo),
             ).fetchone()
         return float(row[0])
 
@@ -297,14 +323,14 @@ class PositionTracker:
         if paper is None:
             row = conn.execute(
                 "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
-                "WHERE date(ts,'unixepoch','localtime') = ?",
-                (today,),
+                "WHERE algo=? AND date(ts,'unixepoch','localtime') = ?",
+                (self.algo, today),
             ).fetchone()
         else:
             row = conn.execute(
                 "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
-                "WHERE paper=? AND date(ts,'unixepoch','localtime') = ?",
-                (int(paper), today),
+                "WHERE paper=? AND algo=? AND date(ts,'unixepoch','localtime') = ?",
+                (int(paper), self.algo, today),
             ).fetchone()
         return float(row[0]) if row else 0.0
 
@@ -312,19 +338,20 @@ class PositionTracker:
         positions = self.all_open(paper=paper)
         exposure = self.total_exposure_usdc(paper=paper)
         pnl = self.today_pnl_usdc(paper=paper)
+        tag = f"[{self.algo}] "
         if paper:
             balance = self.paper_balance()
             logger.info(
-                "Paper balance: $%.2f | %d positions | exposure $%.2f | today P&L $%.2f",
-                balance, len(positions), exposure, pnl,
+                "%sPaper balance: $%.2f | %d positions | exposure $%.2f | today P&L $%.2f",
+                tag, balance, len(positions), exposure, pnl,
             )
         else:
             logger.info(
-                "Portfolio: %d open positions | exposure $%.2f | today P&L $%.2f",
-                len(positions), exposure, pnl,
+                "%sPortfolio: %d open positions | exposure $%.2f | today P&L $%.2f",
+                tag, len(positions), exposure, pnl,
             )
         for p in positions:
-            logger.info("  %s", p)
+            logger.info("%s  %s", tag, p)
 
 
 def _row_to_position(row) -> Position:
@@ -342,13 +369,20 @@ def _row_to_position(row) -> Position:
 
 
 # ---------------------------------------------------------------------------
-# Risk manager
+# Risk manager — driven by per-algo params, not global config
 # ---------------------------------------------------------------------------
 
 
 class RiskManager:
-    def __init__(self, tracker: PositionTracker) -> None:
+    """Per-algorithm risk gate.
+
+    Takes the algorithm's `params` object directly so each strategy can have
+    its own caps without sharing a global pool with sibling algorithms.
+    """
+
+    def __init__(self, tracker: PositionTracker, params) -> None:
         self.tracker = tracker
+        self.params = params
 
     def check(
         self,
@@ -387,20 +421,21 @@ class RiskManager:
         return True, ""
 
     def _check_min_order(self, scaled_usdc: float) -> tuple[bool, str]:
-        if scaled_usdc < config.MIN_ORDER_SIZE_USDC:
+        if scaled_usdc < self.params.min_order_size_usdc:
             return (
                 False,
                 f"Scaled size ${scaled_usdc:.2f} below min "
-                f"${config.MIN_ORDER_SIZE_USDC:.2f}",
+                f"${self.params.min_order_size_usdc:.2f}",
             )
         return True, ""
 
     def _check_daily_loss(self, paper: bool) -> tuple[bool, str]:
         pnl = self.tracker.today_pnl_usdc(paper=paper)
-        if pnl < -config.DAILY_LOSS_LIMIT_USDC:
+        if pnl < -self.params.daily_loss_limit_usdc:
             return (
                 False,
-                f"Daily loss limit hit (${pnl:.2f} < -${config.DAILY_LOSS_LIMIT_USDC})",
+                f"Daily loss limit hit (${pnl:.2f} < "
+                f"-${self.params.daily_loss_limit_usdc})",
             )
         return True, ""
 
@@ -409,11 +444,11 @@ class RiskManager:
     ) -> tuple[bool, str]:
         position = self.tracker.get(trade.market_id, paper)
         current = position.total_cost_usdc if position else 0.0
-        if current + scaled_usdc > config.MAX_POSITION_SIZE_USDC:
+        if current + scaled_usdc > self.params.max_position_size_usdc:
             return (
                 False,
                 f"Position size ${current + scaled_usdc:.2f} would exceed "
-                f"max ${config.MAX_POSITION_SIZE_USDC}",
+                f"max ${self.params.max_position_size_usdc}",
             )
         return True, ""
 
@@ -421,11 +456,11 @@ class RiskManager:
         self, scaled_usdc: float, paper: bool
     ) -> tuple[bool, str]:
         total = self.tracker.total_exposure_usdc(paper)
-        if total + scaled_usdc > config.MAX_TOTAL_EXPOSURE_USDC:
+        if total + scaled_usdc > self.params.max_total_exposure_usdc:
             return (
                 False,
                 f"Total exposure ${total + scaled_usdc:.2f} would exceed "
-                f"max ${config.MAX_TOTAL_EXPOSURE_USDC}",
+                f"max ${self.params.max_total_exposure_usdc}",
             )
         return True, ""
 

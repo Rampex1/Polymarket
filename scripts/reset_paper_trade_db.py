@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Deletes positions.db and reinitialises it with a fresh paper balance
-from config.PAPER_STARTING_BALANCE.
+Deletes positions.db and reinitialises every enabled algorithm's paper
+balance from its own params.
 """
 
 import os
@@ -10,6 +10,7 @@ import sys
 # Allow running from any directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from algorithms import ENABLED
 from bot import config
 from bot.positions import PositionTracker
 
@@ -19,6 +20,9 @@ if os.path.exists(db_path):
     os.remove(db_path)
     print(f"Deleted {db_path}")
 
-tracker = PositionTracker()
-tracker.init_paper_balance(config.PAPER_STARTING_BALANCE)
-print(f"Fresh paper account created with ${config.PAPER_STARTING_BALANCE:.2f}")
+for algo in ENABLED:
+    name = algo.params.name
+    bal = algo.params.paper_starting_balance
+    tracker = PositionTracker(algo=name)
+    tracker.init_paper_balance(bal)
+    print(f"Fresh paper account [{name}] created with ${bal:.2f}")

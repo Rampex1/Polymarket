@@ -87,16 +87,18 @@ def test_parse_trade_merge_requires_tx_and_market():
     assert _parse_trade({"type": "MERGE", "transactionHash": "0x"}) is None
 
 
-def test_parse_trade_skips_below_min_size(monkeypatch):
-    from bot import config
+def test_parse_trade_emits_all_sizes_now_that_filter_moved():
+    """The min-trade-size filter is now algorithm-level (see test_copy_trade.py).
+    The fetcher emits every parseable row above $0 — small ones included."""
     from bot.fetcher import _parse_trade
 
-    monkeypatch.setattr(config, "MIN_TRADE_SIZE_USDC", 100.0)
-    assert _parse_trade({
+    t = _parse_trade({
         "type": "TRADE", "side": "BUY", "usdcSize": "50",
         "price": "0.5", "transactionHash": "x", "conditionId": "m",
         "timestamp": "1", "outcome": "Yes", "asset": "a",
-    }) is None
+    })
+    assert t is not None
+    assert t.size_usdc == 50.0
 
 
 def test_parse_trade_ignores_unknown_action():
@@ -133,7 +135,6 @@ def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
         return [_fake_trade(f"id{i}") for i in range(max(0, new - 3), new + 1)]
 
     monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
-    monkeypatch.setattr(fetcher.config, "POLL_INTERVAL_SECONDS", 0)
 
     stop = threading.Event()
     seen_handled = []
@@ -143,7 +144,8 @@ def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
         if len(seen_handled) >= 8:
             stop.set()
 
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop)
+    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+                 poll_interval_seconds=0)
 
     assert len(seen_handled) == len(set(seen_handled))
     assert len(seen_handled) >= 8
@@ -158,7 +160,6 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
 
     # Tight cap so we can prove eviction in a few iterations.
     monkeypatch.setattr(fetcher, "SEEN_IDS_MAX", 3)
-    monkeypatch.setattr(fetcher.config, "POLL_INTERVAL_SECONDS", 0)
 
     # Seed phase: poll 1 returns id0; then we'll force-evict id0 by feeding
     # 3 distinct new IDs (so the ring is full of ids 1,2,3) and re-present id0.
@@ -183,7 +184,8 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
         if not timeline:
             stop.set()
 
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop)
+    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+                 poll_interval_seconds=0)
 
     # id0 was seeded (not handled), then evicted, then handled on re-appearance.
     assert "id0" in handled, "id0 should have been re-executed after eviction"
@@ -207,8 +209,6 @@ def test_poll_loop_swallows_handler_exceptions(monkeypatch):
     """One bad on_trade call must not kill the loop."""
     from bot import fetcher
 
-    monkeypatch.setattr(fetcher.config, "POLL_INTERVAL_SECONDS", 0)
-
     counter = {"n": 0}
 
     def fake_fetch(address, limit=100):
@@ -229,7 +229,8 @@ def test_poll_loop_swallows_handler_exceptions(monkeypatch):
             stop.set()
 
     # Should not raise.
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop)
+    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+                 poll_interval_seconds=0)
     assert len(invocations) >= 3
 
 

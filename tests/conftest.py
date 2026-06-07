@@ -1,23 +1,22 @@
 """
 Shared pytest fixtures.
 
-Design rules for this test suite:
-
-  * Use a *real* SQLite database via tempfile — no DB mocking. SQLite is
-    fast enough that there's no reason to fake it, and using the real
+Design rules:
+  * Use a *real* SQLite database via tempfile — no DB mocking. The real
     engine catches integration bugs (PRAGMA, indexes, migrations) that a
     mock would hide.
 
-  * Use real RiskManager, real PositionTracker, real Trade dataclasses.
-    The only thing we stub is the HTTP boundary — we obviously can't hit
-    the live Polymarket API, and we want deterministic responses.
+  * Use real RiskManager, PositionTracker, Trade dataclasses. The only
+    thing we stub is the HTTP boundary (Polymarket API).
 
-  * Each test gets a fresh DB AND a cleared target-holding cache — no
-    state leakage between tests.
+  * Each test gets a fresh DB. Every PositionTracker fixture is bound to
+    the `copy_trade` algorithm namespace so existing tests behave the
+    same way they did before the multi-algorithm refactor.
 """
 
 import os
 import sys
+from dataclasses import dataclass
 
 import pytest
 
@@ -27,18 +26,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 @pytest.fixture
 def tmp_db_path(tmp_path):
-    """Path to a fresh empty SQLite file. The `fresh_db` fixture wires it in."""
+    """Path to a fresh empty SQLite file."""
     return str(tmp_path / "test.db")
 
 
 @pytest.fixture
 def fresh_db(tmp_db_path, monkeypatch):
-    """Point bot.db at a brand-new file for this test, then close + reset.
-
-    Uses `db.reset_for_tests()` which is the documented teardown hook —
-    cleaner than poking the internal `_conn` attribute, and works correctly
-    with the new thread-local connection layout.
-    """
+    """Point bot.db at a brand-new file for this test, then close + reset."""
     from bot import config
     import bot.db as dbmod
 
@@ -48,52 +42,62 @@ def fresh_db(tmp_db_path, monkeypatch):
     dbmod.reset_for_tests()
 
 
-@pytest.fixture(autouse=True)
-def _clear_holding_cache():
-    """Wipe the module-level target-holding cache between tests so prior-test
-    state doesn't leak into the next test's sell-ratio computation."""
-    from bot import fetcher
-    fetcher.target_holding_cache.clear()
-    yield
-    fetcher.target_holding_cache.clear()
-
-
 @pytest.fixture
 def tracker(fresh_db):
-    """A PositionTracker bound to a fresh DB."""
+    """A PositionTracker bound to a fresh DB, namespaced to copy_trade."""
     from bot.positions import PositionTracker
 
-    t = PositionTracker()
+    t = PositionTracker(algo="copy_trade")
     t.init_paper_balance(10_000.0)
     return t
 
 
-@pytest.fixture
-def risk(tracker):
-    from bot.positions import RiskManager
-    return RiskManager(tracker)
+@dataclass
+class _TestParams:
+    """Minimal params object for RiskManager + runner-handler tests."""
+    name: str = "copy_trade"
+    max_position_size_usdc: float = 100.0
+    max_total_exposure_usdc: float = 500.0
+    daily_loss_limit_usdc: float = 50.0
+    min_order_size_usdc: float = 1.0
+    max_slippage: float = 0.05
+    paper_starting_balance: float = 10_000.0
+    paper_fee_bps: float = 0.0
+    poll_interval_seconds: int = 0
+    order_type: str = "market"
+    # CopyTrade-specific knobs used by some tests.
+    tier1_min: float = 80_000.0
+    tier1_max: float = 150_000.0
+    tier1_size: float = 1.0
+    tier2_max: float = 300_000.0
+    tier2_size: float = 2.0
+    tier3_size: float = 3.0
+    target_address: str = "0xtarget"
+    target_username: str = ""
+    min_trade_size_usdc: float = 0.0
 
 
 @pytest.fixture
-def default_config(monkeypatch):
-    """Pin config to known values so tests aren't affected by .env."""
+def default_params(monkeypatch):
+    """A fully-initialised _TestParams instance. Also clears caches so
+    state doesn't leak between tests."""
+    params = _TestParams()
+    # No global config to reset post-trim, but keep PAPER_TRADE pinned.
     from bot import config
-
-    monkeypatch.setattr(config, "TIER1_MIN", 80_000.0)
-    monkeypatch.setattr(config, "TIER1_MAX", 150_000.0)
-    monkeypatch.setattr(config, "TIER1_SIZE", 1.0)
-    monkeypatch.setattr(config, "TIER2_MAX", 300_000.0)
-    monkeypatch.setattr(config, "TIER2_SIZE", 2.0)
-    monkeypatch.setattr(config, "TIER3_SIZE", 3.0)
-    monkeypatch.setattr(config, "MIN_ORDER_SIZE_USDC", 1.0)
-    monkeypatch.setattr(config, "MAX_POSITION_SIZE_USDC", 100.0)
-    monkeypatch.setattr(config, "MAX_TOTAL_EXPOSURE_USDC", 500.0)
-    monkeypatch.setattr(config, "DAILY_LOSS_LIMIT_USDC", 50.0)
-    monkeypatch.setattr(config, "MAX_SLIPPAGE", 0.05)
     monkeypatch.setattr(config, "PAPER_TRADE", True)
-    monkeypatch.setattr(config, "PAPER_FEE_BPS", 0.0)
-    monkeypatch.setattr(config, "TARGET_ADDRESS", "0xtarget")
-    return config
+    return params
+
+
+# Backwards-compatible alias — old tests referenced `default_config`.
+@pytest.fixture
+def default_config(default_params):
+    return default_params
+
+
+@pytest.fixture
+def risk(tracker, default_params):
+    from bot.positions import RiskManager
+    return RiskManager(tracker, default_params)
 
 
 def make_trade(
