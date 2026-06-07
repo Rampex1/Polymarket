@@ -153,10 +153,21 @@ def _handle_buy(
         )
         return
 
-    scaled_usdc = _tier_for_holding(holding)
+    target = _tier_for_holding(holding)
+    position = tracker.get(trade.market_id, paper)
+    current = position.total_cost_usdc if position else 0.0
+    scaled_usdc = round(target - current, 8)
+
+    if scaled_usdc <= config.MIN_ORDER_SIZE_USDC:
+        logger.info(
+            "Already at tier target $%.2f (current $%.2f), skipping: %s",
+            target, current, trade.question[:50],
+        )
+        return
+
     logger.info(
-        "Tier bet: $%.2f (target holding $%.0f) | %s",
-        scaled_usdc, holding, trade.question[:55],
+        "Tier top-up: $%.2f (target $%.2f, current $%.2f, holding $%.0f) | %s",
+        scaled_usdc, target, current, holding, trade.question[:55],
     )
 
     approved, reason = risk.check(trade, scaled_usdc, paper)
