@@ -391,6 +391,96 @@ def test_execute_no_asset_id_buy_is_skipped(tracker, risk, default_config):
 
 
 # ---------------------------------------------------------------------------
+# MERGE — full close mirror
+# ---------------------------------------------------------------------------
+
+
+def test_execute_merge_fully_closes_position(tracker, risk, default_config, stub_price):
+    """A MERGE signal must close 100% of our position in the market — the
+    target has fully exited, so we mirror that regardless of the merge size."""
+    from bot import executor
+
+    seed = make_trade(action="BUY", price=0.50)
+    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+
+    stub_price(0.50)
+
+    merge = make_trade(action="MERGE", price=0.0, size_usdc=100_000.0, trade_id="mg1")
+    executor.execute(merge, client=None, tracker=tracker, risk=risk)
+
+    assert tracker.get("m1", paper=True) is None
+
+
+def test_execute_merge_with_no_position_is_noop(tracker, risk, default_config, stub_price):
+    """A MERGE for a market we don't hold must not crash or attempt a fill."""
+    from bot import executor
+
+    stub_price(0.50)
+    merge = make_trade(action="MERGE", price=0.0, size_usdc=100_000.0, trade_id="mg1")
+    executor.execute(merge, client=None, tracker=tracker, risk=risk)
+    assert tracker.get("m1", paper=True) is None
+
+
+def test_execute_merge_clears_holding_cache(tracker, risk, default_config, stub_price):
+    """After a MERGE the target's holding in that market is zero — the cache
+    must reflect that so any later signal doesn't compute against stale value."""
+    from bot import executor, fetcher
+
+    seed = make_trade(action="BUY", price=0.50)
+    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+    fetcher.target_holding_cache.set("m1", 100_000.0)
+
+    stub_price(0.50)
+
+    merge = make_trade(action="MERGE", price=0.0, size_usdc=100_000.0, trade_id="mg1")
+    executor.execute(merge, client=None, tracker=tracker, risk=risk)
+
+    assert fetcher.target_holding_cache.get("m1") == 0.0
+
+
+def test_execute_merge_without_asset_id_uses_position_asset(tracker, risk,
+                                                             default_config, stub_price,
+                                                             monkeypatch):
+    """A merge spans both outcomes, so the Data API may omit `asset`. The
+    handler must substitute our held position's asset_id rather than skip."""
+    from bot import executor
+
+    seed = make_trade(action="BUY", price=0.50, asset_id="held_asset")
+    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+
+    captured_asset = {}
+
+    def fake_get_price(trade, client):
+        captured_asset["asset_id"] = trade.asset_id
+        return 0.50
+    monkeypatch.setattr(executor, "_get_current_price", fake_get_price)
+
+    merge = make_trade(action="MERGE", price=0.0, size_usdc=100_000.0,
+                       trade_id="mg1", asset_id=None)
+    executor.execute(merge, client=None, tracker=tracker, risk=risk)
+
+    assert captured_asset["asset_id"] == "held_asset"
+    assert tracker.get("m1", paper=True) is None
+
+
+def test_execute_merge_books_realized_pnl(tracker, risk, default_config, stub_price):
+    """The close fills at the current market price; P&L is booked into the
+    paper account just like a regular SELL."""
+    from bot import executor
+
+    seed = make_trade(action="BUY", price=0.40)
+    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+
+    stub_price(0.70)   # closing at 0.70 → 10 shares × $0.30 profit
+
+    merge = make_trade(action="MERGE", price=0.0, size_usdc=100_000.0, trade_id="mg1")
+    executor.execute(merge, client=None, tracker=tracker, risk=risk)
+
+    assert tracker.get("m1", paper=True) is None
+    assert abs(tracker.today_pnl_usdc(paper=True) - 3.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
 # REDEEM resolution
 # ---------------------------------------------------------------------------
 

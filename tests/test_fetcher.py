@@ -56,6 +56,37 @@ def test_parse_trade_redeem_passes_through_without_asset():
     assert t.action == "REDEEM"
 
 
+def test_parse_trade_merge_emits_signal():
+    """MERGE rows must be emitted as a MERGE signal so the executor can
+    mirror-close our matching position. Pre-fix, _parse_trade silently
+    dropped them and our position would sit open indefinitely."""
+    from bot.fetcher import _parse_trade
+
+    t = _parse_trade({
+        "type": "MERGE",
+        "transactionHash": "0xmerge",
+        "conditionId": "m1",
+        "title": "Tennis match",
+        "usdcSize": "100000",
+        "timestamp": "1700000000",
+        # No `asset` — a merge spans both outcomes.
+    })
+    assert t is not None
+    assert t.action == "MERGE"
+    assert t.market_id == "m1"
+    assert t.size_usdc == 100_000.0
+    assert t.asset_id is None
+
+
+def test_parse_trade_merge_requires_tx_and_market():
+    """A MERGE row missing tx_hash or conditionId can't be deduped or
+    routed — drop it rather than emit a malformed signal."""
+    from bot.fetcher import _parse_trade
+
+    assert _parse_trade({"type": "MERGE", "conditionId": "m1"}) is None
+    assert _parse_trade({"type": "MERGE", "transactionHash": "0x"}) is None
+
+
 def test_parse_trade_skips_below_min_size(monkeypatch):
     from bot import config
     from bot.fetcher import _parse_trade

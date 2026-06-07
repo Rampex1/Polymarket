@@ -212,6 +212,31 @@ def _parse_trade(item: dict) -> Optional[Trade]:
                 asset_id=item.get("asset") or None,
             )
 
+        if trade_type == "MERGE":
+            # A merge means the target redeemed complementary YES+NO shares
+            # for $1/pair, fully exiting their directional bet on this market.
+            # We mirror it as a full close of our matching position — the
+            # executor doesn't try to compute a partial ratio from the merge
+            # USDC (it's in $/pair units, not mark-to-market USD).
+            tx_hash = item.get("transactionHash")
+            condition_id = item.get("conditionId")
+            if not (tx_hash and condition_id):
+                return None
+            return Trade(
+                id=tx_hash,
+                market_id=condition_id,
+                question=item.get("title", ""),
+                side="MERGE",
+                size_usdc=float(item.get("usdcSize") or 0),
+                price=0.0,
+                action="MERGE",
+                timestamp=int(item.get("timestamp") or time.time()),
+                outcome=item.get("outcome", ""),
+                # asset_id may be absent — a merge spans both sides of the
+                # market. The executor falls back to our position's asset_id.
+                asset_id=item.get("asset") or None,
+            )
+
         return None
     except (TypeError, ValueError, KeyError) as e:
         logger.debug("Skipping unparseable trade item: %s — %s", item, e)

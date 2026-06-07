@@ -104,8 +104,12 @@ def execute(
     BUY    → tier-size, run risk checks, place order, record position.
     SELL   → mirror-close *proportionally* using the cached pre-sell holding.
     REDEEM → settle our matching position at the actual resolution price.
+    MERGE  → full close of our matching position (target has exited).
     """
-    if not trade.asset_id and trade.action != "REDEEM":
+    # REDEEM and MERGE signals may not carry an asset_id (REDEEM is per-market,
+    # and a MERGE spans both sides). Their handlers fall back to the position's
+    # asset_id when placing the close order.
+    if not trade.asset_id and trade.action not in ("REDEEM", "MERGE"):
         logger.warning("Trade missing asset_id, skipping: %s", trade)
         return
 
@@ -119,6 +123,8 @@ def execute(
         _handle_sell(trade, client, tracker, risk, paper)
     elif trade.action == "REDEEM":
         _handle_redeem(trade, tracker, paper)
+    elif trade.action == "MERGE":
+        _handle_merge(trade, client, tracker, risk, paper)
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +314,86 @@ def _compute_sell_ratio(trade: Trade) -> float:
     # Update the cache to reflect the post-sell holding for subsequent partials.
     fetcher.target_holding_cache.decrement(trade.market_id, trade.size_usdc)
     return max(0.0, min(1.0, ratio))
+
+
+# ---------------------------------------------------------------------------
+# MERGE (target exited via complementary-share redemption)
+# ---------------------------------------------------------------------------
+
+def _handle_merge(
+    trade: Trade,
+    client: Optional[ClobClient],
+    tracker: PositionTracker,
+    risk: RiskManager,
+    paper: bool,
+) -> None:
+    """Mirror a target MERGE as a full exit of our position in that market.
+
+    A merge means the target paired YES+NO shares and redeemed them for $1
+    per pair — they've fully closed their directional bet here. They will
+    not emit a corresponding SELL signal, so without this handler our
+    matching position would sit open until the market eventually resolves
+    (or indefinitely if it's delisted).
+
+    We do not attempt to compute a partial close ratio from the merge USDC.
+    The merge value is denominated in $/pair, while the cached pre-trade
+    holding is mark-to-market USD — the units don't divide cleanly. Any
+    merge triggers a full close.
+    """
+    from dataclasses import replace
+
+    position = tracker.get(trade.market_id, paper)
+    if position is None or position.shares <= 0:
+        logger.info("MERGE with no position to close: %s", trade.question[:60])
+        # Clear any stale cache for this market so later signals start fresh.
+        fetcher.target_holding_cache.set(trade.market_id, 0.0)
+        return
+
+    # The MERGE event may omit asset_id (a merge spans both outcomes); the
+    # CLOB SELL path needs a concrete token, so substitute the side we hold.
+    if not trade.asset_id:
+        trade = replace(trade, asset_id=position.asset_id)
+
+    approved, reason = risk.check(trade, 0, paper)
+    if not approved:
+        logger.warning("Risk check blocked merge close — %s", reason)
+        notifier.on_risk_blocked(reason, trade)
+        return
+
+    shares_to_sell = position.shares
+    logger.info(
+        "Mirror close on MERGE: full close (%.2f shares) | %s",
+        shares_to_sell, trade.question[:55],
+    )
+
+    current_price = _get_current_price(trade, client)
+    if not _slippage_ok(trade, current_price):
+        return
+
+    if paper:
+        fill = _simulate_sell(trade, shares_to_sell, current_price)
+    else:
+        fill = _place_sell(trade, shares_to_sell, client)
+
+    if not fill or not fill.success:
+        reason_str = fill.reason if fill else "no fill"
+        logger.warning("MERGE close did not fill (%s) — position unchanged.", reason_str)
+        return
+
+    pnl = (fill.amount_usdc - fill.fee_usdc) - (position.avg_price * fill.shares)
+    tracker.record_sell(
+        trade,
+        shares=fill.shares,
+        proceeds_usdc=fill.amount_usdc,
+        fill_price=fill.fill_price,
+        paper=paper,
+        fee_usdc=fill.fee_usdc,
+    )
+    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price)
+    tracker.print_summary(paper=paper)
+    # Target has exited the market — drop the cached holding so a subsequent
+    # signal in this market doesn't compute against a stale value.
+    fetcher.target_holding_cache.set(trade.market_id, 0.0)
 
 
 # ---------------------------------------------------------------------------
