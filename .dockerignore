@@ -1,7 +1,0 @@
-.env
-.venv
-.git
-__pycache__
-*.pyc
-*.pyo
-positions.db
