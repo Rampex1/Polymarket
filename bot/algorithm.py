@@ -20,7 +20,25 @@ Design notes
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Iterator, Protocol
+
+
+# ---------------------------------------------------------------------------
+# Mode — per-algorithm paper/live toggle
+# ---------------------------------------------------------------------------
+
+
+class Mode(str, Enum):
+    """Per-algorithm execution mode.
+
+    Replaces the previous global PAPER_TRADE flag. Each algorithm declares
+    its mode in its params, so a single process can run prod-live and
+    paper-experimental algorithms side by side without sharing the toggle.
+    Inherits from str so env-var values ("paper" / "live") work directly.
+    """
+    PAPER = "paper"
+    LIVE = "live"
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +96,7 @@ class AlgoParams(Protocol):
     attributes; subclassing is optional.
     """
     name: str
+    mode: Mode
 
     # Risk knobs
     max_position_size_usdc: float

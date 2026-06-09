@@ -13,7 +13,9 @@ deployments have migrated.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from bot.algorithm import Mode
 
 _P = "COPYTRADE_"
 
@@ -29,9 +31,30 @@ def _env(new_name: str, legacy_name: str, default: str) -> str:
     return default
 
 
+def _default_mode() -> Mode:
+    """Pick the default mode.
+
+    Order of precedence:
+      1. COPYTRADE_MODE         — explicit per-algo setting.
+      2. PAPER_TRADE            — legacy global toggle (still respected as a
+                                  fallback so existing .env files boot).
+      3. paper                  — fail-safe default.
+    """
+    explicit = os.getenv(_P + "MODE")
+    if explicit:
+        return Mode(explicit.lower())
+    legacy = os.getenv("PAPER_TRADE")
+    if legacy is not None:
+        return Mode.PAPER if legacy.lower() != "false" else Mode.LIVE
+    return Mode.PAPER
+
+
 @dataclass(frozen=True)
 class CopyTradeParams:
     name: str = "copy_trade"
+    # default_factory so each instantiation re-reads env (relevant for tests
+    # that set COPYTRADE_MODE per-case).
+    mode: Mode = field(default_factory=_default_mode)
 
     # ── Signal source ────────────────────────────────────────────────────────
     target_address: str = _env("TARGET_ADDRESS", "TARGET_ADDRESS", "")

@@ -7,14 +7,25 @@ This file holds only settings that are *bot-wide infrastructure* — the same
 for every algorithm running in the process:
 
   * Polymarket credentials and API base URLs (one wallet, one CLOB session).
-  * The single paper-vs-live mode flag.
   * Database path.
   * Telegram credentials and timezone.
 
+Mode (paper vs live) is **per-algorithm** now and lives in each algorithm's
+`params.py`. There is no global PAPER_TRADE toggle.
+
 Algorithm-specific settings (tiers, sizing, risk caps, poll cadence,
-starting paper balance, slippage tolerance, target wallet, etc.) live with
-the algorithm in `algorithms/<algo_name>/params.py`. Don't add new
-algorithm knobs here.
+slippage tolerance, target wallet, etc.) live with the algorithm in
+`algorithms/<algo_name>/params.py`.
+
+Profiles
+--------
+A "profile" is the bundle of algorithms a given process runs. Pick one at
+startup via the `PROFILE` env var (default: `default`). This file looks for
+`.env.<profile>` first and falls back to `.env`, so each profile can have
+its own credentials, DB path, Telegram channel, etc.
+
+    PROFILE=prod          python main.py     # loads .env.prod
+    PROFILE=experimental  python main.py     # loads .env.experimental
 """
 
 import os
@@ -22,7 +33,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
-load_dotenv()
+
+# ── Profile selection (must run before any os.getenv reads below) ────────────
+
+PROFILE: str = os.getenv("PROFILE", "default")
+
+# Load .env.<profile> if it exists, otherwise fall back to plain .env.
+# `override=True` so a stale shell env doesn't shadow file values.
+for _candidate in (f".env.{PROFILE}", ".env"):
+    if os.path.exists(_candidate):
+        load_dotenv(_candidate, override=True)
+        break
 
 
 # ── Polymarket API base URLs ─────────────────────────────────────────────────
@@ -30,13 +51,6 @@ load_dotenv()
 GAMMA_API: str = "https://gamma-api.polymarket.com"
 DATA_API:  str = "https://data-api.polymarket.com"
 CLOB_API:  str = "https://clob.polymarket.com"
-
-
-# ── Execution mode (single, process-wide) ────────────────────────────────────
-# Set to True to log orders without sending them to the exchange. Affects
-# *all* algorithms uniformly — there's no "one algo paper, another live"
-# mode because they share the same CLOB client and wallet.
-PAPER_TRADE: bool = os.getenv("PAPER_TRADE", "true").lower() != "false"
 
 
 # ── Polymarket credentials (live mode only; ignored in paper) ────────────────

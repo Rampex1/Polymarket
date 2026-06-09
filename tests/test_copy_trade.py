@@ -107,25 +107,112 @@ def test_buy_signal_skipped_when_at_tier(algo_with_tracker, stub_holding, tracke
     assert list(algo_with_tracker._intents_for(t)) == []
 
 
-def test_sell_signal_yields_proportional_close(algo_with_tracker):
-    """The cached pre-sell holding sets the close ratio."""
-    algo_with_tracker.holding_cache.set("m1", 100_000.0)
-    t = make_trade(action="SELL", price=0.50, size_usdc=25_000.0)
+# ── SELL: tier-resize semantics ─────────────────────────────────────────────
+#
+# The SELL handler resizes our position to match the target's POST-sell tier,
+# symmetric to the BUY top-up. The fixture below sets up the canonical
+# example: target had $400k (tier 3, our $3 position), then sells various
+# amounts and we verify the resize is correct.
+
+
+def _seed_position(tracker, cost: float, shares: float = 6.0, price: float = 0.5):
+    """Helper: give the algorithm a position with known cost basis."""
+    seed = make_trade(action="BUY", price=price)
+    tracker.record_buy(seed, spent_usdc=cost, shares=shares,
+                       fill_price=price, paper=True)
+
+
+def test_sell_same_tier_no_op(algo_with_tracker, tracker):
+    """Target sells $50k, still tier 3 ($350k) → our $3 stays unchanged."""
+    _seed_position(tracker, cost=3.0)
+    algo_with_tracker.holding_cache.set("m1", 400_000.0)
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=50_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert intents == []
+    # Cache decremented even on no-op so a subsequent sell re-tiers correctly.
+    assert algo_with_tracker.holding_cache.get("m1") == 350_000.0
+
+
+def test_sell_tier_3_to_tier_1_resize(algo_with_tracker, tracker):
+    """The headline scenario: target had $400k ($3 ours), sells $300k →
+    $100k left (tier 1) → we should hold $1 → close $2/$3 = 2/3 of position."""
+    _seed_position(tracker, cost=3.0)
+    algo_with_tracker.holding_cache.set("m1", 400_000.0)
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=300_000.0)
     intents = list(algo_with_tracker._intents_for(t))
     assert len(intents) == 1
-    assert isinstance(intents[0], CloseIntent)
-    assert abs(intents[0].fraction - 0.25) < 1e-9
-    # Cache decremented for subsequent partials.
-    assert abs(algo_with_tracker.holding_cache.get("m1") - 75_000.0) < 1e-6
+    intent = intents[0]
+    assert isinstance(intent, CloseIntent)
+    # Sell 2/3 of position to leave $1 cost at the new tier 1.
+    assert abs(intent.fraction - (2.0 / 3.0)) < 1e-9
+    assert algo_with_tracker.holding_cache.get("m1") == 100_000.0
 
 
-def test_sell_signal_full_close_on_cache_miss(algo_with_tracker):
+def test_sell_tier_3_to_below_min_full_close(algo_with_tracker, tracker):
+    """Target sells $350k → $50k left, below tier1_min ($80k) → full close."""
+    _seed_position(tracker, cost=3.0)
+    algo_with_tracker.holding_cache.set("m1", 400_000.0)
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=350_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert intents[0].fraction == 1.0
+
+
+def test_sell_tier_1_to_below_min_full_close(algo_with_tracker, tracker):
+    """Tier 1 ($150k) sells $80k → $70k, below min → full close, not 53%."""
+    _seed_position(tracker, cost=1.0)
+    algo_with_tracker.holding_cache.set("m1", 150_000.0)
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=80_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert intents[0].fraction == 1.0
+
+
+def test_sell_tier_2_to_tier_1(algo_with_tracker, tracker):
+    """$200k tier 2 ($2 ours), sells $80k → $120k tier 1 ($1) → close half."""
+    _seed_position(tracker, cost=2.0)
+    algo_with_tracker.holding_cache.set("m1", 200_000.0)
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=80_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    # Close $1 of $2 = 50%.
+    assert abs(intents[0].fraction - 0.5) < 1e-9
+
+
+def test_sell_cache_miss_falls_back_to_full_close(algo_with_tracker):
     """No cached pre-sell holding → safe default of fraction=1.0."""
     t = make_trade(action="SELL", price=0.50, size_usdc=25_000.0)
     intents = list(algo_with_tracker._intents_for(t))
     assert len(intents) == 1
-    assert isinstance(intents[0], CloseIntent)
     assert intents[0].fraction == 1.0
+    assert intents[0].reason == "full close (cache miss)"
+
+
+def test_sell_with_no_position_emits_no_intent(algo_with_tracker, tracker):
+    """If the target sells but we never held the market, no SELL is emitted
+    (the runner would no-op anyway, but skipping early saves a dispatch)."""
+    algo_with_tracker.holding_cache.set("m1", 400_000.0)
+    t = make_trade(action="SELL", price=0.50, size_usdc=300_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert intents == []
+
+
+def test_sell_oversize_caps_cache_at_zero(algo_with_tracker, tracker):
+    """If the API-reported sell exceeds the cached holding (stale cache),
+    the post-sell value floors at 0 → full close, not a negative cache."""
+    _seed_position(tracker, cost=2.0)
+    algo_with_tracker.holding_cache.set("m1", 50_000.0)   # stale, too small
+
+    t = make_trade(action="SELL", price=0.50, size_usdc=100_000.0)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert intents[0].fraction == 1.0
+    assert algo_with_tracker.holding_cache.get("m1") == 0.0
 
 
 def test_merge_signal_yields_full_close(algo_with_tracker):

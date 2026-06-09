@@ -32,9 +32,9 @@ import logging
 from typing import Iterator, Optional
 
 from bot import fetcher
-from bot.algorithm import Algorithm, CloseIntent, Intent, OpenIntent, SettleIntent
+from bot.algorithm import Algorithm, CloseIntent, Intent, Mode, OpenIntent, SettleIntent
 
-from .params import PARAMS
+from .params import PARAMS, CopyTradeParams
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,33 @@ SEEN_IDS_MAX = 5000
 
 
 class CopyTradeAlgorithm(Algorithm):
-    params = PARAMS
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        params: Optional[CopyTradeParams] = None,
+    ) -> None:
+        """Create a copy-trade worker.
 
-    def __init__(self) -> None:
+        Two ways to construct:
+          * `CopyTradeAlgorithm()` — uses the module-level PARAMS (env-driven
+            defaults). Convenient for single-algorithm setups.
+          * `CopyTradeAlgorithm(name="my_variant", params=CopyTradeParams(...))`
+            — full control over each instance, so profiles can spin up
+            multiple copy-trade workers (different wallets, different tiers,
+            different paper/live modes) in the same process.
+        """
+        if params is not None:
+            self.params = params
+        elif name is not None:
+            # Cheap rename: clone PARAMS with the new name.
+            from dataclasses import replace
+            self.params = replace(PARAMS, name=name)
+        else:
+            self.params = PARAMS
+
         self._address: str = ""
         self._tracker = None        # PositionTracker, set in setup()
-        self._paper: bool = True    # resolved in setup() from client + config
+        self._paper: bool = self.params.mode == Mode.PAPER
         self._seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
         self.holding_cache = fetcher.TargetHoldingCache()
 
@@ -57,11 +78,10 @@ class CopyTradeAlgorithm(Algorithm):
 
     def setup(self, tracker, notifier_mod, client) -> None:
         self._tracker = tracker
-        # The algorithm needs to know if we're in paper mode to read
-        # tracker state with the right `paper` flag. Resolve from the
-        # presence of a CLOB client (mirrors main.py's single resolution).
-        from bot import config as _cfg
-        self._paper = _cfg.PAPER_TRADE or client is None
+        # Mode comes from this algorithm's own params — no global toggle.
+        # Live mode also requires a CLOB client; if there's none we fall
+        # back to paper to avoid silently mis-routing real-money orders.
+        self._paper = self.params.mode == Mode.PAPER or client is None
 
         if self.params.target_address:
             self._address = self.params.target_address
@@ -183,25 +203,74 @@ class CopyTradeAlgorithm(Algorithm):
         )
 
     def _close_intent_for(self, t) -> Iterator[CloseIntent]:
+        """Resize our position to match the target's post-sell tier.
+
+        Symmetric counterpart to the BUY top-up: BUY tops the position up
+        to the new (higher) tier's total cost; SELL resizes it down to the
+        new (lower) tier's total cost. The size we sell is
+            current_cost  −  tier_for_holding(post_sell_holding)
+        clamped to [0, current_cost]. Three special cases:
+
+          * Cache miss   → full close (safe default; without a cached
+                           pre-sell value we can't infer the post-sell tier).
+          * Below tier 1 → target has effectively exited, so we fully close
+                           regardless of how big our position is.
+          * No change    → if the new target ≥ our current cost, no-op.
+        """
         cached_pre = self.holding_cache.get(t.market_id)
         if cached_pre is None or cached_pre <= 0:
             logger.info(
                 "[%s] No cached holding for %s — full close.",
                 self.params.name, t.market_id[:12],
             )
-            ratio = 1.0
-        else:
-            ratio = max(0.0, min(1.0, t.size_usdc / cached_pre))
-            self.holding_cache.decrement(t.market_id, t.size_usdc)
+            yield CloseIntent(
+                market_id=t.market_id, fraction=1.0, signal_price=t.price,
+                question=t.question, outcome=t.outcome, signal_id=t.id,
+                reason="full close (cache miss)",
+            )
+            return
 
+        # Target's holding after this sell. The cache is reset to the new
+        # value so subsequent sells in the same market re-tier correctly.
+        post_sell_holding = max(0.0, cached_pre - t.size_usdc)
+        self.holding_cache.set(t.market_id, post_sell_holding)
+
+        # What our position should cost at the new tier. Below tier 1 min
+        # means the target has effectively exited the bet → full close.
+        if post_sell_holding < self.params.tier1_min:
+            new_target_cost = 0.0
+        else:
+            new_target_cost = self._tier_for_holding(post_sell_holding)
+
+        position = self._tracker.get(t.market_id, self._paper)
+        if position is None or position.shares <= 0:
+            return    # nothing held; nothing to close
+        current_cost = position.total_cost_usdc
+
+        if new_target_cost >= current_cost:
+            logger.info(
+                "[%s] Target still at/above our tier ($%.2f → $%.2f), no resize",
+                self.params.name, current_cost, new_target_cost,
+            )
+            return
+
+        # Sell exactly enough to leave us at the new tier target.
+        fraction = (current_cost - new_target_cost) / current_cost
+        logger.info(
+            "[%s] Tier resize: sell %.0f%% (cost $%.2f → $%.2f, "
+            "target holding $%.0f → $%.0f) | %s",
+            self.params.name, fraction * 100, current_cost, new_target_cost,
+            cached_pre, post_sell_holding, t.question[:50],
+        )
         yield CloseIntent(
             market_id=t.market_id,
-            fraction=ratio,
+            fraction=fraction,
             signal_price=t.price,
             question=t.question,
             outcome=t.outcome,
             signal_id=t.id,
-            reason=f"mirror sell ({ratio * 100:.0f}%)",
+            reason=f"resize to ${new_target_cost:.2f} "
+                   f"(target now ${post_sell_holding:,.0f})",
         )
 
     # ── Helpers ──────────────────────────────────────────────────────────────

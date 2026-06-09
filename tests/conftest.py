@@ -56,6 +56,9 @@ def tracker(fresh_db):
 class _TestParams:
     """Minimal params object for RiskManager + runner-handler tests."""
     name: str = "copy_trade"
+    # mode is set in the default_params fixture so we can import Mode there
+    # without circular references on import order.
+    mode: object = None
     max_position_size_usdc: float = 100.0
     max_total_exposure_usdc: float = 500.0
     daily_loss_limit_usdc: float = 50.0
@@ -78,14 +81,10 @@ class _TestParams:
 
 
 @pytest.fixture
-def default_params(monkeypatch):
-    """A fully-initialised _TestParams instance. Also clears caches so
-    state doesn't leak between tests."""
-    params = _TestParams()
-    # No global config to reset post-trim, but keep PAPER_TRADE pinned.
-    from bot import config
-    monkeypatch.setattr(config, "PAPER_TRADE", True)
-    return params
+def default_params():
+    """A fully-initialised _TestParams instance defaulting to PAPER mode."""
+    from bot.algorithm import Mode
+    return _TestParams(mode=Mode.PAPER)
 
 
 # Backwards-compatible alias — old tests referenced `default_config`.

@@ -2,32 +2,38 @@
 """
 Entry point — boots one worker thread per enabled algorithm.
 
+Mode resolution
+---------------
+There is no global paper/live flag anymore. Each algorithm declares its
+mode in its params (`Mode.PAPER` / `Mode.LIVE`). The runner threads pick
+up that mode independently, so a single process can run prod-live and
+paper-experimental algorithms side by side.
+
+The shared CLOB client is built once, and only if at least one algorithm
+is `Mode.LIVE`. If every algorithm is paper, no creds are needed.
+
 Architecture
 ------------
-Each algorithm in `algorithms.ENABLED` runs as a fully independent worker:
+Each algorithm in `algorithms.ENABLED` (selected by the `PROFILE` env var)
+runs as a fully independent worker:
 
   * Own `PositionTracker(algo=...)` — DB rows partitioned by algo.
-  * Own `RiskManager(tracker, params)` — caps come from algo params,
-    not shared global config.
+  * Own `RiskManager(tracker, params)` — caps come from algo params.
   * Own polling cadence (`params.poll_interval_seconds`).
   * Own paper bankroll (per-algo row in `paper_account`).
   * Own daily-summary thread tagged with algo name.
 
-The only shared infrastructure is the CLOB client (one wallet, one
-connection), the SQLite connection (thread-local), the notifier, and the
-HTTP session used by `bot.fetcher`. Crashes in one algorithm do not affect
-the others — each worker catches its own exceptions per tick.
+Crashes in one algorithm do not affect the others.
 """
 
 import logging
 import signal
 import sys
 import threading
-from typing import Optional
 
 from algorithms import ENABLED
 from bot import config, notifier, runner
-from bot.algorithm import Algorithm
+from bot.algorithm import Algorithm, Mode
 from bot.positions import PositionTracker, RiskManager
 
 logging.basicConfig(
@@ -41,11 +47,19 @@ logger = logging.getLogger(__name__)
 def _run_worker(
     algo: Algorithm,
     client,
-    paper: bool,
     stop_event: threading.Event,
 ) -> None:
     """One algorithm's lifecycle: setup → poll loop → shutdown."""
     name = algo.params.name
+    # Mode comes from THIS algorithm's params. If params say LIVE but no
+    # CLOB client exists (no creds), force paper to avoid silent misroutes.
+    paper = algo.params.mode == Mode.PAPER or client is None
+    if algo.params.mode == Mode.LIVE and client is None:
+        logger.warning(
+            "[%s] declared LIVE but no CLOB client available — falling back to PAPER.",
+            name,
+        )
+
     try:
         tracker = PositionTracker(algo=name)
         if paper:
@@ -63,9 +77,10 @@ def _run_worker(
         )
 
         logger.info(
-            "[%s] Started — poll every %ds | risk: per-position $%.2f, "
+            "[%s] Started (%s) — poll every %ds | risk: per-position $%.2f, "
             "total $%.2f, daily loss $%.2f | slippage %.0f%% | order=%s",
-            name, algo.params.poll_interval_seconds,
+            name, "PAPER" if paper else "LIVE",
+            algo.params.poll_interval_seconds,
             algo.params.max_position_size_usdc,
             algo.params.max_total_exposure_usdc,
             algo.params.daily_loss_limit_usdc,
@@ -97,16 +112,20 @@ def _run_worker(
 
 def main() -> None:
     if not ENABLED:
-        logger.error("No algorithms enabled in algorithms/__init__.py")
+        logger.error("No algorithms enabled (profile=%s).", config.PROFILE)
         sys.exit(1)
 
-    client = runner.build_client()
-    paper = config.PAPER_TRADE or client is None
+    # Build the CLOB client only if at least one algorithm wants to trade
+    # live. Saves creds-not-set warnings in paper-only deployments.
+    any_live = any(a.params.mode == Mode.LIVE for a in ENABLED)
+    client = runner.build_client() if any_live else None
 
     logger.info(
-        "Execution mode: %s | algorithms enabled: %s",
-        "PAPER" if paper else "LIVE",
-        ", ".join(a.params.name for a in ENABLED),
+        "Profile: %s | algorithms: %s",
+        config.PROFILE,
+        ", ".join(
+            f"{a.params.name}({a.params.mode.value})" for a in ENABLED
+        ),
     )
 
     # Single Event coordinates shutdown for every worker + daily summary.
@@ -123,7 +142,7 @@ def main() -> None:
 
     workers = [
         threading.Thread(
-            target=_run_worker, args=(algo, client, paper, stop_event),
+            target=_run_worker, args=(algo, client, stop_event),
             daemon=True, name=f"worker-{algo.params.name}",
         )
         for algo in ENABLED
@@ -131,9 +150,7 @@ def main() -> None:
     for w in workers:
         w.start()
 
-    # Block the main thread until shutdown is signaled. Worker threads
-    # are daemons so they'd be killed at process exit even without join();
-    # the wait gives them a chance to finish their current cycle cleanly.
+    # Block the main thread until shutdown is signaled.
     try:
         while not stop_event.is_set():
             stop_event.wait(1.0)
