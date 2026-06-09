@@ -247,6 +247,27 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         return None
 
 
+def fetch_user_positions(address: str) -> list[dict]:
+    """All open positions for `address`, as raw rows from the Data API.
+
+    Used by the reconciliation step to compare our actual on-chain holdings
+    against the bot's local DB. Returns an empty list on failure — callers
+    treat that as "couldn't check this tick" rather than "no positions".
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/positions",
+            params={"user": address},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("data", [])
+    except Exception as e:
+        logger.warning("Could not fetch positions for %s: %s", address, e)
+        return []
+
+
 def fetch_target_position_value(
     address: str,
     market_id: str,

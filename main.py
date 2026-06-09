@@ -32,9 +32,15 @@ import sys
 import threading
 
 from algorithms import ENABLED
-from bot import config, notifier, runner
+from bot import config, notifier, reconciliation, runner
 from bot.algorithm import Algorithm, Mode
 from bot.positions import PositionTracker, RiskManager
+
+
+# Run a reconciliation every N poll cycles. With the default 20s poll
+# interval, 30 cycles ≈ 10 minutes — frequent enough to catch drift
+# quickly without hammering the Data API.
+RECONCILE_EVERY_N_POLLS = 30
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +95,13 @@ def _run_worker(
         )
         tracker.print_summary(paper=paper)
 
+        # Startup reconciliation — surfaces ghost positions or stale DB rows
+        # before we start acting. Live-only; paper has nothing to reconcile.
+        reconciliation.reconcile_positions(
+            tracker, config.POLY_FUNDER_ADDRESS, name, paper,
+        )
+
+        poll_count = 0
         while not stop_event.is_set():
             try:
                 for intent in algo.poll():
@@ -99,6 +112,18 @@ def _run_worker(
                 # One bad tick must not kill this algorithm. Log and keep
                 # going — siblings continue regardless.
                 logger.exception("[%s] poll/dispatch raised, continuing", name)
+
+            # Periodic reconciliation. Failures inside reconcile_positions
+            # only log; they never abort the worker.
+            poll_count += 1
+            if not paper and poll_count % RECONCILE_EVERY_N_POLLS == 0:
+                try:
+                    reconciliation.reconcile_positions(
+                        tracker, config.POLY_FUNDER_ADDRESS, name, paper,
+                    )
+                except Exception:
+                    logger.exception("[%s] reconciliation raised, continuing", name)
+
             stop_event.wait(algo.params.poll_interval_seconds)
     finally:
         try:

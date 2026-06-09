@@ -72,12 +72,33 @@ def build_client() -> Optional[ClobClient]:
         logger.warning("POLY_PRIVATE_KEY not set — running in paper-trade mode only.")
         return None
 
+    # signature_type=2 (Polymarket proxy-wallet flow) requires the funder
+    # address explicitly. Without it the client defaults to the EOA — orders
+    # sign correctly but USDC is debited from the wrong account, producing
+    # silent ghost positions on the user's actual proxy wallet.
+    if not config.POLY_FUNDER_ADDRESS:
+        logger.error(
+            "POLY_FUNDER_ADDRESS is required for live trading (your Polymarket "
+            "proxy wallet, visible in the profile URL). Falling back to paper "
+            "mode to prevent fund-routing errors."
+        )
+        return None
+
     creds = None
     if config.POLY_API_KEY:
         creds = ApiCreds(
             api_key=config.POLY_API_KEY,
             api_secret=config.POLY_API_SECRET,
             api_passphrase=config.POLY_API_PASSPHRASE,
+        )
+    else:
+        # Without API creds we can sign orders but can't authenticate against
+        # the CLOB's authenticated endpoints (e.g. get_last_trade_price). Warn
+        # so the operator knows slippage checks will fall back to the public
+        # /last-trade-price endpoint.
+        logger.warning(
+            "POLY_API_KEY/SECRET/PASSPHRASE not set — slippage check will use "
+            "the public CLOB endpoint instead of authenticated."
         )
 
     return ClobClient(
@@ -86,7 +107,7 @@ def build_client() -> Optional[ClobClient]:
         chain_id=POLYGON,
         creds=creds,
         signature_type=2,
-        funder=config.POLY_FUNDER_ADDRESS or None,
+        funder=config.POLY_FUNDER_ADDRESS,
     )
 
 
@@ -457,7 +478,12 @@ def _place_buy(
             )
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
-        logger.info("BUY order response: %s", resp)
+        # Log the raw response (repr) so a misparse can be diagnosed from the
+        # logs alone — the field names `_parse_fill` accepts (takingAmount /
+        # makingAmount and aliases) are inferred from py_clob_client docs, not
+        # validated against a captured live response. Keep this log permanent
+        # until at least one prod fill is verified end-to-end.
+        logger.info("RAW BUY order response: %r", resp)
         return _parse_fill(resp, side="BUY")
     except Exception as e:
         logger.error("BUY order failed: %s", e)
@@ -486,7 +512,7 @@ def _place_sell(
             )
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
-        logger.info("SELL order response: %s", resp)
+        logger.info("RAW SELL order response: %r", resp)
         return _parse_fill(resp, side="SELL")
     except Exception as e:
         logger.error("SELL order failed: %s", e)
