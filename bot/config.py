@@ -8,7 +8,7 @@ for every algorithm running in the process:
 
   * Polymarket credentials and API base URLs (one wallet, one CLOB session).
   * Database path.
-  * Telegram credentials and timezone.
+  * Discord webhook URL and timezone.
 
 Mode (paper vs live) is **per-algorithm** now and lives in each algorithm's
 `params.py`. There is no global PAPER_TRADE toggle.
@@ -22,7 +22,7 @@ Profiles
 A "profile" is the bundle of algorithms a given process runs. Pick one at
 startup via the `PROFILE` env var (default: `default`). This file looks for
 `.env.<profile>` first and falls back to `.env`, so each profile can have
-its own credentials, DB path, Telegram channel, etc.
+its own credentials, DB path, Discord channel, etc.
 
     PROFILE=prod          python main.py     # loads .env.prod
     PROFILE=experimental  python main.py     # loads .env.experimental
@@ -68,8 +68,7 @@ DB_PATH: str = os.getenv("DB_PATH", "positions.db")
 
 # ── Notifications ────────────────────────────────────────────────────────────
 
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID:   str = os.getenv("TELEGRAM_CHAT_ID", "")
+DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 # Timezone for daily-summary rollovers. Defaults to UTC so cadence is
 # deterministic regardless of where the VPS is hosted.

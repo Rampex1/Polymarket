@@ -1,6 +1,6 @@
 # Polymarket Copy-Trading Bot
 
-Automatically mirrors the trades of a profitable Polymarket user ([surfandturf](https://polymarket.com)) using a tiered bet-sizing strategy. Supports paper trading, live execution, a web dashboard, and Telegram notifications.
+Automatically mirrors the trades of a profitable Polymarket user ([surfandturf](https://polymarket.com)) using a tiered bet-sizing strategy. Supports paper trading, live execution, a web dashboard, and Discord notifications.
 
 ## How it works
 
@@ -10,7 +10,7 @@ Automatically mirrors the trades of a profitable Polymarket user ([surfandturf](
 4. **Risk check** — enforces per-position, total exposure, and daily loss limits before every order
 5. **Execute** — places a market (FOK) or limit (GTC) order via Polymarket's CLOB API
 6. **Track** — records positions and P&L in a local SQLite database
-7. **Notify** — sends Telegram messages on every trade event and a daily portfolio summary
+7. **Notify** — sends Discord messages on every trade event and a daily portfolio summary
 
 ## Project structure
 
@@ -22,7 +22,7 @@ Automatically mirrors the trades of a profitable Polymarket user ([surfandturf](
 │   ├── fetcher.py      # Trade monitor and poll loop
 │   ├── executor.py     # Order sizing, slippage guard, CLOB submission
 │   ├── positions.py    # Position tracker and risk manager
-│   └── notifier.py     # Telegram alerts and daily summary thread
+│   └── notifier.py     # Discord alerts and daily summary thread
 ├── dashboard/
 │   ├── app.py          # Flask web dashboard
 │   └── templates/
@@ -105,16 +105,14 @@ All values can be overridden in `.env`.
 | `DAILY_LOSS_LIMIT_USDC` | `4.0` | Stop new buys if today's realized loss exceeds this |
 | `MAX_SLIPPAGE` | `0.05` | Skip trade if price moved more than 5% since signal |
 | `ORDER_TYPE` | `market` | `market` (FOK) or `limit` (GTC at signal price) |
-| `TELEGRAM_BOT_TOKEN` | — | From [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | — | Your Telegram chat ID |
+| `DISCORD_WEBHOOK_URL` | — | Incoming-webhook URL for the channel that should receive alerts |
 | `POLL_INTERVAL_SECONDS` | `20` | How often to check for new trades |
 
-## Telegram notifications
+## Discord notifications
 
-1. Message [@BotFather](https://t.me/BotFather) on Telegram → `/newbot` → copy the token
-2. Start a chat with your new bot
-3. Visit `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `chat_id`
-4. Add both to `.env`
+1. In your Discord server, open the target channel → *Edit Channel → Integrations → Webhooks*
+2. Click *New Webhook*, pick a name/avatar, then *Copy Webhook URL*
+3. Paste it into `.env` as `DISCORD_WEBHOOK_URL=...`
 
 ## Deploying on a VPS
 

@@ -56,7 +56,7 @@ class OpenIntent:
     question: str = ""
     outcome: str = ""
     signal_id: str = ""          # tx hash / arbitrary unique trigger id
-    reason: str = ""             # human-readable, surfaced to logs/Telegram
+    reason: str = ""             # human-readable, surfaced to logs/Discord
 
 
 @dataclass

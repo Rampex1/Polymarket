@@ -6,7 +6,7 @@ The runner is the only place that:
   * runs the slippage gate,
   * simulates paper fills,
   * writes positions / trade_log / paper_balance,
-  * fires Telegram notifications.
+  * fires Discord notifications.
 
 Algorithms emit `OpenIntent` / `CloseIntent` / `SettleIntent` and never touch
 any of the above. That's the entire reuse story: write a new algorithm in

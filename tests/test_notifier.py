@@ -1,11 +1,10 @@
 """
 Notifier tests — formatting, escaping, timezone math.
 
-We don't actually call Telegram; we capture the payload by stubbing the
+We don't actually call Discord; we capture the payload by stubbing the
 HTTP POST. This is the bare minimum stubbing — the rest is real code.
 """
 
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -15,13 +14,16 @@ from tests.conftest import make_trade
 
 @pytest.fixture
 def capture_send(monkeypatch):
-    """Capture every Telegram POST body so we can assert on it."""
+    """Capture every Discord webhook POST body so we can assert on it."""
     from bot import notifier
 
     sent = []
 
-    monkeypatch.setattr(notifier.config, "TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(notifier.config, "TELEGRAM_CHAT_ID", "1234")
+    monkeypatch.setattr(
+        notifier.config,
+        "DISCORD_WEBHOOK_URL",
+        "https://discord.com/api/webhooks/123/abc",
+    )
 
     def fake_post(url, json=None, timeout=None):
         sent.append(json or {})
@@ -35,56 +37,55 @@ def capture_send(monkeypatch):
     return sent
 
 
-def test_html_escape_question_with_angle_brackets(capture_send):
-    """Market titles can contain < or & — they must be escaped or Telegram
-    rejects the message. Pre-fix, this silently dropped alerts."""
+def test_markdown_escape_question_with_special_chars(capture_send):
+    """Market titles can contain Discord markdown chars (`*`, `_`, etc.)
+    — they must be escaped so formatting can't be broken by a hostile
+    or unlucky title."""
     from bot import notifier
 
-    t = make_trade(question="A&B <foo> wins?")
+    t = make_trade(question="A*B _foo_ wins?")
     notifier.on_trade_detected(t)
-    body = capture_send[-1]["text"]
-    # Telegram-safe escapes present, raw chars absent.
-    assert "&amp;" in body
-    assert "&lt;foo&gt;" in body
-    assert "<foo>" not in body
+    body = capture_send[-1]["content"]
+    # Escaped versions present, raw markdown chars absent in title section.
+    assert r"\*" in body
+    assert r"\_" in body
 
 
-def test_html_escape_in_reason_and_question(capture_send):
+def test_markdown_escape_in_reason_and_question(capture_send):
     from bot import notifier
 
-    t = make_trade(question="<Yes&> wins?")
-    notifier.on_risk_blocked("max < limit", t)
-    body = capture_send[-1]["text"]
+    t = make_trade(question="*Yes_* wins?")
+    notifier.on_risk_blocked("max | limit", t)
+    body = capture_send[-1]["content"]
     # Both user-supplied strings (reason, question) get escaped.
-    assert "&lt;Yes&amp;&gt; wins?" in body
-    assert "max &lt; limit" in body
+    assert r"\*Yes\_\* wins?" in body
+    assert r"max \| limit" in body
 
 
-def test_html_escape_in_outcome(capture_send):
+def test_markdown_escape_in_outcome(capture_send):
     """outcome is rendered in buy/sell messages — must be escaped too."""
     from bot import notifier
 
-    t = make_trade(outcome="<Yes&>", question="q")
+    t = make_trade(outcome="*Yes_*", question="q")
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5)
-    body = capture_send[-1]["text"]
-    assert "&lt;Yes&amp;&gt;" in body
+    body = capture_send[-1]["content"]
+    assert r"\*Yes\_\*" in body
 
 
 def test_buy_executed_format(capture_send):
     from bot import notifier
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
-    body = capture_send[-1]["text"]
+    body = capture_send[-1]["content"]
     assert "📄 PAPER" in body
     assert "$1.00" in body
     assert "0.550" in body
 
 
-def test_skip_when_creds_missing(monkeypatch):
+def test_skip_when_webhook_missing(monkeypatch):
     from bot import notifier
 
-    monkeypatch.setattr(notifier.config, "TELEGRAM_BOT_TOKEN", "")
-    monkeypatch.setattr(notifier.config, "TELEGRAM_CHAT_ID", "")
+    monkeypatch.setattr(notifier.config, "DISCORD_WEBHOOK_URL", "")
 
     posted = []
 

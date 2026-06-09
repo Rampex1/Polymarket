@@ -1,20 +1,17 @@
 """
-Telegram notifications + midnight daily summary thread.
+Discord notifications + midnight daily summary thread.
 
-Two fixes vs. the previous version:
+Messages are sent to a Discord channel via an incoming webhook. User-
+controlled strings (market titles, outcomes, error reasons) are escaped
+for Discord markdown so a `*` or `_` in a title can't break formatting.
 
-  * All user-injected strings (market titles, outcomes) are HTML-escaped
-    before being sent with `parse_mode=HTML`. A title containing `<`, `>`,
-    or `&` was previously rejected by Telegram and the exception swallowed
-    — meaning critical buy/sell alerts could silently disappear.
-
-  * The midnight summary thread uses `config.TIMEZONE` instead of naive
-    `datetime.now()`. Without an explicit tz the rollover happened at
-    whatever the VPS local time happened to be.
+The midnight summary thread uses `config.TIMEZONE` instead of naive
+`datetime.now()`. Without an explicit tz the rollover would happen at
+whatever the VPS local time happened to be.
 """
 
-import html
 import logging
+import re
 import threading
 from datetime import datetime, timedelta
 
@@ -25,30 +22,30 @@ from .models import Trade
 
 logger = logging.getLogger(__name__)
 
-_TELEGRAM_URL = "https://api.telegram.org/bot{token}/sendMessage"
+# Discord hard-caps message content at 2000 chars.
+_DISCORD_MAX_LEN = 2000
 
 
 def send(text: str) -> None:
-    """Fire-and-forget Telegram message. Silently skips if creds not configured."""
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+    """Fire-and-forget Discord webhook message. Silently skips if not configured."""
+    if not config.DISCORD_WEBHOOK_URL:
         return
     try:
         http.post(
-            _TELEGRAM_URL.format(token=config.TELEGRAM_BOT_TOKEN),
-            json={
-                "chat_id": config.TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-            },
+            config.DISCORD_WEBHOOK_URL,
+            json={"content": text[:_DISCORD_MAX_LEN]},
             timeout=5,
         )
     except Exception as e:
-        logger.warning("Telegram send failed: %s", e)
+        logger.warning("Discord send failed: %s", e)
+
+
+_DISCORD_ESCAPE = re.compile(r"([\\*_~`|>])")
 
 
 def _esc(s: str) -> str:
-    """HTML-escape user-controlled strings before interpolating into a message."""
-    return html.escape(s or "", quote=False)
+    """Escape Discord markdown special chars in user-controlled strings."""
+    return _DISCORD_ESCAPE.sub(r"\\\1", s or "")
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +80,7 @@ def on_signal(intent, algo_name: str = "") -> None:
         line = "Unknown intent"
 
     send(
-        f"{_prefix(algo_name)}👀 <b>Signal detected</b>\n"
+        f"{_prefix(algo_name)}👀 **Signal detected**\n"
         f"{line}\n"
         f"{_esc((intent.question or '')[:80])}"
     )
@@ -94,7 +91,7 @@ def on_trade_detected(trade: Trade, algo_name: str = "") -> None:
     classifies a Trade before issuing an Intent. New algorithms should call
     `on_signal` instead."""
     send(
-        f"{_prefix(algo_name)}👀 <b>Signal detected</b>\n"
+        f"{_prefix(algo_name)}👀 **Signal detected**\n"
         f"{_esc(trade.action)} {_esc(trade.outcome)} — "
         f"${trade.size_usdc:,.0f} @ {trade.price:.3f}\n"
         f"{_esc(trade.question[:80])}"
@@ -115,7 +112,7 @@ def on_buy_executed(
 
 def on_buy_failed(trade: Trade, reason: str, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}❌ <b>BUY failed</b>\n"
+        f"{_prefix(algo_name)}❌ **BUY failed**\n"
         f"{_esc(reason)}\n"
         f"{_esc(trade.question[:80])}"
     )
@@ -130,14 +127,14 @@ def on_sell_executed(
     send(
         f"{_prefix(algo_name)}{tag}\n"
         f"{shares:.2f} shares of {_esc(trade.outcome)} @ {fill_price:.3f} "
-        f"| P&amp;L {sign}${pnl:.2f}\n"
+        f"| P&L {sign}${pnl:.2f}\n"
         f"{_esc(trade.question[:80])}"
     )
 
 
 def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}⚠️ <b>Risk block</b>\n"
+        f"{_prefix(algo_name)}⚠️ **Risk block**\n"
         f"{_esc(reason)}\n"
         f"{_esc(trade.question[:80])}"
     )
@@ -145,20 +142,20 @@ def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "") -> None:
 
 def on_slippage_skipped(trade: Trade, drift_pct: float, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}⏭ <b>Slippage skip</b> ({drift_pct:.1f}%)\n"
+        f"{_prefix(algo_name)}⏭ **Slippage skip** ({drift_pct:.1f}%)\n"
         f"{_esc(trade.question[:80])}"
     )
 
 
 def on_startup(mode: str, exposure: float, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}🚀 <b>Bot started</b> — {_esc(mode)} mode\n"
+        f"{_prefix(algo_name)}🚀 **Bot started** — {_esc(mode)} mode\n"
         f"Exposure: ${exposure:.2f}"
     )
 
 
 def on_shutdown(algo_name: str = "") -> None:
-    send(f"{_prefix(algo_name)}🛑 <b>Bot stopped</b>")
+    send(f"{_prefix(algo_name)}🛑 **Bot stopped**")
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +202,8 @@ def _send_daily_summary(tracker, paper: bool, algo_name: str = "") -> None:
     mode_tag = "📄 PAPER" if paper else "💵 LIVE"
 
     lines = [
-        f"{_prefix(algo_name)}📊 <b>Daily Summary — {today_str}</b> ({mode_tag})",
-        f"Realized P&amp;L: {sign}${pnl:.2f}",
+        f"{_prefix(algo_name)}📊 **Daily Summary — {today_str}** ({mode_tag})",
+        f"Realized P&L: {sign}${pnl:.2f}",
         f"Open positions: {len(positions)} | Exposure: ${exposure:.2f}",
     ]
     for p in positions:

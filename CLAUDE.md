@@ -34,7 +34,7 @@ bot/
   fetcher.py              # Poll Data API for target wallet's trades, parse into Trade objects
   executor.py             # Dispatch BUY/SELL/REDEEM, apply tier sizing, slippage check, place CLOB orders
   positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
-  notifier.py             # Telegram alerts + midnight daily summary thread
+  notifier.py             # Discord alerts + midnight daily summary thread
 scripts/
   reset_paper_trade_db.py
   trading_account_summary.py
@@ -46,7 +46,7 @@ scripts/
 2. `executor.execute()` dispatches by action (BUY / SELL / REDEEM)
 3. For BUY: fetch target's current holding → determine tier → risk checks → place order → record position
 4. For SELL/REDEEM: close position → calculate P&L → record
-5. `notifier` sends Telegram messages at each step
+5. `notifier` sends Discord messages at each step
 
 ## Key Configuration (`.env`)
 
@@ -68,7 +68,7 @@ scripts/
 
 Live trading also requires: `POLY_PRIVATE_KEY`, `POLY_FUNDER_ADDRESS`, `POLY_API_KEY`, `POLY_API_SECRET`, `POLY_API_PASSPHRASE`.
 
-Telegram (optional): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+Discord (optional): `DISCORD_WEBHOOK_URL`.
 
 ## External APIs
 

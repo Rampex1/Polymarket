@@ -153,7 +153,7 @@ def reconcile_positions(
             len(summary["ghost"]), len(summary["divergent"]),
         )
 
-    # Telegram alert on any discrepancy. Ghost/divergent are the high-risk
+    # Discord alert on any discrepancy. Ghost/divergent are the high-risk
     # ones (real money at stake); stale is informational but still worth
     # surfacing. A single alert per reconcile run avoids notification flood.
     issues = len(summary["ghost"]) + len(summary["stale"]) + len(summary["divergent"])
