@@ -129,7 +129,7 @@ def dispatch(
     signals so the same intent is not emitted twice. The runner does not
     re-check.
     """
-    notifier.on_signal(intent, algo.name)
+    notifier.on_signal(intent, algo.display_name)
 
     if isinstance(intent, OpenIntent):
         _handle_open(intent, algo, tracker, risk, client, paper)
@@ -163,11 +163,11 @@ def _handle_open(
     if not approved:
         logger.warning("[%s] Risk check failed — %s | %s",
                        algo.name, reason, trade.question[:50])
-        notifier.on_risk_blocked(reason, trade, algo.name)
+        notifier.on_risk_blocked(reason, trade, algo.display_name)
         return
 
     current_price = _get_current_price(trade, client)
-    if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.name):
+    if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.display_name):
         return
 
     if paper:
@@ -179,7 +179,7 @@ def _handle_open(
         reason_str = fill.reason if fill else "no fill"
         logger.warning("[%s] BUY did not fill (%s) — not recording.",
                        algo.name, reason_str)
-        notifier.on_buy_failed(trade, reason_str, algo.name)
+        notifier.on_buy_failed(trade, reason_str, algo.display_name)
         return
 
     tracker.record_buy(
@@ -190,7 +190,7 @@ def _handle_open(
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
-    notifier.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.name)
+    notifier.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name)
     tracker.print_summary(paper=paper)
 
 
@@ -233,7 +233,7 @@ def _handle_close(
     current_price = _get_current_price(trade, client)
     # signal_price=0 disables the slippage gate (forced exits like MERGE).
     if intent.signal_price > 0:
-        if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.name):
+        if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.display_name):
             return
     else:
         if current_price is None:
@@ -260,7 +260,7 @@ def _handle_close(
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
-    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.name)
+    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.display_name)
     tracker.print_summary(paper=paper)
 
 

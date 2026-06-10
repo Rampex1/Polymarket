@@ -150,3 +150,13 @@ class Algorithm(ABC):
     def name(self) -> str:
         """Convenience — most code reads `algo.params.name`."""
         return self.params.name
+
+    @property
+    def display_name(self) -> str:
+        """Human-friendly label used in user-facing notifications.
+
+        Defaults to `name`. Subclasses can override to surface additional
+        context (e.g. the wallet a copy-trader is mirroring) so messages
+        in a shared Discord channel are self-identifying.
+        """
+        return self.name

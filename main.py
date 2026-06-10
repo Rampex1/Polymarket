@@ -73,13 +73,14 @@ def _run_worker(
         risk = RiskManager(tracker, algo.params)
         algo.setup(tracker, notifier, client)
 
+        display_name = algo.display_name
         notifier.start_daily_summary(
-            tracker, paper=paper, stop_event=stop_event, algo_name=name,
+            tracker, paper=paper, stop_event=stop_event, algo_name=display_name,
         )
         notifier.on_startup(
             "PAPER" if paper else "LIVE",
             tracker.total_exposure_usdc(paper=paper),
-            algo_name=name,
+            algo_name=display_name,
         )
 
         logger.info(
@@ -98,7 +99,7 @@ def _run_worker(
         # Startup reconciliation — surfaces ghost positions or stale DB rows
         # before we start acting. Live-only; paper has nothing to reconcile.
         reconciliation.reconcile_positions(
-            tracker, config.POLY_FUNDER_ADDRESS, name, paper,
+            tracker, config.POLY_FUNDER_ADDRESS, algo.display_name, paper,
         )
 
         poll_count = 0
@@ -119,7 +120,7 @@ def _run_worker(
             if not paper and poll_count % RECONCILE_EVERY_N_POLLS == 0:
                 try:
                     reconciliation.reconcile_positions(
-                        tracker, config.POLY_FUNDER_ADDRESS, name, paper,
+                        tracker, config.POLY_FUNDER_ADDRESS, algo.display_name, paper,
                     )
                 except Exception:
                     logger.exception("[%s] reconciliation raised, continuing", name)
@@ -131,7 +132,7 @@ def _run_worker(
             tracker.print_summary(paper=paper)
         except Exception:
             pass
-        notifier.on_shutdown(algo_name=name)
+        notifier.on_shutdown(algo_name=algo.display_name)
         logger.info("[%s] Stopped.", name)
 
 

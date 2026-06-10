@@ -26,6 +26,28 @@ def _algo(params=None):
     return algo
 
 
+def test_display_name_includes_username_when_set():
+    """Notifications should self-identify which wallet they're mirroring."""
+    a = _algo(CopyTradeParams(name="copy_trade", target_username="surfandturf"))
+    assert a.display_name == "copy_trade → surfandturf"
+
+
+def test_display_name_falls_back_to_short_address():
+    """When only a wallet is configured, surface a shortened form."""
+    a = _algo(CopyTradeParams(
+        name="copy_trade",
+        target_username="",
+        target_address="0x1234567890abcdef1234567890abcdef12345678",
+    ))
+    assert a.display_name == "copy_trade → 0x1234…5678"
+
+
+def test_display_name_is_bare_name_when_no_target():
+    """No target configured (e.g. pre-setup) → no trailing arrow."""
+    a = _algo(CopyTradeParams(name="copy_trade", target_username="", target_address=""))
+    assert a.display_name == "copy_trade"
+
+
 def test_tier_boundaries():
     a = _algo(CopyTradeParams())
     assert a._tier_for_holding(80_000) == 1.0

@@ -74,6 +74,19 @@ class CopyTradeAlgorithm(Algorithm):
         self._seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
         self.holding_cache = fetcher.TargetHoldingCache()
 
+    @property
+    def display_name(self) -> str:
+        """Algorithm name plus the target being copied, so Discord
+        messages from multiple copy-trade workers are self-identifying.
+        Prefers the configured username; falls back to a shortened
+        address if only the wallet was supplied.
+        """
+        target = self.params.target_username
+        if not target:
+            addr = self.params.target_address
+            target = f"{addr[:6]}…{addr[-4:]}" if len(addr) > 10 else addr
+        return f"{self.name} → {target}" if target else self.name
+
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def setup(self, tracker, notifier_mod, client) -> None:

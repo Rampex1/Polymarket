@@ -28,6 +28,10 @@ class _StubAlgo:
     def name(self):
         return self.params.name
 
+    @property
+    def display_name(self):
+        return self.params.name
+
 
 @pytest.fixture
 def algo(default_params):

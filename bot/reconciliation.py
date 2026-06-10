@@ -159,7 +159,7 @@ def reconcile_positions(
     issues = len(summary["ghost"]) + len(summary["stale"]) + len(summary["divergent"])
     if issues > 0:
         notifier.send(
-            f"⚠️ <b>[{notifier._esc(algo_name)}] Reconcile mismatch</b>\n"
+            f"⚠️ **[{notifier._esc(algo_name)}] Reconcile mismatch**\n"
             f"Ghost: {len(summary['ghost'])} | "
             f"Stale: {len(summary['stale'])} | "
             f"Divergent: {len(summary['divergent'])}\n"

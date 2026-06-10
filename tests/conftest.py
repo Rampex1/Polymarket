@@ -24,6 +24,17 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
+@pytest.fixture(autouse=True)
+def _no_discord(monkeypatch):
+    """Default: clear the Discord webhook so the test suite never posts to a
+    real channel even if `DISCORD_WEBHOOK_URL` leaks in from the shell or
+    `.env`. Tests that exercise the notifier transport itself re-set it
+    explicitly (see tests/test_notifier.py)."""
+    from bot import config
+
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_URL", "", raising=False)
+
+
 @pytest.fixture
 def tmp_db_path(tmp_path):
     """Path to a fresh empty SQLite file."""
