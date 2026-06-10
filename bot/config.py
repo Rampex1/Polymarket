@@ -60,6 +60,15 @@ POLY_API_SECRET:      str = os.getenv("POLY_API_SECRET", "")
 POLY_API_PASSPHRASE:  str = os.getenv("POLY_API_PASSPHRASE", "")
 POLY_FUNDER_ADDRESS:  str = os.getenv("POLY_FUNDER_ADDRESS", "")
 
+# CLOB signature_type. Which one depends on how you signed up to Polymarket:
+#   1 = Email / social (Magic Link) — Polymarket-managed proxy, EOA exported
+#       from Settings → Export private key.
+#   2 = Browser wallet (MetaMask / WalletConnect / Coinbase) — Polymarket Safe
+#       owned by your wallet's EOA.
+# Default 2 is the common browser-wallet case. Email-signup users must
+# set POLY_SIGNATURE_TYPE=1.
+POLY_SIGNATURE_TYPE: int = int(os.getenv("POLY_SIGNATURE_TYPE", "2"))
+
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 

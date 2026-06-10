@@ -72,10 +72,11 @@ def build_client() -> Optional[ClobClient]:
         logger.warning("POLY_PRIVATE_KEY not set — running in paper-trade mode only.")
         return None
 
-    # signature_type=2 (Polymarket proxy-wallet flow) requires the funder
-    # address explicitly. Without it the client defaults to the EOA — orders
-    # sign correctly but USDC is debited from the wrong account, producing
-    # silent ghost positions on the user's actual proxy wallet.
+    # Both signature_type 1 (email/Magic) and 2 (browser wallet) route
+    # orders through a Polymarket proxy that holds USDC. Without an explicit
+    # funder the client defaults to the EOA — orders sign correctly but USDC
+    # is debited from the wrong account, producing silent ghost positions on
+    # the user's actual proxy wallet.
     if not config.POLY_FUNDER_ADDRESS:
         logger.error(
             "POLY_FUNDER_ADDRESS is required for live trading (your Polymarket "
@@ -101,12 +102,16 @@ def build_client() -> Optional[ClobClient]:
             "the public CLOB endpoint instead of authenticated."
         )
 
+    logger.info(
+        "Building CLOB client (signature_type=%d, funder=%s).",
+        config.POLY_SIGNATURE_TYPE, config.POLY_FUNDER_ADDRESS,
+    )
     return ClobClient(
         host=config.CLOB_API,
         key=config.POLY_PRIVATE_KEY,
         chain_id=POLYGON,
         creds=creds,
-        signature_type=2,
+        signature_type=config.POLY_SIGNATURE_TYPE,
         funder=config.POLY_FUNDER_ADDRESS,
     )
 
