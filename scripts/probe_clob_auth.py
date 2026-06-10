@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot import config  # noqa: E402
 from py_clob_client.client import ClobClient  # noqa: E402
-from py_clob_client.clob_types import ApiCreds  # noqa: E402
+from py_clob_client.clob_types import ApiCreds, AssetType, BalanceAllowanceParams  # noqa: E402
 
 
 def make(sig: int) -> ClobClient:
@@ -36,7 +36,7 @@ for sig in (1, 2):
     print(f"\n=== signature_type={sig} ===")
     try:
         ba = make(sig).get_balance_allowance(
-            {"asset_type": "COLLATERAL", "signature_type": sig}
+            BalanceAllowanceParams(asset_type=AssetType.COLLATERAL, signature_type=sig)
         )
         print("balance_allowance:", ba)
     except Exception as e:
