@@ -7,9 +7,14 @@ Usage on the VM:
     python scripts/probe_clob_auth.py
 """
 
-from bot import config
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from bot import config  # noqa: E402
+from py_clob_client.client import ClobClient  # noqa: E402
+from py_clob_client.clob_types import ApiCreds  # noqa: E402
 
 
 def make(sig: int) -> ClobClient:
