@@ -70,10 +70,10 @@ DB_PATH: str = os.getenv("DB_PATH", "positions.db")
 
 DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
 
-# Timezone for daily-summary rollovers. Defaults to UTC so cadence is
-# deterministic regardless of where the VPS is hosted.
-_TZ_NAME = os.getenv("TIMEZONE", "UTC")
+# Timezone for daily-summary rollovers. Defaults to US Pacific so the
+# rollover lands at midnight PT regardless of where the VPS is hosted.
+_TZ_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
 try:
     TIMEZONE = ZoneInfo(_TZ_NAME)
 except ZoneInfoNotFoundError:
-    TIMEZONE = ZoneInfo("UTC")
+    TIMEZONE = ZoneInfo("America/Los_Angeles")
