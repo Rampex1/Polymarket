@@ -3,13 +3,13 @@
 Base: `4b79dc2` (Surface target wallet in Discord notifications)
 7 commits, 201 tests passing.
 
-⚠️ **Merge warning:** `origin/main` is 12 commits ahead of this branch's base
-with live-trading work done elsewhere (port to `py_clob_client_v2` for
-smart-wallet accounts, FAK instead of FOK market orders, configurable
-`POLY_SIGNATURE_TYPE`, funder diagnostics). `bot/runner.py` was modified on
-**both** sides — expect conflicts there when merging/rebasing. Resolve by
-keeping the v2 client/order code from main and this branch's signal-logging
-hooks + the `market_is_resolved` relocation.
+✅ **Rebased onto `origin/main`** (2026-06-10): the branch now sits on top of
+main's live-trading work (port to `py_clob_client_v2` for smart-wallet
+accounts, FAK instead of FOK market orders, configurable
+`POLY_SIGNATURE_TYPE`, funder diagnostics, smoke-test 1:1 mirror). The
+rebase auto-merged with zero conflicts; full suite green (204 tests). The
+import-isolation guard was extended to block `py_clob_client_v2` as well.
+The branch is PR-ready against main.
 
 ---
 
@@ -91,8 +91,8 @@ Deploy = two processes on the VPS:
 
 ## What's next
 
-1. **Rebase/merge onto current `origin/main`** (the v2-client work) before
-   any PR — see merge warning above. Re-run the suite after resolving.
+1. ~~Rebase onto current `origin/main`~~ — done 2026-06-10, zero conflicts,
+   204 tests green.
 2. **Deploy** both processes on the VPS. Every undeployed week is labeled
    training data and price history permanently lost.
 3. **Batch outcome labeler** — skipped signals never settle (no position),
