@@ -472,7 +472,7 @@ def _place_buy(
                 price=trade.price,
             )
             signed = client.create_market_order(args)
-            resp = client.post_order(signed, OrderType.FOK)
+            resp = client.post_order(signed, OrderType.FAK)
         else:
             shares = scaled_usdc / trade.price
             args = OrderArgs(
@@ -507,7 +507,7 @@ def _place_sell(
                 price=trade.price,
             )
             signed = client.create_market_order(args)
-            resp = client.post_order(signed, OrderType.FOK)
+            resp = client.post_order(signed, OrderType.FAK)
         else:
             args = OrderArgs(
                 token_id=trade.asset_id,
