@@ -7,3 +7,9 @@ positions.db
 *.key
 .DS_Store
 .coverage
+
+# Claude Code local (per-user) settings
+.claude/settings.local.json
+
+# Discovery price-history archive (regenerable, can grow large)
+discovery_archive.db*
