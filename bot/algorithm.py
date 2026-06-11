@@ -57,6 +57,11 @@ class OpenIntent:
     outcome: str = ""
     signal_id: str = ""          # tx hash / arbitrary unique trigger id
     reason: str = ""             # human-readable, surfaced to logs/Discord
+    # Raw observables captured at signal time, persisted to the `signals`
+    # table as training data for confidence models. Optional — algorithms
+    # that don't populate it lose nothing. Log raw inputs, not derived
+    # scores (derivations can be recomputed offline; raw can't).
+    features: dict = field(default_factory=dict)
 
 
 @dataclass

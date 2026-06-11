@@ -31,7 +31,7 @@ from py_clob_client_v2.client import ClobClient
 from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client_v2.constants import POLYGON
 
-from . import config, fetcher, notifier
+from . import config, fetcher, notifier, signals
 from .algorithm import CloseIntent, Intent, OpenIntent, SettleIntent
 from .models import Trade
 from .positions import PositionTracker, RiskManager
@@ -169,10 +169,14 @@ def _handle_open(
         logger.warning("[%s] Risk check failed — %s | %s",
                        algo.name, reason, trade.question[:50])
         notifier.on_risk_blocked(reason, trade, algo.display_name)
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason=f"risk: {reason}")
         return
 
     current_price = _get_current_price(trade, client)
     if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.display_name):
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason="slippage")
         return
 
     if paper:
@@ -185,8 +189,11 @@ def _handle_open(
         logger.warning("[%s] BUY did not fill (%s) — not recording.",
                        algo.name, reason_str)
         notifier.on_buy_failed(trade, reason_str, algo.display_name)
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason=f"no fill: {reason_str}")
         return
 
+    signals.record(algo.name, intent, paper, executed=True)
     tracker.record_buy(
         trade,
         spent_usdc=fill.amount_usdc,
@@ -315,6 +322,9 @@ def _handle_settle(
         paper=paper,
         fee_usdc=0.0,
     )
+    # Backfill the outcome label on this market's signal rows — settlement
+    # is the moment a logged signal becomes a labeled training example.
+    signals.label_outcomes(algo.name, intent.market_id, close_price, pnl, paper)
     tracker.print_summary(paper=paper)
 
     sign = "+" if pnl >= 0 else ""
@@ -594,13 +604,15 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
 
     Strategy (in order):
       1. Ask Gamma for the market and *only* trust outcomePrices if the
-         market is explicitly closed/resolved.
+         outcome is actually determined (strict check — a merely-closed
+         market can still be in the UMA dispute window, where outcomePrices
+         is the last order book, not a settlement).
       2. Fall back to CLOB last-trade-price binarized to {0, 1}.
       3. If neither yields a confident answer, return None and leave the
          position open.
     """
     market = fetcher.fetch_market_resolution(market_id)
-    if market and _market_is_resolved(market):
+    if market and fetcher.market_outcome_is_final(market):
         outcome_price = _gamma_outcome_price(market, asset_id)
         if outcome_price is not None:
             return outcome_price
@@ -613,17 +625,6 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     if price < 0.05:
         return 0.0
     return None
-
-
-def _market_is_resolved(market: dict) -> bool:
-    """Check Gamma's closed/resolved flags. Either being truthy implies finality."""
-    for key in ("closed", "resolved", "archived"):
-        val = market.get(key)
-        if isinstance(val, bool) and val:
-            return True
-        if isinstance(val, str) and val.lower() in ("true", "1", "yes"):
-            return True
-    return False
 
 
 def _gamma_outcome_price(market: dict, asset_id: str) -> Optional[float]:

@@ -110,6 +110,31 @@ def risk(tracker, default_params):
     return RiskManager(tracker, default_params)
 
 
+def make_global_trade(**overrides):
+    """A parsed firehose row (GlobalTrade) that passes every InsiderFlow
+    filter by default: big cash, long odds, non-sports title."""
+    import time
+
+    from bot.models import GlobalTrade
+
+    defaults = dict(
+        tx_hash="0xtx1",
+        wallet="0xwhale",
+        side="BUY",
+        price=0.20,
+        shares=50_000.0,
+        cash_usdc=10_000.0,
+        market_id="m1",
+        asset_id="a1",
+        timestamp=int(time.time()),
+        title="Will the ceasefire be announced this month?",
+        outcome="Yes",
+        trader_name="Quiet-Fox",
+    )
+    defaults.update(overrides)
+    return GlobalTrade(**defaults)
+
+
 def make_trade(
     *,
     action: str = "BUY",

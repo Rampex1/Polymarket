@@ -1,0 +1,448 @@
+POLYMARKET BOT — RESEARCH NOTES
+Automated Discovery Pipeline + WebSocket vs Polling
+Based on codebase analysis (June 2026)
+================================================================
+
+
+PART 1: AUTOMATED INSIDER DISCOVERY
+=====================================
+
+## What the other Claude got right
+
+Pure algorithms for ranking, thin agent layer for investigation. That
+framing is correct. An LLM is strictly worse than a scoring function
+for ranking thousands of wallets — slower, non-deterministic, expensive
+per call. Use statistics to build the shortlist, agents only to
+investigate the shortlist.
+
+
+## What your codebase already has (cross these off the build list)
+
+- Proxy address resolution: fetcher.lookup_wallet() resolves via Gamma
+  /profiles and grabs proxyWallet (fetcher.py:136). You're already
+  tracking the right address, not the EOA.
+
+- "Pull for correctness" safety net: reconciliation.reconcile_positions()
+  runs every 30 polls against on-chain positions (main.py:119). You
+  already do this.
+
+- Mark-to-resolution primitives: fetch_market_resolution() (Gamma,
+  trusts outcomePrices only when closed/resolved) and
+  fetch_resolution_price() (CLOB last-trade binarized to 0/1) are in
+  fetcher.py:308-353. The plumbing for realized-to-resolution PnL is
+  half-there.
+
+- Parallel paper-followers are FREE. Profiles already let you spin up
+  N CopyTradeAlgorithm instances with different target_address and
+  independent Mode.PAPER bankrolls/risk pools. Forward-validation by
+  paper-following — the step everyone skips — is a config change, not
+  new infra. Discovery's output can auto-instantiate a paper worker
+  per candidate.
+
+
+## Where discovery fits in the architecture
+
+Discovery is NOT an Algorithm. An Algorithm yields trade Intents every
+poll() tick (bot/algorithm.py:124-147). Discovery is an offline/batch
+pipeline whose output is a single value: a wallet address that becomes
+target_address for a new CopyTradeAlgorithm.
+
+That's the clean seam:
+  pipeline ranks wallets
+    → emits a candidate address
+    → a profile entry boots it as a paper follower (free, already works)
+    → after K weeks you read paper_account + trade_log and promote/kill
+
+Build a new top-level discovery/ package (peer to bot/ and algorithms/).
+It reuses fetcher.fetch_user_positions() and the resolution helpers.
+It does NOT touch runner or Intent.
+
+
+## The codebase-specific catch the other Claude couldn't see
+
+Your strategy is NOT a generic copy-trader — it's a whale-conviction
+filter. Tier sizing keys off the target's ABSOLUTE HOLDING, not their
+trade size. tier1_min defaults to $80,000 (params.py:73).
+
+You only copy a trade if the target holds $80k+ in that market:
+  $80k-$150k holding → $1 bet
+  $150k-$300k holding → $2 bet
+  $300k+ holding → $3 bet
+
+Two consequences for discovery:
+
+1. YOUR SCORING METRIC MUST MATCH YOUR SIZING ASSUMPTION.
+   A sharp trader who bets $2k positions will NEVER trigger a copy
+   under these thresholds. Either discovery must filter for wallets
+   that take ≥$80k positions, or each discovered candidate needs its
+   own calibrated tier thresholds. (Fine — they're per-instance params,
+   but don't reuse the $80k default blindly for a $2k trader.)
+
+2. THE INSIDER FINGERPRINT (timing/lead-lag) REQUIRES DATA YOU DON'T
+   FETCH YET. /activity gives entry timestamp + entry price, but the
+   subsequent price path (to prove they entered before the move) needs
+   CLOB price-history, which nothing in the repo calls today. Net-new
+   data dependency for the highest-signal feature.
+
+
+## The follow-ability backtest — your own code shows the problem
+
+The other Claude said rank on "what I'd net copying them with realistic
+latency/slippage," not their raw PnL. Your code makes this urgent:
+
+- max_slippage = 0.05 hard-skips trades that moved >5% by detection
+  time (runner.py:170, 388-412). On a fast insider signal — exactly
+  the kind you want — the price has often already moved past 5% in
+  your 20s window. So the bot silently declines the BEST trades and
+  fills the slow, already-priced-in ones. Adverse selection, encoded
+  in your own gate.
+
+- The Data API is provably laggy: fetch_target_position_value() has an
+  expected_min retry loop specifically to beat eventual consistency
+  (fetcher.py:271-305). Real detection lag = poll interval (~10s mean)
+  + API propagation, before you even sign.
+
+Any backtest you build must replay: "at detection time T+lag, what was
+the price, and would the 5% gate have PASSED?" Rank candidates on fills
+that survive that gate. This will kill impressive-looking wallets —
+which is the point.
+
+
+## Suggested feature ranking for discovery
+
+1. Sample size gate (hard filter): resolved trades count. 8/10 is
+   noise; ~60/100 is signal worth looking at.
+
+2. Win rate conditioned on entry odds: winning at long odds is signal;
+   winning coinflips isn't.
+
+3. Realized PnL marked to resolution — count expired-worthless as
+   losses. fetch_market_resolution() already handles this.
+
+4. Category concentration (entropy over market tags): consistent profit
+   in one category = genuine edge; wins across disparate random markets
+   = luck.
+
+5. Timing/lead-lag: did they enter before the price moved, on the
+   correct side, consistently? This is the actual insider fingerprint.
+   Requires CLOB price-history (net-new data call).
+
+6. Recency weighting: weight recent months over all-time.
+
+7. Survivorship correction: run a binomial or bootstrap per wallet,
+   then FDR-correct (Benjamini-Hochberg) across the population. You're
+   running thousands of simultaneous hypothesis tests — some wallets
+   will look brilliant by pure chance.
+
+
+## Agent layer (thin, specific jobs only)
+
+Once the pipeline hands you a shortlist, LLM/agent is the right tool
+for qualitative work that's hard to code:
+
+- News correlation: "did this wallet's well-timed bet precede public
+  reporting?" Web-search per candidate. This is what confirms
+  "insider" vs "just fast."
+
+- Resolution-criteria parsing: resolution language is ambiguous; an
+  LLM flags markets where "win" is ill-defined and PnL calc would
+  be corrupted.
+
+- Backfilling missing market categorization.
+
+NOT for ranking. Not for scoring. Those are pure statistics jobs.
+
+
+================================================================
+
+PART 2: WEBSOCKET vs POLLING
+==============================
+
+## What Polymarket exposes
+
+1. CLOB WebSocket at wss://ws-subscriptions-clob.polymarket.com
+   - /ws/market: PUBLIC, no auth. Pushes orderbook updates, price
+     changes, last trade prices, market_resolved events.
+     Set custom_feature_enabled: true to get trade/resolution events.
+   - /ws/user: AUTHENTICATED. Your own orders/fills only. NOT a way
+     to watch other wallets.
+
+2. RTDS at wss://ws-live-data.polymarket.com
+   - activity topic, trades type, via @polymarket/real-time-data-client
+   - Platform-wide trade feed. Closest to "notify me when a trade
+     happens." Filter to your watchlist client-side.
+
+3. On-chain logs (Polygon)
+   - OrderFilled, PositionsMerged, ConditionResolution on CTF Exchange
+   - eth_subscribe via a node/provider
+   - Ground truth, provider-independent. Cost: parse raw logs,
+     resolve proxy addresses yourself.
+
+CATCH: subscriptions are by MARKET (asset/condition IDs), not by wallet.
+There is no "notify me when wallet X trades" primitive. You subscribe
+to markets your watchlist wallets play in, then filter trade events by
+maker/taker address client-side.
+
+
+## Why WebSocket is lower priority than it sounds for your bot
+
+Your bets are $1-3, copying $80k whale conviction positions. These are
+event-market conviction plays, not HFT.
+
+The structural lag is: detection time (10s mean poll) + API propagation.
+WebSocket shrinks that to ~1-2s. But the 5% slippage gate and discovery
+quality dominate. Shaving 20s→2s at the margin doesn't change whether
+the edge exists.
+
+More importantly: the migration is architecturally non-trivial.
+
+Currently: each worker independently polls /activity?user=<its target>
+(algorithm.py:114). That's a clean pull model.
+
+WebSocket inverts this: you'd need ONE shared ws consumer fanning out
+to workers by address. That means:
+  - Algorithm.poll()'s pull contract changes to push, OR
+  - poll() drains a per-algo queue that a shared ws thread fills
+  - Either way: non-trivial refactor of the core worker loop
+
+Don't delete the poller regardless. You already have the reconciliation
+safety net (reconcile_positions every 30 polls). Keep it. WebSocket
+for latency, poll for correctness — you already have the correctness
+half.
+
+
+## Practical gotchas if you do implement WebSocket
+
+- Send PING every ~10s or the server closes the connection
+- Implement auto-reconnect with exponential backoff (connection drops
+  silently lose messages — you need the poll fallback)
+- No native HTTP webhook API. It's WebSockets only. Third-party
+  trackers offer Discord/Slack/Telegram alerts but those are products,
+  not infra you'd build on.
+
+
+================================================================
+
+RECOMMENDED BUILD SEQUENCE
+============================
+
+1. FOLLOW-ABILITY BACKTESTER (offline, no new infra)
+   Reuses fetcher + resolution helpers + one new CLOB price-history
+   call. Without this you can't tell skill from survivorship, and it
+   tells you whether your CURRENT one whale even has surviving edge
+   after your 5% slippage gate is applied realistically.
+
+2. DISCOVERY SCORING PIPELINE
+   discovery/ package (peer to bot/ and algorithms/).
+   Emits candidate addresses → auto-boots them as paper
+   CopyTradeAlgorithm instances (architecture already supports this
+   for free).
+
+3. THIN AGENT LAYER
+   On the shortlist only: news correlation + resolution-criteria
+   sanity. Right tool, right job.
+
+4. WEBSOCKET MIGRATION
+   Last, only if latency is shown to be the binding constraint after
+   steps 1-2 show which wallets survive the gate.
+
+
+================================================================
+================================================================
+
+PART 3: VERIFIED DESIGN — TOP-ACCOUNT DISCOVERY + LUCKY-VS-SKILLED
+  (Endpoints below were probed live and confirmed working,
+   unauthenticated, June 2026. Supersedes the sketch in Part 1.)
+================================================================
+
+
+## The data surface that actually exists
+
+There is NO public global leaderboard. Every leaderboard URL 404s
+(data-api/leaderboard, lb-api, gamma/leaderboard, polymarket.com/api).
+So "find top accounts" is NOT one call — you reconstruct it from
+per-market holder lists.
+
+Confirmed working (HTTP 200, no auth):
+
+  Gamma  /markets?closed=true&order=volume&ascending=false
+         -> resolved markets + outcomePrices. Universe of settled markets.
+
+  Data   /holders?market=<conditionId>&limit=N
+         -> ranked holders per token. Each row:
+            { proxyWallet, amount, outcomeIndex, name, pseudonym }
+         -> THE ENUMERATION ENTRY POINT.
+
+  Data   /activity?user=<addr>            (already used by fetcher.py)
+         -> full trade history: entry ts, price, size, side.
+
+  Data   /positions?user=<addr>           (already used)
+         -> current open positions. Follow-ability check.
+
+  Data   /value?user=<addr>
+         -> wallet net worth. Size/conviction gate.
+
+  CLOB   /prices-history?market=<tokenId>&interval=max&fidelity=60
+         -> { history: [ {t, p}, ... ] } price timeseries.
+         -> THE BACKTEST BACKBONE (and the lead-lag fingerprint source).
+
+
+## Stage 1 — Enumerate candidate wallets
+
+Can't scan all wallets; sample the interesting ones:
+  1. Pull recently-resolved, high-volume markets from Gamma
+     (closed=true, sort by volume).
+  2. For each -> /holders -> collect every proxyWallet.
+  3. Union across markets -> candidate universe (dedup + cache).
+  Bias enumeration toward target categories via Gamma `tag`
+  (politics / sports / crypto) if you suspect domain-specific edge.
+
+This biases toward wallets active in markets that actually resolved
+with volume — exactly where edge is statistically detectable.
+
+
+## Stage 2 — Lucky vs skilled (the statistical core)
+
+PnL alone is survivorship bias: with thousands of wallets, some look
+brilliant by pure chance. Treat each wallet as a hypothesis test
+against the null "they bet at fair market odds."
+
+Per resolved bet i:  entry price p_i (= market-implied prob),
+                     outcome    w_i in {0,1}.
+
+Under the null (no edge), w_i ~ Bernoulli(p_i). Across N bets:
+
+    observed wins = sum(w_i)
+    expected wins = sum(p_i)
+    variance      = sum( p_i * (1 - p_i) )         [Poisson-binomial]
+    Z             = (sum(w_i) - sum(p_i)) / sqrt(variance)
+    p_value       = 1 - Phi(Z)        one-sided
+                    (use exact Poisson-binomial / Monte Carlo for small N)
+
+Why this and NOT raw win-rate:
+  * Rewards winning at LONG odds. A win entered at p=0.15 carries far
+    more variance-adjusted signal than a p=0.85 favorite. Coinflip
+    specialists score ~0.
+  * Scale-free: directly answers "distinguishable from betting at
+    market prices?"
+
+Multiplicity correction (the step everyone skips):
+  You ran N_wallets tests. Collect all p-values, apply
+  Benjamini-Hochberg FDR at ~10%. What survives is statistically
+  skilled, not lucky.
+
+Heuristic gates (cheap filters, apply BEFORE the test):
+  - Min resolved bets:    N >= 30-50            (8/10 is noise)
+  - Mark-to-resolution PnL > 0, counting expired-worthless as LOSS
+    (use fetch_market_resolution) — this is how inflated win-rates hide
+  - Category entropy:     low = concentrated edge; high = scattered luck
+  - Recency weight:       last ~6mo > all-time   (era-specific edge decays)
+  - Position size:        >= $80k tier floor      (follow-ability, see note)
+
+
+## Skilled vs INSIDER specifically
+
+The Z-test catches SKILLED. "Insider" is a stronger claim requiring the
+TIMING FINGERPRINT, computed from /prices-history:
+  - Did they enter shortly BEFORE a sharp favorable move, repeatedly,
+    on the correct side?
+  - Lead-lag: align entry timestamp vs subsequent price path. Insiders
+    enter a flat book that then jumps their way. Skilled-but-public
+    traders enter already-moving markets.
+
+This is where the THIN AGENT LAYER earns its place: hand it the
+shortlist + suspicious-timing markets, let it web-search whether the
+well-timed bet PRECEDED public reporting. That is the only step that
+separates "insider" from "fast and sharp," and it's genuinely hard
+to code.
+
+
+## Stage 3 — Candidate -> copy list (the seam)
+
+Scoring output = ranked file, e.g. discovery/candidates.json:
+  [{ "wallet":"0x...", "z":3.8, "q_value":0.02, "n":64,
+     "median_size":120000, "tier_floor":80000 }]
+
+Promotion is FREE in the current architecture: each candidate becomes
+a Mode.PAPER CopyTradeAlgorithm instance with its own bankroll/risk
+pool. Write profiles/discovery_paper.py that reads candidates.json and
+instantiates one paper worker per wallet. Forward-validate K weeks ->
+read paper_account + trade_log -> promote winners into prod.py as
+Mode.LIVE. NO new execution code.
+
+!! THE $80k CATCH: tier sizing keys off the target's ABSOLUTE holding.
+   A sharp wallet betting $2k positions scores great but NEVER triggers
+   a copy under tier1_min=80000. Stage 2 must either filter for wallets
+   taking >= $80k positions, OR emit a per-candidate calibrated
+   tier1_min set from their median position size (it's a per-instance
+   param).
+
+
+================================================================
+
+PART 4: HOW TO BACKTEST POLYMARKET
+====================================
+
+Two DISTINCT backtests. Conflating them is the classic mistake.
+
+
+## Backtest 1 — Does the wallet have edge? (cheap, optimistic)
+
+Replay their resolved /activity, mark each to resolution. This IS
+Stage 2 above. Tells you if THEY are good. Does NOT tell you if YOU
+can profit copying them — it assumes zero latency and perfect fills.
+
+
+## Backtest 2 — Copy-execution backtest (decides real money)
+
+Replay YOUR bot following them, with realistic friction. Event-driven:
+
+  for each target BUY (timestamp t, price p, size) in /activity:
+      detect_at = t + LATENCY          # ~10s poll + API propagation
+      p' = price_from_history(token, detect_at)   # CLOB /prices-history
+      if abs(p' - p)/p > MAX_SLIPPAGE (0.05):
+          record SKIP                  # your gate refuses it
+      else:
+          fill at p', size via tier ladder (target holding -> tier)
+          hold to resolution, or to mirrored SELL/MERGE/REDEEM
+      book PnL at resolution (Gamma outcomePrices)
+
+This replays your ACTUAL runner.py logic (5% slippage gate, tier
+sizing, min-order) against historical prices.
+
+CRITICAL FINDING IT WILL SURFACE: the slippage gate silently drops the
+FASTEST insider signals (price already moved >5% by detection), filling
+only the slow, already-priced-in ones. Backtest 1 looks great, Backtest
+2 looks mediocre — that GAP is the follow-ability cost, and it's the
+number that matters.
+
+Methodology guardrails:
+  - NO LOOKAHEAD. Only use data available at detect_at. Don't pre-filter
+    to markets you know resolved favorably.
+  - OUT-OF-SAMPLE SPLIT. Discover candidates on period A; copy-backtest
+    on period B. Scoring + validating on the same trades is double-dipping
+    — why most copy backtests lie.
+  - WALK-FORWARD rolling windows, not one fixed split, to confirm edge
+    isn't era-specific.
+  - THEN forward paper-trade (free in this architecture) before live
+    capital — the only true out-of-sample test.
+  - MODEL COSTS: fill at the touch not mid, gate skips, Polygon gas on
+    redeem.
+
+DATA COST is the bottleneck: Backtest 2 needs /prices-history per token
+at minute fidelity for every market your candidates traded. Cache
+aggressively — it's I/O bound, not compute bound.
+
+
+================================================================
+
+REVISED BUILD ORDER (supersedes Part 2 sequence)
+==================================================
+
+1. discovery/ scoring (Stage 1-2): ranked candidate file from the
+   verified endpoints. Z-test + BH-FDR. Offline, self-contained,
+   cannot touch live trading.
+2. Copy-execution backtester (Backtest 2): reuses /prices-history +
+   runner logic. Tells you which candidates survive YOUR friction.
+3. profiles/discovery_paper.py: auto-boots survivors as paper followers.
+4. Agent layer: insider confirmation (news + timing) on shortlist only.

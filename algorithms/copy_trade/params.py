@@ -16,19 +16,14 @@ import os
 from dataclasses import dataclass, field
 
 from bot.algorithm import Mode
+from bot.config import env_value
 
 _P = "COPYTRADE_"
 
 
 def _env(new_name: str, legacy_name: str, default: str) -> str:
     """Return COPYTRADE_<NAME>, then <LEGACY_NAME>, then the default."""
-    val = os.getenv(_P + new_name)
-    if val is not None and val != "":
-        return val
-    val = os.getenv(legacy_name)
-    if val is not None and val != "":
-        return val
-    return default
+    return env_value(_P + new_name, legacy_name, default=default)
 
 
 def _default_mode() -> Mode:

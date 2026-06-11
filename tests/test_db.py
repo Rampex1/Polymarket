@@ -97,3 +97,53 @@ def test_threadlocal_connection_isolation(fresh_db):
     t.join()
 
     assert other_conn[0] is not main_conn
+
+
+# ---------------------------------------------------------------------------
+# data/ directory — default paths + auto-created parents
+# ---------------------------------------------------------------------------
+
+
+def test_get_creates_missing_parent_dirs(tmp_path, monkeypatch):
+    """sqlite3.connect fails on a missing directory; db.get() must create it
+    so the data/ default works on a fresh checkout."""
+    from bot import config
+    import bot.db as dbmod
+
+    nested = tmp_path / "data" / "deep" / "pos.db"
+    monkeypatch.setattr(config, "DB_PATH", str(nested))
+    dbmod.reset_for_tests()
+    try:
+        dbmod.get()
+        assert nested.exists()
+    finally:
+        dbmod.reset_for_tests()
+
+
+def test_default_db_path_prefers_data_dir(tmp_path, monkeypatch):
+    import os
+
+    from bot import config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DB_PATH", raising=False)
+    assert config._default_db_path() == os.path.join("data", "positions.db")
+
+
+def test_default_db_path_env_override_wins(tmp_path, monkeypatch):
+    from bot import config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DB_PATH", "/elsewhere/x.db")
+    assert config._default_db_path() == "/elsewhere/x.db"
+
+
+def test_default_db_path_legacy_fallback(tmp_path, monkeypatch):
+    """A pre-existing ./positions.db with no data/ copy must keep being used —
+    a deploy that git-pulls this change must not silently start a fresh DB."""
+    from bot import config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DB_PATH", raising=False)
+    (tmp_path / "positions.db").touch()
+    assert config._default_db_path() == "positions.db"

@@ -46,6 +46,21 @@ for _candidate in (f".env.{PROFILE}", ".env"):
         break
 
 
+# ── Shared env helper (used by per-algorithm params modules) ─────────────────
+
+def env_value(*names: str, default: str = "") -> str:
+    """First non-empty value among environment variables `names`, else default.
+
+    Treats "" the same as unset so an empty assignment in a .env file
+    doesn't shadow a legacy fallback name.
+    """
+    for name in names:
+        val = os.getenv(name)
+        if val is not None and val != "":
+            return val
+    return default
+
+
 # ── Polymarket API base URLs ─────────────────────────────────────────────────
 
 GAMMA_API: str = "https://gamma-api.polymarket.com"
@@ -76,7 +91,28 @@ POLY_SIGNATURE_TYPE: int = int(os.getenv("POLY_SIGNATURE_TYPE", "3"))
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 
-DB_PATH: str = os.getenv("DB_PATH", "positions.db")
+def _default_db_path() -> str:
+    """Resolve the positions DB path. New default lives under data/.
+
+    Legacy fallback: an existing ./positions.db with no data/ counterpart
+    keeps being used (with a warning) so a deployment that pulls this change
+    and restarts doesn't silently start trading against a fresh DB.
+    """
+    env = os.getenv("DB_PATH")
+    if env:
+        return env
+    new_path = os.path.join("data", "positions.db")
+    if os.path.exists("positions.db") and not os.path.exists(new_path):
+        import logging
+        logging.getLogger(__name__).warning(
+            "Using legacy ./positions.db — move it to data/positions.db "
+            "(or set DB_PATH) to adopt the new layout."
+        )
+        return "positions.db"
+    return new_path
+
+
+DB_PATH: str = _default_db_path()
 
 
 # ── Notifications ────────────────────────────────────────────────────────────
