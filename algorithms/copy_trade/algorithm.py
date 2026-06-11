@@ -27,7 +27,6 @@ Close strategy:
     canonical close price.
 """
 
-import collections
 import logging
 from typing import Iterator, Optional
 
@@ -78,7 +77,7 @@ class CopyTradeAlgorithm(Algorithm):
         self._address: str = ""
         self._tracker = None        # PositionTracker, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
-        self._seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+        self._seen_ids = fetcher.SeenRing(SEEN_IDS_MAX)
         self.holding_cache = fetcher.TargetHoldingCache()
 
     @property
@@ -122,7 +121,7 @@ class CopyTradeAlgorithm(Algorithm):
         # re-execute everything from history on startup.
         for t in fetcher.fetch_recent_trades(self._address):
             if t.id:
-                self._mark_seen(t.id)
+                self._seen_ids.mark(t.id)
         logger.info(
             "[%s] Seeded with %d existing trades. Watching for new ones...",
             self.params.name, len(self._seen_ids),
@@ -138,7 +137,7 @@ class CopyTradeAlgorithm(Algorithm):
 
         new_trades = [t for t in trades if t.id and t.id not in self._seen_ids]
         for t in sorted(new_trades, key=lambda x: x.timestamp):
-            self._mark_seen(t.id)
+            self._seen_ids.mark(t.id)
             logger.info("[%s] New trade detected: %s", self.params.name, t)
             yield from self._intents_for(t)
 
@@ -336,11 +335,3 @@ class CopyTradeAlgorithm(Algorithm):
         if holding <= self.params.tier2_max:
             return self.params.tier2_size
         return self.params.tier3_size
-
-    def _mark_seen(self, trade_id: str) -> None:
-        if trade_id in self._seen_ids:
-            self._seen_ids.move_to_end(trade_id)
-        else:
-            self._seen_ids[trade_id] = None
-            if len(self._seen_ids) > SEEN_IDS_MAX:
-                self._seen_ids.popitem(last=False)

@@ -600,7 +600,7 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
          position open.
     """
     market = fetcher.fetch_market_resolution(market_id)
-    if market and _market_is_resolved(market):
+    if market and fetcher.market_is_resolved(market):
         outcome_price = _gamma_outcome_price(market, asset_id)
         if outcome_price is not None:
             return outcome_price
@@ -613,17 +613,6 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     if price < 0.05:
         return 0.0
     return None
-
-
-def _market_is_resolved(market: dict) -> bool:
-    """Check Gamma's closed/resolved flags. Either being truthy implies finality."""
-    for key in ("closed", "resolved", "archived"):
-        val = market.get(key)
-        if isinstance(val, bool) and val:
-            return True
-        if isinstance(val, str) and val.lower() in ("true", "1", "yes"):
-            return True
-    return False
 
 
 def _gamma_outcome_price(market: dict, asset_id: str) -> Optional[float]:

@@ -25,7 +25,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from . import config
-from .models import Trade
+from .models import GlobalTrade, Trade
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +353,202 @@ def fetch_market_resolution(market_id: str) -> Optional[dict]:
     return None
 
 
+def market_is_resolved(market: dict) -> bool:
+    """Check Gamma's closed/resolved flags. Either being truthy implies finality.
+
+    Lives here (not in runner) so paper-mode algorithms can check resolution
+    without transitively importing py_clob_client.
+    """
+    for key in ("closed", "resolved", "archived"):
+        val = market.get(key)
+        if isinstance(val, bool) and val:
+            return True
+        if isinstance(val, str) and val.lower() in ("true", "1", "yes"):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Platform-wide discovery primitives
+# ---------------------------------------------------------------------------
+#
+# These power account discovery (finding wallets worth copying) rather than
+# following an already-known target. All of them follow the same failure
+# contract as the rest of this module: log + return an empty/None sentinel,
+# never raise to the caller.
+
+
+def fetch_global_trades(min_cash_usdc: float, limit: int = 100) -> list[GlobalTrade]:
+    """Platform-wide trades at or above a USDC notional (the whale firehose).
+
+    Uses the Data API's server-side cash filter so we only pay bandwidth for
+    trades big enough to matter. Returns newest-first rows; failure → [].
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/trades",
+            params={
+                "filterType": "CASH",
+                "filterAmount": min_cash_usdc,
+                "limit": limit,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+    except requests.RequestException as e:
+        logger.error("Failed to fetch global trades: %s", e)
+        return []
+
+    trades = []
+    for item in raw if isinstance(raw, list) else raw.get("data", []):
+        trade = _parse_global_trade(item)
+        if trade is not None:
+            trades.append(trade)
+    return trades
+
+
+def _parse_global_trade(item: dict) -> Optional[GlobalTrade]:
+    """Parse a raw /trades row. Returns None when the row can't be acted on
+    (no tx hash to dedupe, no market/asset to route, non-positive economics)."""
+    try:
+        tx_hash = item.get("transactionHash")
+        condition_id = item.get("conditionId")
+        wallet = item.get("proxyWallet")
+        asset_id = item.get("asset")
+        if not (tx_hash and condition_id and wallet and asset_id):
+            return None
+
+        price = float(item.get("price") or 0)
+        shares = float(item.get("size") or 0)
+        if price <= 0 or shares <= 0:
+            return None
+
+        return GlobalTrade(
+            tx_hash=tx_hash,
+            wallet=wallet,
+            side=item.get("side", "").upper(),
+            price=price,
+            shares=shares,
+            cash_usdc=shares * price,
+            market_id=condition_id,
+            asset_id=asset_id,
+            timestamp=int(item.get("timestamp") or time.time()),
+            title=item.get("title", ""),
+            outcome=item.get("outcome", ""),
+            trader_name=item.get("name") or item.get("pseudonym") or "",
+        )
+    except (TypeError, ValueError, KeyError) as e:
+        logger.debug("Skipping unparseable global trade: %s — %s", item, e)
+        return None
+
+
+def fetch_wallet_stats(address: str, max_rows: int = 100) -> Optional[dict]:
+    """Cheap freshness profile of a wallet from one /activity page.
+
+    Returns {"trade_count", "activity_count", "oldest_ts", "capped"}.
+    `capped=True` means the page came back full — the wallet has at least
+    `max_rows` activities and is by definition not fresh, so callers can
+    short-circuit without paginating. `oldest_ts` is None for a wallet with
+    zero recorded activity (brand new, or the API hasn't propagated yet).
+
+    Failure → None, so callers can fail CLOSED: a wallet we can't verify is
+    a wallet we don't copy.
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/activity",
+            params={"user": address, "limit": max_rows},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data if isinstance(data, list) else data.get("data", [])
+    except Exception as e:
+        logger.warning("Could not fetch wallet stats for %s: %s", address, e)
+        return None
+
+    # A null timestamp (row not yet propagated) must not become epoch-zero —
+    # that would make a brand-new wallet look decades old.
+    timestamps = [int(r["timestamp"]) for r in rows if r.get("timestamp")]
+    return {
+        "trade_count": sum(1 for r in rows if r.get("type") == "TRADE"),
+        "activity_count": len(rows),
+        "oldest_ts": min(timestamps) if timestamps else None,
+        "capped": len(rows) >= max_rows,
+    }
+
+
+def fetch_price_history(
+    token_id: str,
+    fidelity: int = 60,
+    interval: str = "max",
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+) -> Optional[list[dict]]:
+    """Price timeseries for a token from the public CLOB endpoint.
+
+    Returns the raw `history` list ([{t, p}, ...]). An empty list is a real
+    answer — the CLOB drops history for long-resolved markets — while None
+    means the HTTP call itself failed (caller may retry later).
+
+    `startTs`/`endTs` and `interval` are mutually exclusive on the API;
+    passing either timestamp drops the interval parameter.
+    """
+    params: dict = {"market": token_id, "fidelity": fidelity}
+    if start_ts is not None or end_ts is not None:
+        if start_ts is not None:
+            params["startTs"] = start_ts
+        if end_ts is not None:
+            params["endTs"] = end_ts
+    else:
+        params["interval"] = interval
+
+    try:
+        resp = SESSION.get(
+            f"{config.CLOB_API}/prices-history", params=params, timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        history = data.get("history", []) if isinstance(data, dict) else []
+        return history if isinstance(history, list) else []
+    except Exception as e:
+        logger.warning("Could not fetch price history for %s: %s", token_id, e)
+        return None
+
+
+def fetch_top_markets(
+    closed: bool,
+    limit: int = 50,
+    end_date_min: Optional[str] = None,
+    end_date_max: Optional[str] = None,
+) -> list[dict]:
+    """Top markets by volume from Gamma (universe selection for discovery).
+
+    Note: `order=volumeNum` — Gamma's `order=volume` sorts the *string* field
+    and returns garbage. Booleans must be lowercase strings. Failure → [].
+    """
+    params: dict = {
+        "closed": "true" if closed else "false",
+        "order": "volumeNum",
+        "ascending": "false",
+        "limit": limit,
+    }
+    if end_date_min:
+        params["end_date_min"] = end_date_min
+    if end_date_max:
+        params["end_date_max"] = end_date_max
+
+    try:
+        resp = SESSION.get(f"{config.GAMMA_API}/markets", params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("data", [])
+    except Exception as e:
+        logger.warning("Could not fetch top markets: %s", e)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Polling loop
 # ---------------------------------------------------------------------------
@@ -360,6 +556,33 @@ def fetch_market_resolution(market_id: str) -> Optional[dict]:
 # Bound on the dedupe ring. Sized for ~weeks of an active trader's history;
 # tune up if monitoring a high-frequency target.
 SEEN_IDS_MAX = 5000
+
+
+class SeenRing:
+    """Bounded LRU set of already-processed signal ids.
+
+    The shared dedupe primitive for every polling loop (copy_trade,
+    insider_flow, the utility `poll` below). Re-marking an id refreshes its
+    recency; past `maxlen` the least-recently-marked id falls off.
+    """
+
+    def __init__(self, maxlen: int = SEEN_IDS_MAX) -> None:
+        self._maxlen = maxlen
+        self._ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._ids
+
+    def __len__(self) -> int:
+        return len(self._ids)
+
+    def mark(self, key: str) -> None:
+        if key in self._ids:
+            self._ids.move_to_end(key)
+        else:
+            self._ids[key] = None
+            if len(self._ids) > self._maxlen:
+                self._ids.popitem(last=False)
 
 
 def poll(
@@ -377,18 +600,11 @@ def poll(
     `stop_event` (a threading.Event) lets the caller cleanly interrupt
     the sleep instead of relying on signal-driven sys.exit.
     """
-    seen_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
-
-    def _mark_seen(trade_id: str) -> None:
-        if trade_id in seen_ids:
-            seen_ids.move_to_end(trade_id)
-        else:
-            seen_ids[trade_id] = None
-            if len(seen_ids) > SEEN_IDS_MAX:
-                seen_ids.popitem(last=False)
+    # Read SEEN_IDS_MAX at call time so tests can shrink the ring.
+    seen_ids = SeenRing(SEEN_IDS_MAX)
 
     for t in fetch_recent_trades(address):
-        _mark_seen(t.id)
+        seen_ids.mark(t.id)
     logger.info(
         "Seeded with %d existing trades. Watching for new ones...", len(seen_ids),
     )
@@ -405,7 +621,7 @@ def poll(
         new_trades = [t for t in trades if t.id and t.id not in seen_ids]
 
         for trade in sorted(new_trades, key=lambda t: t.timestamp):
-            _mark_seen(trade.id)
+            seen_ids.mark(trade.id)
             logger.info("New trade detected: %s", trade)
             if on_trade:
                 try:

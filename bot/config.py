@@ -46,6 +46,21 @@ for _candidate in (f".env.{PROFILE}", ".env"):
         break
 
 
+# ── Shared env helper (used by per-algorithm params modules) ─────────────────
+
+def env_value(*names: str, default: str = "") -> str:
+    """First non-empty value among environment variables `names`, else default.
+
+    Treats "" the same as unset so an empty assignment in a .env file
+    doesn't shadow a legacy fallback name.
+    """
+    for name in names:
+        val = os.getenv(name)
+        if val is not None and val != "":
+            return val
+    return default
+
+
 # ── Polymarket API base URLs ─────────────────────────────────────────────────
 
 GAMMA_API: str = "https://gamma-api.polymarket.com"

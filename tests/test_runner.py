@@ -433,11 +433,13 @@ def test_dispatch_settle_ignores_gamma_when_open(tracker, risk, algo,
     assert tracker.today_pnl_usdc(paper=True) == 6.0
 
 
-def test_market_is_resolved_accepts_alternate_flags(default_params):
-    from bot.runner import _market_is_resolved
-    assert _market_is_resolved({"closed": True})
-    assert _market_is_resolved({"resolved": True})
-    assert _market_is_resolved({"archived": True})
-    assert _market_is_resolved({"closed": "true"})
-    assert not _market_is_resolved({})
-    assert not _market_is_resolved({"closed": False, "resolved": False})
+def test_market_is_resolved_accepts_alternate_flags():
+    # Lives in bot.fetcher (not runner) so paper-mode algorithms can use it
+    # without transitively importing py_clob_client.
+    from bot.fetcher import market_is_resolved
+    assert market_is_resolved({"closed": True})
+    assert market_is_resolved({"resolved": True})
+    assert market_is_resolved({"archived": True})
+    assert market_is_resolved({"closed": "true"})
+    assert not market_is_resolved({})
+    assert not market_is_resolved({"closed": False, "resolved": False})
