@@ -153,17 +153,9 @@ def reconcile_positions(
             len(summary["ghost"]), len(summary["divergent"]),
         )
 
-    # Discord alert on any discrepancy. Ghost/divergent are the high-risk
-    # ones (real money at stake); stale is informational but still worth
-    # surfacing. A single alert per reconcile run avoids notification flood.
-    issues = len(summary["ghost"]) + len(summary["stale"]) + len(summary["divergent"])
-    if issues > 0:
-        notifier.send(
-            f"⚠️ **[{notifier._esc(algo_name)}] Reconcile mismatch**\n"
-            f"Ghost: {len(summary['ghost'])} | "
-            f"Stale: {len(summary['stale'])} | "
-            f"Divergent: {len(summary['divergent'])}\n"
-            f"Check bot logs."
-        )
+    # Discrepancies are surfaced via logs only — Discord alerts proved
+    # noisy in practice (manual UI trades show up as ghosts forever; UI
+    # closes show up as stale until cleared). Re-enable here if a specific
+    # category becomes worth paging on.
 
     return summary
