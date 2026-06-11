@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 SEEN_IDS_MAX = 5000
 
 
+# Personal smoke-test wallet — when targeted, the algorithm switches to
+# 1:1 mirroring so trades placed manually from that wallet exercise the
+# bot's order-placement path without the $80k tier floor swallowing them.
+# Lowercased for case-insensitive comparison.
+_SMOKE_TEST_WALLET = "0x8b181a0f7ab8f2d886b9bb2765eb1699b6ecced9"
+
+
 class CopyTradeAlgorithm(Algorithm):
     def __init__(
         self,
@@ -164,6 +171,26 @@ class CopyTradeAlgorithm(Algorithm):
             )
 
     def _open_intent_for(self, t) -> Iterator[OpenIntent]:
+        # Smoke-test wallet → mirror the trade dollar-for-dollar with no
+        # tier floor, so manually-placed test trades exercise the full
+        # order path even at small sizes.
+        if self._address.lower() == _SMOKE_TEST_WALLET:
+            logger.info(
+                "[%s] Smoke-test mirror BUY: $%.2f | %s",
+                self.params.name, t.size_usdc, t.question[:55],
+            )
+            yield OpenIntent(
+                market_id=t.market_id,
+                asset_id=t.asset_id or "",
+                usdc_amount=t.size_usdc,
+                signal_price=t.price,
+                question=t.question,
+                outcome=t.outcome,
+                signal_id=t.id,
+                reason="smoke-test 1:1 mirror",
+            )
+            return
+
         # Look up the target's total holding to pick a tier. `expected_min`
         # defeats the Data API's eventual-consistency window — the BUY we
         # just observed must be reflected.
@@ -230,6 +257,20 @@ class CopyTradeAlgorithm(Algorithm):
                            regardless of how big our position is.
           * No change    → if the new target ≥ our current cost, no-op.
         """
+        # Smoke-test wallet → full close on any SELL. Simple and unambiguous:
+        # one BUY signal opens, one SELL signal closes.
+        if self._address.lower() == _SMOKE_TEST_WALLET:
+            logger.info(
+                "[%s] Smoke-test mirror SELL: full close | %s",
+                self.params.name, t.question[:55],
+            )
+            yield CloseIntent(
+                market_id=t.market_id, fraction=1.0, signal_price=t.price,
+                question=t.question, outcome=t.outcome, signal_id=t.id,
+                reason="smoke-test 1:1 mirror (full close)",
+            )
+            return
+
         cached_pre = self.holding_cache.get(t.market_id)
         if cached_pre is None or cached_pre <= 0:
             logger.info(

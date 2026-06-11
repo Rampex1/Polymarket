@@ -104,6 +104,42 @@ def test_buy_signal_skipped_below_tier1_min(algo_with_tracker, stub_holding):
     assert list(algo_with_tracker._intents_for(t)) == []
 
 
+def test_smoke_test_wallet_mirrors_buy_one_to_one(algo_with_tracker):
+    """When the target is the hard-coded smoke-test wallet, BUYs bypass the
+    tier floor and mirror the target's USDC amount dollar-for-dollar."""
+    from algorithms.copy_trade.algorithm import _SMOKE_TEST_WALLET
+    algo_with_tracker._address = _SMOKE_TEST_WALLET
+    t = make_trade(action="BUY", price=0.50, size_usdc=0.75)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert isinstance(intents[0], OpenIntent)
+    assert intents[0].usdc_amount == 0.75      # 1:1, not tier-scaled
+    assert intents[0].reason == "smoke-test 1:1 mirror"
+
+
+def test_smoke_test_wallet_mirrors_buy_case_insensitive(algo_with_tracker):
+    """Address comparison is lowercased so checksum-cased env values still match."""
+    from algorithms.copy_trade.algorithm import _SMOKE_TEST_WALLET
+    algo_with_tracker._address = _SMOKE_TEST_WALLET.upper().replace("X", "x")
+    t = make_trade(action="BUY", price=0.50, size_usdc=1.5)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert intents[0].usdc_amount == 1.5
+
+
+def test_smoke_test_wallet_full_close_on_sell(algo_with_tracker, tracker):
+    """SELL from the smoke-test wallet → full close, no tier reasoning."""
+    from algorithms.copy_trade.algorithm import _SMOKE_TEST_WALLET
+    algo_with_tracker._address = _SMOKE_TEST_WALLET
+    seed = make_trade(action="BUY", price=0.50)
+    tracker.record_buy(seed, spent_usdc=0.50, shares=1.0, fill_price=0.50, paper=True)
+    t = make_trade(action="SELL", price=0.55, size_usdc=0.27)
+    intents = list(algo_with_tracker._intents_for(t))
+    assert len(intents) == 1
+    assert isinstance(intents[0], CloseIntent)
+    assert intents[0].fraction == 1.0
+
+
 def test_buy_signal_tops_up_to_target(algo_with_tracker, stub_holding, tracker,
                                        default_params, monkeypatch):
     """When we already hold $0.50 in the market and tier is $1, top-up = $0.50.
