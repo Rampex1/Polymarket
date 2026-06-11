@@ -69,6 +69,17 @@ def algo(tracker):
     return a
 
 
+@pytest.fixture(autouse=True)
+def _no_value_lookup(monkeypatch):
+    """Default: portfolio-value enrichment returns None so no test ever makes
+    a real HTTP call. Feature-capture tests override explicitly."""
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher, "fetch_wallet_value", lambda *a, **kw: None, raising=False,
+    )
+
+
 @pytest.fixture
 def stub_firehose(monkeypatch):
     from bot import fetcher
@@ -248,6 +259,61 @@ def test_failed_wallet_lookup_is_not_cached(algo, stub_firehose, monkeypatch):
     assert len(intents) == 1                  # first row failed closed
     assert intents[0].market_id == "m2"       # second row retried and passed
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Feature capture — raw observables logged on every emitted intent
+# ---------------------------------------------------------------------------
+
+
+def test_intent_carries_raw_features(algo, stub_firehose, stub_stats, monkeypatch):
+    """Features are raw observables (recompute derivations offline later);
+    capture must include the signal economics and the wallet vetting data
+    we already fetched."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_wallet_value", lambda *a, **kw: 2500.0, raising=False,
+    )
+
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    f = intents[0].features
+
+    assert f["odds"] == 0.20
+    assert f["cash_usdc"] == 10_000.0
+    assert f["shares"] == 50_000.0
+    assert f["wallet"] == "0xwhale"
+    assert f["trade_count"] == 1
+    assert f["activity_count"] == 1
+    assert f["portfolio_value_usdc"] == 2500.0
+    # fresh_stats puts oldest_ts an hour ago; allow scheduling slack.
+    assert 3500 <= f["wallet_age_seconds"] <= 3800
+    assert f["detect_latency_seconds"] >= 0
+    assert 0 <= f["hour_utc"] <= 23
+
+
+def test_value_lookup_failure_still_emits_intent(algo, stub_firehose, stub_stats):
+    """Portfolio value is enrichment, not a gate — its failure must never
+    cost us the signal."""
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    # autouse fixture already stubs fetch_wallet_value → None
+
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert intents[0].features["portfolio_value_usdc"] is None
+
+
+def test_zero_history_wallet_features_have_null_age(algo, stub_firehose, stub_stats):
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats(trade_count=0, activity_count=0, oldest_ts=None))
+
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert intents[0].features["wallet_age_seconds"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -479,6 +479,30 @@ def fetch_wallet_stats(address: str, max_rows: int = 100) -> Optional[dict]:
     }
 
 
+def fetch_wallet_value(address: str) -> Optional[float]:
+    """Total USD value of a wallet's open positions (Data API /value).
+
+    Enrichment for signal feature logging (enables offline Kelly inversion:
+    bet_fraction ≈ cash / (value + cash)). Defensive about response shape;
+    any failure or surprise → None. Never gates a signal.
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/value",
+            params={"user": address},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        if isinstance(data, dict) and data.get("value") is not None:
+            return float(data["value"])
+    except Exception as e:
+        logger.warning("Could not fetch wallet value for %s: %s", address, e)
+    return None
+
+
 def fetch_price_history(
     token_id: str,
     fidelity: int = 60,

@@ -433,6 +433,92 @@ def test_dispatch_settle_ignores_gamma_when_open(tracker, risk, algo,
     assert tracker.today_pnl_usdc(paper=True) == 6.0
 
 
+# ---------------------------------------------------------------------------
+# Signal logging — every OpenIntent leaves a training-data row
+# ---------------------------------------------------------------------------
+
+
+def _signal_row(signal_id="tx1", algo="copy_trade"):
+    from bot import db
+    return db.get().execute(
+        "SELECT * FROM signals WHERE signal_id=? AND algo=?", (signal_id, algo),
+    ).fetchone()
+
+
+def test_dispatch_open_records_executed_signal(tracker, risk, algo,
+                                               default_params, stub_price):
+    from bot import runner
+    stub_price(0.50)
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        signal_id="tx1", features={"odds": 0.5, "wallet": "0xw"},
+    )
+    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+
+    row = _signal_row()
+    assert row is not None
+    assert row["executed"] == 1
+    assert row["skip_reason"] is None
+    import json
+    assert json.loads(row["features"]) == {"odds": 0.5, "wallet": "0xw"}
+
+
+def test_dispatch_open_records_risk_blocked_signal(tracker, risk, algo,
+                                                   default_params, monkeypatch,
+                                                   stub_price):
+    from bot import runner
+    monkeypatch.setattr(default_params, "min_order_size_usdc", 5.0)
+    stub_price(0.50)
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        signal_id="tx1",
+    )
+    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+
+    row = _signal_row()
+    assert row["executed"] == 0
+    assert row["skip_reason"].startswith("risk:")
+
+
+def test_dispatch_open_records_slippage_skipped_signal(tracker, risk, algo,
+                                                       default_params, stub_price):
+    from bot import runner
+    stub_price(0.70)                       # 40% drift from signal 0.50
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        signal_id="tx1",
+    )
+    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+
+    row = _signal_row()
+    assert row["executed"] == 0
+    assert row["skip_reason"] == "slippage"
+
+
+def test_dispatch_settle_labels_signal_outcome(tracker, risk, algo,
+                                               default_params, monkeypatch,
+                                               stub_price):
+    """The settle path backfills outcome + pnl on this market's signal rows."""
+    from bot import runner, fetcher
+    stub_price(0.50)
+    open_intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        signal_id="tx1",
+    )
+    runner.dispatch(open_intent, algo, tracker, risk, client=None, paper=True)
+
+    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+    settle = SettleIntent(market_id="m1", signal_id="r1")
+    runner.dispatch(settle, algo, tracker, risk, client=None, paper=True)
+
+    row = _signal_row()
+    assert row["outcome"] == 1.0                       # binarized win
+    # 2 shares bought at 0.50 settle at 1.0 → pnl = +1.0
+    assert row["pnl_usdc"] == pytest.approx(1.0)
+    assert row["outcome_ts"] is not None
+
+
 def test_market_is_resolved_accepts_alternate_flags():
     # Lives in bot.fetcher (not runner) so paper-mode algorithms can use it
     # without transitively importing py_clob_client.

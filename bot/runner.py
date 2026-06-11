@@ -31,7 +31,7 @@ from py_clob_client_v2.client import ClobClient
 from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client_v2.constants import POLYGON
 
-from . import config, fetcher, notifier
+from . import config, fetcher, notifier, signals
 from .algorithm import CloseIntent, Intent, OpenIntent, SettleIntent
 from .models import Trade
 from .positions import PositionTracker, RiskManager
@@ -169,10 +169,14 @@ def _handle_open(
         logger.warning("[%s] Risk check failed — %s | %s",
                        algo.name, reason, trade.question[:50])
         notifier.on_risk_blocked(reason, trade, algo.display_name)
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason=f"risk: {reason}")
         return
 
     current_price = _get_current_price(trade, client)
     if not _slippage_ok(trade, current_price, algo.params.max_slippage, algo.display_name):
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason="slippage")
         return
 
     if paper:
@@ -185,8 +189,11 @@ def _handle_open(
         logger.warning("[%s] BUY did not fill (%s) — not recording.",
                        algo.name, reason_str)
         notifier.on_buy_failed(trade, reason_str, algo.display_name)
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason=f"no fill: {reason_str}")
         return
 
+    signals.record(algo.name, intent, paper, executed=True)
     tracker.record_buy(
         trade,
         spent_usdc=fill.amount_usdc,
@@ -315,6 +322,9 @@ def _handle_settle(
         paper=paper,
         fee_usdc=0.0,
     )
+    # Backfill the outcome label on this market's signal rows — settlement
+    # is the moment a logged signal becomes a labeled training example.
+    signals.label_outcomes(algo.name, intent.market_id, close_price, pnl, paper)
     tracker.print_summary(paper=paper)
 
     sign = "+" if pnl >= 0 else ""

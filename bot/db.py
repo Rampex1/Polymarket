@@ -20,6 +20,7 @@ Pragmas (per connection)
     script and risk checks become full-table scans.
 """
 
+import os
 import sqlite3
 import threading
 
@@ -33,6 +34,11 @@ def get() -> sqlite3.Connection:
     """Return *this thread's* SQLite connection, opening one on first call."""
     conn = getattr(_local, "conn", None)
     if conn is None:
+        # sqlite3.connect fails on a missing directory — create it so the
+        # data/ default works on a fresh checkout.
+        parent = os.path.dirname(config.DB_PATH)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # Pragmas must be set per-connection.
@@ -108,6 +114,30 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             balance    REAL NOT NULL,
             updated_at INTEGER
         );
+
+        -- Training-data store: one row per signal the runner dispatched,
+        -- raw features captured at signal time, outcome backfilled at
+        -- settlement. See bot/signals.py.
+        CREATE TABLE IF NOT EXISTS signals (
+            signal_id    TEXT NOT NULL,
+            algo         TEXT NOT NULL,
+            paper        INTEGER NOT NULL DEFAULT 1,
+            ts           INTEGER NOT NULL,
+            market_id    TEXT,
+            asset_id     TEXT,
+            question     TEXT,
+            signal_price REAL,
+            usdc_amount  REAL,
+            features     TEXT NOT NULL DEFAULT '{}',
+            executed     INTEGER NOT NULL DEFAULT 0,
+            skip_reason  TEXT,
+            outcome      REAL,
+            outcome_ts   INTEGER,
+            pnl_usdc     REAL,
+            PRIMARY KEY (signal_id, algo)
+        );
+        CREATE INDEX IF NOT EXISTS idx_signals_market
+            ON signals(algo, market_id);
 
         CREATE INDEX IF NOT EXISTS idx_trade_log_paper_ts
             ON trade_log(paper, ts);

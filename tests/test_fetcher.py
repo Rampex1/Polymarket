@@ -494,6 +494,45 @@ def test_fetch_wallet_stats_failure_returns_none(monkeypatch):
     assert fetcher.fetch_wallet_stats("0xw") is None
 
 
+def test_fetch_wallet_value_parses_list_shape(monkeypatch):
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher.SESSION, "get",
+        lambda *a, **kw: _StatsResp([{"user": "0xw", "value": 2500.5}]),
+    )
+    assert fetcher.fetch_wallet_value("0xw") == 2500.5
+
+
+def test_fetch_wallet_value_parses_dict_shape(monkeypatch):
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher.SESSION, "get", lambda *a, **kw: _StatsResp({"value": "99.5"}),
+    )
+    assert fetcher.fetch_wallet_value("0xw") == 99.5
+
+
+def test_fetch_wallet_value_failure_returns_none(monkeypatch):
+    from bot import fetcher
+    import requests
+
+    def bad_get(*a, **kw):
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
+    assert fetcher.fetch_wallet_value("0xw") is None
+
+
+def test_fetch_wallet_value_unparseable_returns_none(monkeypatch):
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher.SESSION, "get", lambda *a, **kw: _StatsResp([{"user": "0xw"}]),
+    )
+    assert fetcher.fetch_wallet_value("0xw") is None
+
+
 # ---------------------------------------------------------------------------
 # Price history (CLOB /prices-history) — archiver + timing backbone
 # ---------------------------------------------------------------------------

@@ -70,8 +70,9 @@ class InsiderFlowAlgorithm(Algorithm):
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen = fetcher.SeenRing(SEEN_IDS_MAX)
         self._poll_count = 0
-        # wallet → (expires_at, is_fresh). Failed lookups are never cached.
-        self._wallet_verdicts: dict[str, tuple[float, bool]] = {}
+        # wallet → (expires_at, stats-dict-if-fresh-else-None).
+        # Failed lookups are never cached.
+        self._wallet_verdicts: dict[str, tuple[float, Optional[dict]]] = {}
 
     @property
     def display_name(self) -> str:
@@ -146,7 +147,8 @@ class InsiderFlowAlgorithm(Algorithm):
             return
 
         # The one network-priced gate, last.
-        if not self._wallet_is_fresh(row.wallet):
+        stats = self._vet_wallet(row.wallet)
+        if stats is None:
             return
 
         wallet_short = f"{row.wallet[:6]}…{row.wallet[-4:]}"
@@ -166,11 +168,34 @@ class InsiderFlowAlgorithm(Algorithm):
                 f"fresh wallet {wallet_short} bet "
                 f"${row.cash_usdc:,.0f} @ {row.price:.2f}"
             ),
+            features=self._features_for(row, stats),
         )
 
-    def _wallet_is_fresh(self, wallet: str) -> bool:
-        """Young account with little history. Unverifiable → NOT fresh —
-        we never copy a wallet we couldn't vet (fail closed)."""
+    def _features_for(self, row: GlobalTrade, stats: dict) -> dict:
+        """Raw observables at signal time — training data for confidence
+        models. Raw inputs only (no derived scores); enrichment failures
+        degrade to None, never gate the signal."""
+        now = time.time()
+        oldest = stats.get("oldest_ts")
+        return {
+            "odds": row.price,
+            "cash_usdc": row.cash_usdc,
+            "shares": row.shares,
+            "wallet": row.wallet,
+            "trade_count": stats.get("trade_count"),
+            "activity_count": stats.get("activity_count"),
+            "wallet_age_seconds": (now - oldest) if oldest else None,
+            "detect_latency_seconds": max(0, int(now) - row.timestamp),
+            "hour_utc": time.gmtime(now).tm_hour,
+            "portfolio_value_usdc": fetcher.fetch_wallet_value(row.wallet),
+        }
+
+    def _vet_wallet(self, wallet: str) -> Optional[dict]:
+        """Freshness gate. Returns the wallet's stats dict when it passes
+        (young account, little history) so feature capture reuses the lookup;
+        None when rejected. Unverifiable (lookup failed) → None and NOT
+        cached — we never copy a wallet we couldn't vet (fail closed), but
+        its next row deserves a retry."""
         now = time.time()
         cached = self._wallet_verdicts.get(wallet)
         if cached is not None and cached[0] > now:
@@ -179,15 +204,13 @@ class InsiderFlowAlgorithm(Algorithm):
         p = self.params
         stats = fetcher.fetch_wallet_stats(wallet)
         if stats is None:
-            # Transient lookup failure: fail closed for THIS row, but don't
-            # cache — the wallet's next row deserves a retry.
             logger.warning(
                 "[%s] Could not verify wallet %s — skipping (fail closed).",
                 p.name, wallet,
             )
-            return False
+            return None
 
-        verdict = self._freshness_verdict(stats)
+        verdict = stats if self._freshness_verdict(stats) else None
         if len(self._wallet_verdicts) >= WALLET_CACHE_MAX:
             self._wallet_verdicts = {
                 w: v for w, v in self._wallet_verdicts.items() if v[0] > now
