@@ -60,14 +60,18 @@ POLY_API_SECRET:      str = os.getenv("POLY_API_SECRET", "")
 POLY_API_PASSPHRASE:  str = os.getenv("POLY_API_PASSPHRASE", "")
 POLY_FUNDER_ADDRESS:  str = os.getenv("POLY_FUNDER_ADDRESS", "")
 
-# CLOB signature_type. Which one depends on how you signed up to Polymarket:
-#   1 = Email / social (Magic Link) — Polymarket-managed proxy, EOA exported
-#       from Settings → Export private key.
-#   2 = Browser wallet (MetaMask / WalletConnect / Coinbase) — Polymarket Safe
-#       owned by your wallet's EOA.
-# Default 2 is the common browser-wallet case. Email-signup users must
-# set POLY_SIGNATURE_TYPE=1.
-POLY_SIGNATURE_TYPE: int = int(os.getenv("POLY_SIGNATURE_TYPE", "2"))
+# CLOB signature_type. Polymarket's CTF Exchange V2 added a new sig type
+# for smart-contract wallets. Which one depends on how the account was
+# created:
+#   0 = Plain EOA (no proxy) — rare for Polymarket use.
+#   1 = POLY_PROXY — legacy email/social signup accounts. Magic-link EOA
+#       exported from Settings → Export private key.
+#   2 = POLY_GNOSIS_SAFE — older browser-wallet signups (pre-2025) with
+#       a Polymarket-deployed Gnosis Safe owned by the EOA.
+#   3 = POLY_1271 — current smart-contract wallet accounts created via
+#       the wallet-signup flow. Uses EIP-1271 signatures.
+# Default 3 is the common case for accounts created in 2025+.
+POLY_SIGNATURE_TYPE: int = int(os.getenv("POLY_SIGNATURE_TYPE", "3"))
 
 
 # ── Storage ──────────────────────────────────────────────────────────────────

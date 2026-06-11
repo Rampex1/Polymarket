@@ -27,9 +27,9 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2.client import ClobClient
+from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
+from py_clob_client_v2.constants import POLYGON
 
 from . import config, fetcher, notifier
 from .algorithm import CloseIntent, Intent, OpenIntent, SettleIntent
