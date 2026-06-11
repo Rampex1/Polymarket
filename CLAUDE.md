@@ -42,18 +42,24 @@ bot/
   notifier.py             # Discord alerts + midnight daily summary thread
 algorithms/
   __init__.py             # Registry — PROFILE env var selects which profile's ALGORITHMS run
-  copy_trade/             # The one shipped strategy
+  copy_trade/             # Mirror a known target wallet
     algorithm.py          # CopyTradeAlgorithm: poll target → tier sizing → emit intents
     params.py             # CopyTradeParams dataclass (COPYTRADE_* env-driven, legacy fallbacks)
+  insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
+    algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
+    params.py             # InsiderFlowParams dataclass (INSIDERFLOW_* env-driven)
   profiles/
     default.py            # env-driven single CopyTradeAlgorithm (no PROFILE set)
     prod.py               # Mode.LIVE algorithms — real money, keep conservative
-    experimental.py       # Mode.PAPER variants for tuning / A/B testing
+    experimental.py       # Mode.PAPER variants for tuning / A/B testing (incl. insider_flow)
+discovery/
+  archive.py              # Price-history archiver (CLOB drops history at resolution — hoard it)
+research/                 # Strategy research notes + plans (discovery_plan.md, implementation_plan.md)
 scripts/
   reset_paper_trade_db.py
   trading_account_summary.py
   ssh_vm.sh
-tests/                    # pytest suite (copy_trade, db, fetcher, positions, risk, runner, ...)
+tests/                    # pytest suite (copy_trade, insider_flow, archive, db, fetcher, ...)
 ```
 
 ### Per-algorithm worker model
@@ -116,6 +122,33 @@ Canonical names are `COPYTRADE_*`; legacy unprefixed names (`TARGET_ADDRESS`, `T
 | `COPYTRADE_PAPER_FEE_BPS` | `PAPER_FEE_BPS` | `0` | Modeled paper fee (basis points) |
 
 Tier knobs are per-instance, so profiles can run multiple copy-trade variants with different sizing (see `experimental.py`).
+
+### Per-algorithm settings — insider_flow (`algorithms/insider_flow/params.py`, `INSIDERFLOW_*` env vars)
+
+Detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed), and exits positions at market resolution via a periodic Gamma sweep.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `INSIDERFLOW_MODE` | `paper` | `paper` or `live` |
+| `INSIDERFLOW_MIN_CASH` | `5000` | Min observed-trade notional (USDC) |
+| `INSIDERFLOW_MAX_ODDS` | `0.35` | Only copy BUYs at/below these odds |
+| `INSIDERFLOW_MAX_WALLET_AGE_DAYS` | `14` | Wallet freshness window |
+| `INSIDERFLOW_MAX_PRIOR_TRADES` | `10` | Max prior trades for "fresh" |
+| `INSIDERFLOW_BET_SIZE` | `10` | Our copy size (top-up target, USDC) |
+| `INSIDERFLOW_EXCLUDE_TITLES` | `" vs. ", " vs ", O/U, Spread` | Comma-sep title patterns (sports filter) |
+| `INSIDERFLOW_POLL_INTERVAL` | `15` | Firehose poll cadence (seconds) |
+| `INSIDERFLOW_SETTLE_EVERY` | `20` | Polls between resolution sweeps |
+| `INSIDERFLOW_MAX_POSITION` / `MAX_EXPOSURE` / `DAILY_LOSS_LIMIT` | `10` / `100` / `50` | Risk caps (this algo's pool) |
+| `INSIDERFLOW_MAX_SLIPPAGE` | `0.10` | Wider than copy_trade — these signals move fast |
+
+### Discovery price archiver
+
+```bash
+python -m discovery.archive --once             # one pass (cron-friendly)
+python -m discovery.archive --loop --every 3600
+```
+
+Snapshots CLOB `/prices-history` for active top-volume, recently-closed, and whale-touched markets into `discovery_archive.db` (own SQLite file, gitignored). **The public API drops price history once markets resolve**, so this should run continuously — it's the raw material for copy-execution backtests and insider lead-lag analysis. Research context lives in `research/discovery_plan.md` and `research/implementation_plan.md`.
 
 ## External APIs
 

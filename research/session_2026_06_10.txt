@@ -1,0 +1,164 @@
+Session Notes — 2026-06-10
+==========================
+
+## What was built
+
+### New: algorithms/insider_flow/
+
+A second trading algorithm alongside copy_trade. Watches the platform-wide
+trade firehose in real time and copies large buys that match the documented
+insider fingerprint: fresh wallet, first big bet, long odds, non-sports market.
+
+Filter chain (cheap to expensive):
+  1. BUY side only
+  2. Entry odds ≤ 0.35 (long shots; favorites carry no edge)
+  3. Notional ≥ min_cash_size_usdc (defense-in-depth vs API filter)
+  4. Title not matching sports keywords (" vs ", "O/U", "Spread")
+  5. We don't already hold a full position in this market
+  6. Wallet freshness check via one /activity page — young account, few prior
+     trades. Lookup failure = do NOT copy (fail closed).
+
+Exit: hold-to-resolution. Every N polls, open positions are swept against
+Gamma. Settled when the market closes.
+
+Wired into algorithms/profiles/experimental.py as Mode.PAPER.
+
+Configurable via INSIDERFLOW_* env vars. Key defaults:
+  - INSIDERFLOW_MIN_CASH=5000
+  - INSIDERFLOW_MAX_ODDS=0.35
+  - INSIDERFLOW_MAX_WALLET_AGE_DAYS=14
+  - INSIDERFLOW_MAX_PRIOR_TRADES=10
+  - INSIDERFLOW_BET_SIZE=10
+  - INSIDERFLOW_SETTLE_EVERY=20
+
+
+### New: discovery/archive.py
+
+Standalone process that continuously snapshots CLOB price history into its own
+SQLite file (discovery_archive.db). The CLOB drops all history for resolved
+markets — a 2025 market returns zero points at any fidelity. Without this
+running, there is no dataset for backtesting or insider lead-lag analysis.
+
+Universe sources (unioned):
+  - Active top-volume markets (Gamma /markets?order=volumeNum)
+  - Recently-closed top-volume markets (last 7 days)
+  - Whale-touched markets from the /trades firehose (>$10k notional)
+
+Run as:
+  python -m discovery.archive --once            # cron
+  python -m discovery.archive --loop --every 3600
+
+
+### New fetcher primitives (bot/fetcher.py)
+
+  fetch_global_trades(min_cash_usdc, limit)  — platform-wide whale firehose
+  fetch_wallet_stats(address)                — freshness profile (age, trade count)
+  market_is_resolved(market_dict)            — Gamma closed/resolved flag check
+  fetch_price_history(token_id, fidelity)    — CLOB price timeseries
+  fetch_top_markets(closed, limit)           — top-volume markets from Gamma
+  SeenRing(maxlen)                           — shared bounded LRU dedupe class
+
+
+### New model (bot/models.py)
+
+  GlobalTrade dataclass — parsed row from the platform-wide /trades firehose
+
+
+---
+
+## Code review findings fixed (8 total)
+
+1. HIGH — _market_is_resolved moved from bot.runner to bot.fetcher (public name
+   market_is_resolved). runner.py and insider_flow now import it from fetcher.
+   Prevents InsiderFlow from transitively importing py_clob_client, which would
+   crash a paper-only deploy that doesn't have live-trade deps installed.
+   New test: subprocess blocks py_clob_client and verifies the import still works.
+
+2. MEDIUM — fetch_wallet_stats null-timestamp bug fixed. Any row with
+   timestamp=None was mapped to 0, making min(timestamps)=0, which made every
+   wallet look decades old and silently fail freshness checks. Fix: filter
+   nulls before min(). New test covers the case.
+
+3. MEDIUM — snapshot_all now uses delta fetches. Previously re-downloaded full
+   history for every token on every pass. Now reads last_snapshot per market
+   and passes start_ts=(last_snapshot - 2h) to fetch_price_history. First pass
+   per market still pulls full history. Without this, bandwidth and insert load
+   grow without bound as the archive ages.
+
+4. MEDIUM — collect_universe now archives both outcome tokens for whale-flow
+   markets. Previously synthesized a single-token market dict from the firehose
+   row, losing the complementary side. Now resolves the full clobTokenIds from
+   Gamma for new markets. Already-tracked markets skip the Gamma lookup (no
+   per-pass cost on hot markets). Falls back to the traded token if Gamma fails.
+
+5. LOW — make_global_trade helper moved from tests/test_insider_flow.py to
+   tests/conftest.py. test_archive.py was importing it across test modules
+   (import would break if test_insider_flow.py was renamed or moved).
+
+6. LOW — Shared helpers deduplicated:
+   - env_value(*names, default) added to bot/config.py; both params modules
+     use it instead of their own hand-rolled _env functions.
+   - SeenRing class added to bot/fetcher.py; copy_trade/algorithm.py and
+     insider_flow/algorithm.py now use it instead of their own OrderedDict rings.
+
+7. LOW — discovery/archive.py DEFAULT_DB was read at module import time
+   (os.getenv at module level). If the module was imported before dotenv loaded,
+   the path was frozen wrong. Replaced with default_db_path() called at runtime
+   inside connect()/run_once()/CLI.
+
+8. LOW — Wallet freshness verdicts now cached per instance with a 5-minute TTL
+   (WALLET_VERDICT_TTL_SECONDS=300, WALLET_CACHE_MAX=1000). A whale often
+   appears in multiple firehose rows in one burst; each uncached lookup is a
+   blocking /activity round-trip. Failed lookups are not cached so the wallet's
+   next row retries. Two new tests cover caching and retry behavior.
+
+
+---
+
+## Test suite
+
+162 tests, 0 failures.
+New tests added this session: 26 (test_insider_flow, test_archive, test_fetcher,
+test_runner updated for market_is_resolved relocation).
+
+
+---
+
+## Detector quality assessment
+
+Signal basis: real. The Venezuela election, Google top-searched, Iran strikes
+markets all involved fresh wallets making large first bets at long odds and
+winning. The filter chain matches that pattern.
+
+Gaps to address before going live:
+
+  - No backtested precision. Unknown what fraction of trades passing all filters
+    are real insiders vs. first-time bettors or coincidences.
+
+  - Exit strategy is passive. Hold-to-resolution means no mirroring of the
+    insider's sell, which may be where much of their alpha lives.
+
+  - Position size is flat. A $500k signal and a $5k signal both yield a $10
+    copy. Signal strength should inform sizing.
+
+  - High-PnL statistical detector not built yet (planned as Build 2).
+    discovery/archive.py is the foundation; the analysis pipeline
+    (discovery/score.py — Poisson-binomial Z-test + BH-FDR) has not been
+    written. Without it there is no way to surface accounts with statistically
+    significant win rates to copy prospectively.
+
+  - No sybil guard. At $10 bet sizes irrelevant; worth revisiting at scale.
+
+Run in paper mode until the archive has several months of data and the Build 2
+scoring pipeline can validate that copied wallets win at above-chance rates.
+
+
+---
+
+## Next steps (Build 2)
+
+  discovery/universe.py   — enumerate candidate wallets from top markets
+  discovery/score.py      — Poisson-binomial Z-test per wallet, BH-FDR correction
+  discovery/timing.py     — lead-lag analysis (does the wallet buy before the move?)
+  discovery/report.py     — emit candidates.json for the copy-trade profile
+  algorithms/profiles/discovery_paper.py — auto-boot candidates as paper followers
