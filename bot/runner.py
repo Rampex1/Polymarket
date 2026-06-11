@@ -465,11 +465,14 @@ def _place_buy(
 ) -> FillResult:
     try:
         if order_type == "market":
+            # price=0 → SDK calls calculate_market_price and prices the
+            # order at the level needed to fill against current book depth.
+            # The bot's slippage gate (run upstream) already bounded drift
+            # vs signal_price, so this won't walk further than tolerated.
             args = MarketOrderArgs(
                 token_id=trade.asset_id,
                 amount=scaled_usdc,
                 side="BUY",
-                price=trade.price,
             )
             signed = client.create_market_order(args)
             resp = client.post_order(signed, OrderType.FAK)
@@ -504,7 +507,6 @@ def _place_sell(
                 token_id=trade.asset_id,
                 amount=shares,
                 side="SELL",
-                price=trade.price,
             )
             signed = client.create_market_order(args)
             resp = client.post_order(signed, OrderType.FAK)
