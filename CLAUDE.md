@@ -40,6 +40,8 @@ bot/
   positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
   notifier.py             # Discord alerts + midnight daily summary thread
+  signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
+  sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
 algorithms/
   __init__.py             # Registry — PROFILE env var selects which profile's ALGORITHMS run
   copy_trade/             # Mirror a known target wallet
@@ -54,6 +56,7 @@ algorithms/
     experimental.py       # Mode.PAPER variants for tuning / A/B testing (incl. insider_flow)
 discovery/
   archive.py              # Price-history archiver (CLOB drops history at resolution — hoard it)
+data/                     # All SQLite files (positions.db, discovery_archive.db) — gitignored
 research/                 # Strategy research notes + plans (discovery_plan.md, implementation_plan.md)
 scripts/
   reset_paper_trade_db.py
@@ -92,7 +95,7 @@ The shared CLOB client is built **once**, and only if at least one enabled algor
 | Variable | Notes |
 |---|---|
 | `PROFILE` | Selects `algorithms/profiles/<name>.py` and prefers `.env.<profile>`. Default `default`. |
-| `DB_PATH` | SQLite file path (default `positions.db`) |
+| `DB_PATH` | SQLite file path (default `data/positions.db`; an existing legacy `./positions.db` keeps working with a warning) |
 | `DISCORD_WEBHOOK_URL` | Discord incoming webhook (optional) |
 | `TIMEZONE` | Daily-summary rollover tz (default `UTC`) |
 | `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is your Polymarket **proxy wallet** (from the profile URL) and is required for live — without it orders sign correctly but debit the wrong account. |
@@ -166,6 +169,7 @@ Thread-local connections, WAL mode. All rows are partitioned by an `algo` column
 - `trade_log` — all executed trades (BUY/SELL/REDEEM), tagged with `algo`
 - `daily_stats` — per-(date, algo) realized P&L
 - `paper_account` — virtual cash balance, PK `algo`
+- `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON captured at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data for confidence models — log raw observables, never derived scores.
 
 `db._migrate()` upgrades older v0/v1 databases in place (adds `paper`/`algo` columns, repartitions PKs) idempotently.
 
