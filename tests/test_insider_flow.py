@@ -441,6 +441,25 @@ def test_settle_sweep_emits_settle_for_resolved_market(
     assert intents[0].market_id == "m1"
 
 
+def test_settle_sweep_skips_closed_but_undetermined_market(
+    algo_sweeping, stub_firehose, tracker, monkeypatch
+):
+    """Trading has ended but the outcome is still in the UMA window —
+    outcomePrices is the last book, not a settlement. Must NOT settle:
+    a wrong close price would permanently mislabel the signal rows."""
+    from bot import fetcher
+
+    seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
+    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
+
+    stub_firehose([])
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"closed": True, "outcomePrices": '["0.97", "0.03"]'},
+    )
+    assert list(algo_sweeping.poll()) == []
+
+
 def test_settle_sweep_leaves_unresolved_markets_alone(
     algo_sweeping, stub_firehose, tracker, monkeypatch
 ):

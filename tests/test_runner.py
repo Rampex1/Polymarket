@@ -388,7 +388,7 @@ def test_dispatch_settle_ambiguous_leaves_open(tracker, risk, algo,
 
 def test_dispatch_settle_uses_gamma_when_closed(tracker, risk, algo,
                                                 default_params, monkeypatch):
-    """Gamma's `closed` flag → trust outcomePrices."""
+    """Closed market with outcomePrices pinned to 0/1 → trust Gamma."""
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
     tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
@@ -529,3 +529,60 @@ def test_market_is_resolved_accepts_alternate_flags():
     assert market_is_resolved({"closed": "true"})
     assert not market_is_resolved({})
     assert not market_is_resolved({"closed": False, "resolved": False})
+
+
+def test_market_outcome_is_final_requires_determined_outcome():
+    from bot.fetcher import market_outcome_is_final
+
+    # Explicit resolution markers are final on their own.
+    assert market_outcome_is_final({"resolved": True})
+    assert market_outcome_is_final({"resolved": "true"})
+    assert market_outcome_is_final({"umaResolutionStatus": "resolved"})
+
+    # Closed + outcomePrices pinned to exact 0/1 = settled.
+    assert market_outcome_is_final(
+        {"closed": True, "outcomePrices": '["1", "0"]'})
+    assert market_outcome_is_final(
+        {"closed": True, "outcomePrices": ["0", "1"]})
+
+    # Closed alone is NOT final — UMA dispute window.
+    assert not market_outcome_is_final({"closed": True})
+    # Closed with last-book prices (not pinned) is NOT final.
+    assert not market_outcome_is_final(
+        {"closed": True, "outcomePrices": '["0.97", "0.03"]'})
+    # Near-pinned still isn't pinned.
+    assert not market_outcome_is_final(
+        {"closed": True, "outcomePrices": '["0.999", "0.001"]'})
+    # All-zero vector would settle every side at 0 — reject.
+    assert not market_outcome_is_final(
+        {"closed": True, "outcomePrices": '["0", "0"]'})
+    # Open market, garbage, or missing prices.
+    assert not market_outcome_is_final(
+        {"closed": False, "outcomePrices": '["1", "0"]'})
+    assert not market_outcome_is_final(
+        {"closed": True, "outcomePrices": "not json"})
+    assert not market_outcome_is_final({})
+
+
+def test_dispatch_settle_falls_back_when_closed_but_undetermined(
+        tracker, risk, algo, default_params, monkeypatch):
+    """Closed but still in the UMA window → outcomePrices is the last book,
+    not a settlement. Must ignore it and use the CLOB binarization."""
+    from bot import runner, fetcher
+    seed = make_trade(action="BUY", price=0.40, asset_id="winner")
+    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda *a, **kw: {
+            "closed": True,
+            "clobTokenIds": '["winner", "loser"]',
+            "outcomePrices": '["0.97", "0.03"]',
+        },
+    )
+    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+
+    intent = SettleIntent(market_id="m1", signal_id="r1")
+    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    assert tracker.get("m1", paper=True) is None
+    assert tracker.today_pnl_usdc(paper=True) == 6.0

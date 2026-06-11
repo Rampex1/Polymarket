@@ -15,6 +15,7 @@ Design notes:
 """
 
 import collections
+import json
 import logging
 import threading
 import time
@@ -353,19 +354,55 @@ def fetch_market_resolution(market_id: str) -> Optional[dict]:
     return None
 
 
+def _flag_true(val) -> bool:
+    """Gamma boolean fields arrive as bools or strings depending on endpoint."""
+    if isinstance(val, bool):
+        return val
+    return isinstance(val, str) and val.lower() in ("true", "1", "yes")
+
+
 def market_is_resolved(market: dict) -> bool:
     """Check Gamma's closed/resolved flags. Either being truthy implies finality.
 
     Lives here (not in runner) so paper-mode algorithms can check resolution
     without transitively importing py_clob_client.
     """
-    for key in ("closed", "resolved", "archived"):
-        val = market.get(key)
-        if isinstance(val, bool) and val:
-            return True
-        if isinstance(val, str) and val.lower() in ("true", "1", "yes"):
-            return True
-    return False
+    return any(_flag_true(market.get(key)) for key in ("closed", "resolved", "archived"))
+
+
+def market_outcome_is_final(market: dict) -> bool:
+    """True only when Gamma reports a *determined* outcome — stricter than
+    `market_is_resolved`.
+
+    `closed` alone is not finality: a market stops trading at its end date
+    but can sit undetermined through the UMA proposal/dispute window, during
+    which `outcomePrices` still mirrors the last order book. Anything that
+    books P&L or writes outcome labels (which are write-once) must use this
+    check, not the loose one.
+
+    Final means an explicit resolution marker (`resolved` flag or
+    `umaResolutionStatus == "resolved"`), or — belt and braces — a closed
+    market whose outcomePrices vector is already pinned to exact 0/1, which
+    Polymarket only writes at resolution.
+    """
+    if _flag_true(market.get("resolved")):
+        return True
+    uma = market.get("umaResolutionStatus")
+    if isinstance(uma, str) and uma.lower() == "resolved":
+        return True
+
+    if not _flag_true(market.get("closed")):
+        return False
+    prices = market.get("outcomePrices")
+    try:
+        price_list = json.loads(prices) if isinstance(prices, str) else prices
+        if not price_list:
+            return False
+        floats = [float(p) for p in price_list]
+    except (TypeError, ValueError):
+        return False
+    # Exact-pin test: live books quote at most 0.999, so 0/1 means settled.
+    return all(f in (0.0, 1.0) for f in floats) and 1.0 in floats
 
 
 # ---------------------------------------------------------------------------

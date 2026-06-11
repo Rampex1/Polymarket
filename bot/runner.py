@@ -604,13 +604,15 @@ def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
 
     Strategy (in order):
       1. Ask Gamma for the market and *only* trust outcomePrices if the
-         market is explicitly closed/resolved.
+         outcome is actually determined (strict check — a merely-closed
+         market can still be in the UMA dispute window, where outcomePrices
+         is the last order book, not a settlement).
       2. Fall back to CLOB last-trade-price binarized to {0, 1}.
       3. If neither yields a confident answer, return None and leave the
          position open.
     """
     market = fetcher.fetch_market_resolution(market_id)
-    if market and fetcher.market_is_resolved(market):
+    if market and fetcher.market_outcome_is_final(market):
         outcome_price = _gamma_outcome_price(market, asset_id)
         if outcome_price is not None:
             return outcome_price

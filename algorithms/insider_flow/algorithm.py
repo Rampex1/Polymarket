@@ -236,9 +236,14 @@ class InsiderFlowAlgorithm(Algorithm):
     # ── Exit: settle resolved markets ────────────────────────────────────────
 
     def _settle_sweep(self) -> Iterator[SettleIntent]:
+        # Strict finality gate: `closed` alone means trading ended, not that
+        # the outcome is determined (UMA dispute window). Settling there
+        # would book P&L off a stale book and permanently mislabel this
+        # market's signal rows. Undetermined markets just wait for a later
+        # sweep — resolution is not time-sensitive.
         for pos in self._tracker.all_open(paper=self._paper):
             market = fetcher.fetch_market_resolution(pos.market_id)
-            if market and fetcher.market_is_resolved(market):
+            if market and fetcher.market_outcome_is_final(market):
                 logger.info(
                     "[%s] Market resolved — settling: %s",
                     self.params.name, pos.question[:55],
