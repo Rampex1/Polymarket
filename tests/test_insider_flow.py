@@ -333,7 +333,7 @@ def test_insider_flow_imports_without_py_clob_client():
         "import sys\n"
         "class _Block:\n"
         "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name.split('.')[0] == 'py_clob_client':\n"
+        "        if name.split('.')[0] in ('py_clob_client', 'py_clob_client_v2'):\n"
         "            raise ImportError('blocked: ' + name)\n"
         "sys.meta_path.insert(0, _Block())\n"
         "import algorithms.insider_flow.algorithm\n"
