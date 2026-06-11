@@ -12,11 +12,18 @@ Example: two CopyTrade variants with different tier sizes, both paper.
 from dataclasses import replace
 
 from algorithms.copy_trade import CopyTradeAlgorithm, CopyTradeParams
+from algorithms.insider_flow import InsiderFlowAlgorithm, InsiderFlowParams
 from bot.algorithm import Mode
 
 _BASE = CopyTradeParams()
 
 ALGORITHMS = [
+    # Fresh-wallet suspicious-flow detector — paper validation phase.
+    # Copies large long-odds BUYs from young wallets (the documented insider
+    # fingerprint). Params are INSIDERFLOW_* env-driven; defaults are sane.
+    InsiderFlowAlgorithm(
+        params=replace(InsiderFlowParams(), name="insider_flow_paper", mode=Mode.PAPER),
+    ),
     CopyTradeAlgorithm(
         params=replace(
             _BASE,
