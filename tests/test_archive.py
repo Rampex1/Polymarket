@@ -24,6 +24,49 @@ def conn(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# data/ directory — default path + auto-created parents
+# ---------------------------------------------------------------------------
+
+
+def test_connect_creates_missing_parent_dirs(tmp_path):
+    from discovery import archive
+
+    nested = tmp_path / "data" / "deep" / "arch.db"
+    c = archive.connect(str(nested))
+    try:
+        assert nested.exists()
+    finally:
+        c.close()
+
+
+def test_default_db_path_prefers_data_dir(tmp_path, monkeypatch):
+    import os
+
+    from discovery import archive
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DISCOVERY_ARCHIVE_DB", raising=False)
+    assert archive.default_db_path() == os.path.join("data", "discovery_archive.db")
+
+
+def test_default_db_path_legacy_fallback(tmp_path, monkeypatch):
+    from discovery import archive
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DISCOVERY_ARCHIVE_DB", raising=False)
+    (tmp_path / "discovery_archive.db").touch()
+    assert archive.default_db_path() == "discovery_archive.db"
+
+
+def test_default_db_path_env_override_wins(tmp_path, monkeypatch):
+    from discovery import archive
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DISCOVERY_ARCHIVE_DB", "/elsewhere/a.db")
+    assert archive.default_db_path() == "/elsewhere/a.db"
+
+
+# ---------------------------------------------------------------------------
 # Storage primitives
 # ---------------------------------------------------------------------------
 

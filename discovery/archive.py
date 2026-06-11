@@ -30,8 +30,22 @@ logger = logging.getLogger(__name__)
 
 def default_db_path() -> str:
     """Archive DB path, read at call time so dotenv loading (which may
-    happen after this module is imported) is respected."""
-    return os.getenv("DISCOVERY_ARCHIVE_DB", "discovery_archive.db")
+    happen after this module is imported) is respected.
+
+    New default lives under data/; an existing legacy ./discovery_archive.db
+    with no data/ counterpart keeps being used so a deployment that pulls
+    this change doesn't silently start a second archive."""
+    env = os.getenv("DISCOVERY_ARCHIVE_DB")
+    if env:
+        return env
+    new_path = os.path.join("data", "discovery_archive.db")
+    if os.path.exists("discovery_archive.db") and not os.path.exists(new_path):
+        logger.warning(
+            "Using legacy ./discovery_archive.db — move it to data/ "
+            "(or set DISCOVERY_ARCHIVE_DB) to adopt the new layout."
+        )
+        return "discovery_archive.db"
+    return new_path
 
 
 # Universe defaults: how many top-volume markets per Gamma source, and the
@@ -67,7 +81,11 @@ CREATE TABLE IF NOT EXISTS tracked_markets (
 
 def connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     """Open (and if needed create) the archive DB. WAL for concurrent reads."""
-    conn = sqlite3.connect(db_path or default_db_path())
+    path = db_path or default_db_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
     conn.commit()
