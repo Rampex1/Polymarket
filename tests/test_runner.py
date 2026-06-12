@@ -130,21 +130,28 @@ def test_parse_fill_unmatched_status_returns_failure():
 
 
 def test_parse_fill_uses_actual_amounts_for_buy():
+    """BUY: we give USDC (making), we receive tokens (taking).
+
+    Direction validated against prod fills 2026-06-12: a $1.00 buy at
+    ~0.48 returned makingAmount=1.0, takingAmount=2.08.
+    """
     from bot.runner import _parse_fill
     fill = _parse_fill(
-        {"success": True, "takingAmount": 10.0, "makingAmount": 18.0},
+        {"success": True, "makingAmount": 1.0, "takingAmount": 2.08},
         side="BUY",
     )
     assert fill.success
-    assert fill.amount_usdc == 10.0
-    assert fill.shares == 18.0
-    assert abs(fill.fill_price - (10.0 / 18.0)) < 1e-9
+    assert fill.amount_usdc == 1.0
+    assert fill.shares == 2.08
+    assert abs(fill.fill_price - (1.0 / 2.08)) < 1e-9
+    assert fill.fill_price <= 1.0          # prices above $1 are impossible
 
 
 def test_parse_fill_uses_actual_amounts_for_sell():
+    """SELL: we give tokens (making), we receive USDC (taking)."""
     from bot.runner import _parse_fill
     fill = _parse_fill(
-        {"success": True, "takingAmount": 20.0, "makingAmount": 14.0},
+        {"success": True, "makingAmount": 20.0, "takingAmount": 14.0},
         side="SELL",
     )
     assert fill.success
@@ -155,12 +162,12 @@ def test_parse_fill_uses_actual_amounts_for_sell():
 def test_parse_fill_accepts_alternative_field_names():
     from bot.runner import _parse_fill
     fill = _parse_fill(
-        {"success": True, "taker_amount": "10.0", "maker_amount": "18.0"},
+        {"success": True, "maker_amount": "1.0", "taker_amount": "2.0"},
         side="BUY",
     )
     assert fill.success
-    assert fill.amount_usdc == 10.0
-    assert fill.shares == 18.0
+    assert fill.amount_usdc == 1.0
+    assert fill.shares == 2.0
 
 
 def test_parse_fill_rejects_success_without_amounts():

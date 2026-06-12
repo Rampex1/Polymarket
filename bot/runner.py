@@ -497,10 +497,10 @@ def _place_buy(
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
         # Log the raw response (repr) so a misparse can be diagnosed from the
-        # logs alone — the field names `_parse_fill` accepts (takingAmount /
-        # makingAmount and aliases) are inferred from py_clob_client docs, not
-        # validated against a captured live response. Keep this log permanent
-        # until at least one prod fill is verified end-to-end.
+        # logs alone. The making/taking direction in `_parse_fill` was
+        # validated against prod fills + on-chain balances on 2026-06-12;
+        # the snake_case aliases remain unverified — keep this log until
+        # they have been seen in the wild too.
         logger.info("RAW BUY order response: %r", resp)
         return _parse_fill(resp, side="BUY")
     except Exception as e:
@@ -567,12 +567,16 @@ def _parse_fill(resp, side: str) -> FillResult:
             reason="success but no fill amounts in response",
         )
 
+    # For an order WE created: makingAmount is what we give, takingAmount
+    # is what we receive. Validated against live fills 2026-06-12 — the
+    # inverse mapping recorded $1 tier-1 buys as "1.0 shares" with
+    # impossible >1.0 avg prices (shares/cost transposed vs on-chain).
     if side == "BUY":
-        spent = taking
-        shares = making
+        spent = making        # we give USDC
+        shares = taking       # we receive tokens
     else:
-        spent = making
-        shares = taking
+        spent = taking        # we receive USDC
+        shares = making       # we give tokens
 
     if shares <= 0 or spent <= 0:
         return FillResult(False, 0, 0, 0, reason="zero fill")
