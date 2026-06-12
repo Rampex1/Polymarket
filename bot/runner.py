@@ -412,17 +412,17 @@ def _slippage_ok(
             "[%s] No current price for slippage check — refusing: %s",
             algo_name, trade.question[:50],
         )
-        notifier.on_slippage_skipped(trade, drift_pct=float("nan"), algo_name=algo_name)
         return False
     if trade.price <= 0:
         return True
     drift = abs(current_price - trade.price) / trade.price
     if drift > max_slippage:
+        # Log-only: a fast-moving market spams dozens of these per match,
+        # and the skip is the gate working as intended, not an incident.
         logger.warning(
             "[%s] Slippage %.1f%% > max %.1f%%, skipping: %s",
             algo_name, drift * 100, max_slippage * 100, trade.question[:50],
         )
-        notifier.on_slippage_skipped(trade, drift * 100, algo_name=algo_name)
         return False
     return True
 

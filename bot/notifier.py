@@ -180,13 +180,6 @@ def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "") -> None:
     )
 
 
-def on_slippage_skipped(trade: Trade, drift_pct: float, algo_name: str = "") -> None:
-    send(
-        f"{_prefix(algo_name)}⏭ **Slippage skip** ({drift_pct:.1f}%)\n"
-        f"{_esc(trade.question[:80])}"
-    )
-
-
 def on_startup(mode: str, exposure: float, algo_name: str = "") -> None:
     send(
         f"{_prefix(algo_name)}🚀 **Bot started** — {_esc(mode)} mode\n"
