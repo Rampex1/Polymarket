@@ -39,11 +39,24 @@ class ProfileError(RuntimeError):
 
 
 def available_profiles(config_dir: str = CONFIG_DIR) -> list[str]:
+    """Profile names runnable via PROFILE=<name>.
+
+    config/ also holds non-profile TOML (e.g. the webhooks registry), so
+    only files with [[algorithm]] blocks count.
+    """
     if not os.path.isdir(config_dir):
         return []
-    return sorted(
-        f[: -len(".toml")] for f in os.listdir(config_dir) if f.endswith(".toml")
-    )
+    names = []
+    for f in sorted(os.listdir(config_dir)):
+        if not f.endswith(".toml"):
+            continue
+        try:
+            with open(os.path.join(config_dir, f), "rb") as fh:
+                if tomllib.load(fh).get("algorithm"):
+                    names.append(f[: -len(".toml")])
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+    return names
 
 
 def _coerce(params_cls, kwargs: dict) -> dict:

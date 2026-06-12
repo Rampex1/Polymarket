@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+config/webhooks.toml
 .venv/
 __pycache__/
 *.pyc
