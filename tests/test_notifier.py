@@ -82,6 +82,64 @@ def test_buy_executed_format(capture_send):
     assert "0.550" in body
 
 
+def test_buy_executed_shows_shares_and_drift(capture_send):
+    """Fill detail: how many shares the spend bought and how far the fill
+    drifted from the signal price."""
+    from bot import notifier
+
+    t = make_trade(action="BUY", price=0.50, outcome="Yes")
+    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
+    body = capture_send[-1]["content"]
+    assert "1.82 shares" in body                  # 1.0 / 0.55
+    assert "signal 0.500" in body
+    assert "+10.0%" in body
+
+
+def test_signal_message_includes_reason_and_features(capture_send):
+    """The detection message must say WHY — wallet context is the whole
+    point of the alert."""
+    import time
+
+    from bot import notifier
+    from bot.algorithm import OpenIntent
+
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=2.0, signal_price=0.20,
+        question="Will X happen?", outcome="Yes", signal_id="s1",
+        reason="fresh wallet 0x8b18…ed9 bet $10,000 @ 0.20",
+        features={
+            "wallet_age_seconds": 7200.0,
+            "trade_count": 1,
+            "portfolio_value_usdc": 2500.0,
+            "market_category": "politics",
+            "cash_usdc": 10_000.0,
+            "market_end_ts": time.time() + 7 * 86_400,
+        },
+    )
+    notifier.on_signal(intent, "insider_flow_paper")
+    body = capture_send[-1]["content"]
+    assert "fresh wallet" in body
+    assert "0.1d old" in body                     # 7200s ≈ 0.083d → 0.1
+    assert "1 prior trades" in body
+    assert "portfolio $2,500" in body
+    assert "politics" in body
+    assert "resolves in 7d" in body
+
+
+def test_signal_message_without_features_stays_compact(capture_send):
+    """Copy-trade intents carry no features — no empty detail lines."""
+    from bot import notifier
+    from bot.algorithm import OpenIntent
+
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        question="Q?", outcome="Yes", signal_id="s1",
+    )
+    notifier.on_signal(intent, "copy_trade")
+    body = capture_send[-1]["content"]
+    assert "↳" not in body
+
+
 def test_skip_when_webhook_missing(monkeypatch):
     from bot import notifier
 
