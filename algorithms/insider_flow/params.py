@@ -40,14 +40,25 @@ def _default_exclude_titles() -> tuple:
 
 
 def _default_exclude_categories() -> tuple:
-    """Gamma category/tag substrings to reject (lowercased). The authoritative
-    sports screen — title patterns miss formats like "Will <team> win on
-    <date>?", but Gamma tags those markets Sports. "sports" also matches
-    "esports" by substring."""
+    """Gamma category/tag substrings to reject (lowercased) — markets where a
+    fresh-wallet whale bet carries no insider signal:
+
+    - sports: gambling, not private knowledge. Title patterns miss formats
+      like "Will <team> win on <date>?", but Gamma tags those markets Sports.
+      "sports" also matches "esports" by substring.
+    - crypto: price-level markets ("BTC to $150k by Friday?") that no small
+      group can privately know, and exactly where degenerate fresh-wallet
+      longshots concentrate. Matches "Crypto"/"Cryptocurrency" by substring.
+      (Trade-off: also drops crypto-adjacent *regulatory* markets — ETF
+      approvals, token launches — which are knowable. Acceptable while
+      capital is thin; revisit with a knowability model.)
+    - weather: hurricanes, earthquakes, eruptions, temperature records,
+      case counts — acts of nature nobody privately knows.
+    """
     raw = os.getenv(_P + "EXCLUDE_CATEGORIES")
     if raw is not None and raw != "":
         return tuple(c.strip().lower() for c in raw.split(",") if c.strip())
-    return ("sports",)
+    return ("sports", "crypto", "weather")
 
 
 @dataclass(frozen=True)

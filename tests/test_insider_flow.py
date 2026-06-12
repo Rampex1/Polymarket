@@ -230,6 +230,22 @@ def test_skips_sports_tagged_market(algo, stub_firehose, stub_stats, monkeypatch
     assert list(algo.poll()) == []
 
 
+def test_skips_crypto_category_market(algo, stub_firehose, stub_stats,
+                                      monkeypatch):
+    """Nobody privately knows whether BTC hits a price level — crypto
+    longshots are degenerate-gambler magnets that pass every other gate."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade(title="Will Bitcoin hit $150k by June 30?")])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "category": "Crypto",
+                     "endDate": end_iso(7), "events": []},
+    )
+    assert list(algo.poll()) == []
+
+
 def test_market_lookup_failure_fails_closed(algo, stub_firehose, stub_stats,
                                             monkeypatch):
     """The category gate alone used to fail open on a Gamma failure; the
@@ -305,9 +321,18 @@ def test_category_verdict_cached_per_market(algo, stub_firehose, stub_stats,
 def test_exclude_categories_env_override(monkeypatch):
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    monkeypatch.setenv("INSIDERFLOW_EXCLUDE_CATEGORIES", "sports,crypto")
+    monkeypatch.setenv("INSIDERFLOW_EXCLUDE_CATEGORIES", "sports,weather")
     p = InsiderFlowParams()
-    assert p.exclude_categories == ("sports", "crypto")
+    assert p.exclude_categories == ("sports", "weather")
+
+
+def test_default_exclusions_are_no_insider_signal_classes(monkeypatch):
+    """Sports is gambling, crypto price levels and weather are privately
+    unknowable — none of them can carry insider signal."""
+    from algorithms.insider_flow.params import InsiderFlowParams
+
+    monkeypatch.delenv("INSIDERFLOW_EXCLUDE_CATEGORIES", raising=False)
+    assert InsiderFlowParams().exclude_categories == ("sports", "crypto", "weather")
 
 
 def test_features_include_market_category(algo, stub_firehose, stub_stats):
