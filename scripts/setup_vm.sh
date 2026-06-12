@@ -39,6 +39,22 @@ fi
 for key in POLY_PRIVATE_KEY POLY_FUNDER_ADDRESS POLY_API_KEY POLY_API_SECRET POLY_API_PASSPHRASE; do
     grep -q "^${key}=" .env || { echo "ERROR: ${key} missing from .env." >&2; exit 1; }
 done
+# .env is secrets-only. A DISCORD_WEBHOOK_URL here would override the
+# registry for EVERY profile (paper falls back to .env too, so paper
+# alerts would land in the prod channel). Other keys below are dead
+# since the TOML refactor; POLY_SIGNATURE_TYPE only goes if it restates
+# the default (3).
+for key in DISCORD_WEBHOOK_URL TARGET_ADDRESS COPYTRADE_TARGET_ADDRESS TIMEZONE; do
+    if grep -q "^${key}=" .env; then
+        echo "    removing stale ${key} from .env"
+        sed -i.bak "/^${key}=/d" .env
+    fi
+done
+if grep -q "^POLY_SIGNATURE_TYPE=3$" .env; then
+    echo "    removing POLY_SIGNATURE_TYPE=3 (restates the default)"
+    sed -i.bak "/^POLY_SIGNATURE_TYPE=3$/d" .env
+fi
+rm -f .env.bak
 
 echo "==> Validating profiles (fail fast before touching tmux)"
 PROFILE=experimental python -m bot.params --effective > /dev/null
