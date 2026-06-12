@@ -128,7 +128,7 @@ Tier knobs are per-instance, so profiles can run multiple copy-trade variants wi
 
 ### Per-algorithm settings — insider_flow (`algorithms/insider_flow/params.py`, `INSIDERFLOW_*` env vars)
 
-Detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed), and exits positions at market resolution via a periodic Gamma sweep.
+Detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), screens markets against Gamma category/tags (sports = gambling, not signal) and a time-value gate (must resolve soon and out-earn an index fund for the wait — unknown end date fails closed), then vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed). Survivors are buffered for a window, ranked by conviction score, and only the top N are copied. Exits at market resolution via a periodic Gamma sweep. Defaults are sized for a **~$20 prod bankroll** — scale via env when capital grows.
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -137,11 +137,18 @@ Detects the documented insider fingerprint: **fresh wallets making large first b
 | `INSIDERFLOW_MAX_ODDS` | `0.35` | Only copy BUYs at/below these odds |
 | `INSIDERFLOW_MAX_WALLET_AGE_DAYS` | `14` | Wallet freshness window |
 | `INSIDERFLOW_MAX_PRIOR_TRADES` | `10` | Max prior trades for "fresh" |
-| `INSIDERFLOW_BET_SIZE` | `10` | Our copy size (top-up target, USDC) |
-| `INSIDERFLOW_EXCLUDE_TITLES` | `" vs. ", " vs ", O/U, Spread` | Comma-sep title patterns (sports filter) |
+| `INSIDERFLOW_BET_SIZE` | `2` | Our copy size (top-up target, USDC) |
+| `INSIDERFLOW_EXCLUDE_TITLES` | `" vs. ", " vs ", O/U, Spread` | Comma-sep title patterns (sports pre-filter) |
+| `INSIDERFLOW_EXCLUDE_CATEGORIES` | `sports` | Gamma category/tag substrings to reject — the authoritative sports screen |
+| `INSIDERFLOW_MAX_DAYS_TO_RESOLUTION` | `30` | Skip markets resolving further out (insiders bet on imminent events) |
+| `INSIDERFLOW_MIN_ANNUAL_RETURN` | `1.0` | Win-case return, annualized over time-to-resolution, must beat this (1.0 = +100%/yr) |
+| `INSIDERFLOW_BUFFER_SECONDS` | `900` | Candidate buffer window; 0 = copy immediately |
+| `INSIDERFLOW_BUFFER_TOP_N` | `2` | Copy only the N best-scored candidates per window |
+| `INSIDERFLOW_BUFFER_MAX` | `20` | Buffer overflow → early flush |
 | `INSIDERFLOW_POLL_INTERVAL` | `15` | Firehose poll cadence (seconds) |
 | `INSIDERFLOW_SETTLE_EVERY` | `20` | Polls between resolution sweeps |
-| `INSIDERFLOW_MAX_POSITION` / `MAX_EXPOSURE` / `DAILY_LOSS_LIMIT` | `10` / `100` / `50` | Risk caps (this algo's pool) |
+| `INSIDERFLOW_MAX_POSITION` / `MAX_EXPOSURE` / `DAILY_LOSS_LIMIT` | `2` / `10` / `5` | Risk caps (this algo's pool) |
+| `INSIDERFLOW_PAPER_BALANCE` | `20` | Paper bankroll — mirrors planned prod capital |
 | `INSIDERFLOW_MAX_SLIPPAGE` | `0.10` | Wider than copy_trade — these signals move fast |
 
 ### Discovery price archiver

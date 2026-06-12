@@ -19,6 +19,13 @@ from bot.algorithm import Mode, OpenIntent, SettleIntent
 NOW = int(time.time())
 
 
+def end_iso(days_from_now: float) -> str:
+    """Gamma-style ISO-8601 endDate N days from now."""
+    return time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW + days_from_now * 86_400),
+    )
+
+
 def fresh_stats(**overrides):
     """Wallet stats for an unmistakably fresh wallet (hours old, 1 trade)."""
     stats = {
@@ -43,6 +50,11 @@ def _params(**overrides):
         max_prior_trades=10,
         bet_size_usdc=10.0,
         exclude_title_patterns=(" vs. ", " vs ", "O/U", "Spread"),
+        max_days_to_resolution=30.0,
+        min_annualized_return=1.0,
+        buffer_window_seconds=0.0,        # 0 = copy immediately; buffer tests opt in
+        buffer_top_n=2,
+        buffer_max=20,
         settle_check_every=1_000_000,     # effectively off unless a test opts in
         firehose_limit=100,
         poll_interval_seconds=0,
@@ -77,6 +89,23 @@ def _no_value_lookup(monkeypatch):
 
     monkeypatch.setattr(
         fetcher, "fetch_wallet_value", lambda *a, **kw: None, raising=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _non_sports_market(monkeypatch):
+    """Default: Gamma category lookup returns a non-sports market so no test
+    makes a real HTTP call. Category-gate tests override explicitly."""
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {
+            "conditionId": mid,
+            "category": "Politics",
+            "endDate": end_iso(7),
+            "events": [{"tags": [{"label": "Geopolitics", "slug": "geopolitics"}]}],
+        },
     )
 
 
@@ -164,6 +193,207 @@ def test_skips_sports_title_patterns(algo, stub_firehose, stub_stats):
     ])
     stub_stats(fresh_stats())
     assert list(algo.poll()) == []
+
+
+def test_skips_sports_category_market(algo, stub_firehose, stub_stats, monkeypatch):
+    """'Will Bosnia and Herzegovina win on 2026-06-12?' matches no title
+    pattern — the category gate must catch what title heuristics can't."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade(
+        title="Will Bosnia and Herzegovina win on 2026-06-12?")])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "category": "Sports", "events": []},
+    )
+    assert list(algo.poll()) == []
+
+
+def test_skips_sports_tagged_market(algo, stub_firehose, stub_stats, monkeypatch):
+    """Some markets carry no top-level category but are tagged Sports on
+    their event."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade(title="Will FC Basel win on 2026-06-14?")])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {
+            "conditionId": mid,
+            "events": [{"tags": [
+                {"label": "Sports", "slug": "sports"},
+                {"label": "Soccer", "slug": "soccer"},
+            ]}],
+        },
+    )
+    assert list(algo.poll()) == []
+
+
+def test_market_lookup_failure_fails_closed(algo, stub_firehose, stub_stats,
+                                            monkeypatch):
+    """The category gate alone used to fail open on a Gamma failure; the
+    time-value gate supersedes that — without the market row the resolution
+    horizon is unknowable, and an unknowable wait is not bet on."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda mid: None)
+    assert list(algo.poll()) == []
+
+
+def test_market_lookup_failure_is_not_cached(algo, stub_firehose, stub_stats,
+                                             monkeypatch):
+    """A transient Gamma failure fails closed for THAT row only — the
+    market's next trade must retry the lookup, not inherit the failure."""
+    from bot import fetcher
+
+    results = iter([
+        None,
+        {"conditionId": "m1", "category": "Politics",
+         "endDate": end_iso(7), "events": []},
+    ])
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution", lambda mid: next(results),
+    )
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", wallet="0xw1"),
+        make_global_trade(tx_hash="0xt2", wallet="0xw2"),
+    ])
+    stub_stats(fresh_stats())
+    assert len(list(algo.poll())) == 1
+
+
+def test_uncategorized_market_fails_open(algo, stub_firehose, stub_stats,
+                                         monkeypatch):
+    """A fetched market with no category/tag data passes the category gate —
+    it's a noise filter and the title patterns already passed."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "endDate": end_iso(7), "events": []},
+    )
+    assert len(list(algo.poll())) == 1
+
+
+def test_category_verdict_cached_per_market(algo, stub_firehose, stub_stats,
+                                            monkeypatch):
+    """The firehose repeats hot markets constantly — one Gamma lookup per
+    market, not per trade."""
+    from bot import fetcher
+
+    calls = []
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: calls.append(mid) or {
+            "conditionId": mid, "category": "Sports", "events": [],
+        },
+    )
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", wallet="0xw1"),
+        make_global_trade(tx_hash="0xt2", wallet="0xw2"),
+    ])
+    stub_stats(fresh_stats())
+    assert list(algo.poll()) == []
+    assert len(calls) == 1
+
+
+def test_exclude_categories_env_override(monkeypatch):
+    from algorithms.insider_flow.params import InsiderFlowParams
+
+    monkeypatch.setenv("INSIDERFLOW_EXCLUDE_CATEGORIES", "sports,crypto")
+    p = InsiderFlowParams()
+    assert p.exclude_categories == ("sports", "crypto")
+
+
+def test_features_include_market_category(algo, stub_firehose, stub_stats):
+    """The category we vetted against is itself a training feature."""
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert intents[0].features["market_category"] == "politics"
+
+
+# ---------------------------------------------------------------------------
+# Time-value gate — a locked dollar must out-earn the index fund
+# ---------------------------------------------------------------------------
+
+
+def test_skips_market_resolving_too_far_out(algo, stub_firehose, stub_stats,
+                                            monkeypatch):
+    """The Hormuz case: 'true' insider info on a market resolving in six
+    months still locks thin capital for the wait — and real insiders bet on
+    imminent events anyway."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade(
+        title="Strait of Hormuz traffic returns to normal by December 31?")])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "category": "Geopolitics",
+                     "endDate": end_iso(200), "events": []},
+    )
+    assert list(algo.poll()) == []
+
+
+def test_skips_when_annualized_return_below_hurdle(
+    tracker, stub_firehose, stub_stats, monkeypatch
+):
+    """Win-case +400% over 30 days is ~4870%/yr — a 10000%/yr hurdle
+    rejects it. The same trade clears a 1000%/yr hurdle."""
+    from algorithms.insider_flow import InsiderFlowAlgorithm
+    from bot import fetcher
+
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "category": "Politics",
+                     "endDate": end_iso(30), "events": []},
+    )
+    stub_stats(fresh_stats())
+    for hurdle, expected in ((100.0, 0), (10.0, 1)):
+        a = InsiderFlowAlgorithm(params=_params(min_annualized_return=hurdle))
+        a._tracker = tracker
+        a._paper = True
+        stub_firehose([make_global_trade(tx_hash=f"0x{hurdle}")])
+        assert len(list(a.poll())) == expected, f"hurdle={hurdle}"
+
+
+def test_missing_end_date_fails_closed(algo, stub_firehose, stub_stats,
+                                       monkeypatch):
+    """No parseable end date → the wait can't be priced → no bet."""
+    from bot import fetcher
+
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"conditionId": mid, "category": "Politics",
+                     "endDate": "not-a-date", "events": []},
+    )
+    assert list(algo.poll()) == []
+
+
+def test_reason_and_features_carry_resolution_horizon(
+    algo, stub_firehose, stub_stats
+):
+    """The Discord 'why' line must show the time-value math; the raw end
+    timestamp is logged for training."""
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert "resolves in 7d" in intents[0].reason
+    assert "/yr if right" in intents[0].reason
+    end_ts = intents[0].features["market_end_ts"]
+    assert abs(end_ts - (NOW + 7 * 86_400)) < 5
 
 
 def test_skips_old_wallet(algo, stub_firehose, stub_stats):
@@ -404,6 +634,139 @@ def test_partial_position_tops_up_to_bet_size(
     intents = list(algo.poll())
     assert len(intents) == 1
     assert abs(intents[0].usdc_amount - 6.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Candidate buffer — wait out the window, rank, copy only the strongest
+# ---------------------------------------------------------------------------
+
+
+def _buffered_algo(tracker, **overrides):
+    from algorithms.insider_flow import InsiderFlowAlgorithm
+
+    a = InsiderFlowAlgorithm(
+        params=_params(buffer_window_seconds=900.0, **overrides))
+    a._tracker = tracker
+    a._paper = True
+    return a
+
+
+def test_buffer_holds_candidate_instead_of_emitting(
+    tracker, stub_firehose, stub_stats
+):
+    algo = _buffered_algo(tracker)
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+
+    assert list(algo.poll()) == []
+    assert len(algo._buffer) == 1
+
+
+def test_buffer_flushes_after_window(tracker, stub_firehose, stub_stats):
+    algo = _buffered_algo(tracker)
+    stub_firehose([make_global_trade()])
+    stub_stats(fresh_stats())
+    assert list(algo.poll()) == []
+
+    algo._buffer_started -= 901           # age the window instead of mocking time
+    stub_firehose([])
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert isinstance(intents[0], OpenIntent)
+    assert algo._buffer == []
+
+
+def test_buffer_emits_only_top_n_by_score(tracker, stub_firehose, stub_stats):
+    """Three candidates, one slot: the biggest bet (highest conviction
+    score, all else equal) gets copied; the others are dropped for good."""
+    algo = _buffered_algo(tracker, buffer_top_n=1)
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1",
+                          cash_usdc=6_000.0),
+        make_global_trade(tx_hash="0xt2", market_id="m2", asset_id="a2",
+                          cash_usdc=60_000.0),
+        make_global_trade(tx_hash="0xt3", market_id="m3", asset_id="a3",
+                          cash_usdc=10_000.0),
+    ])
+    stub_stats(fresh_stats())
+    assert list(algo.poll()) == []
+
+    algo._buffer_started -= 901
+    stub_firehose([])
+    intents = list(algo.poll())
+    assert len(intents) == 1
+    assert intents[0].market_id == "m2"
+    assert algo._buffer == []
+
+
+def test_buffer_overflow_flushes_early(tracker, stub_firehose, stub_stats):
+    """A burst that fills the buffer flushes immediately — the safety valve
+    must not wait out the window."""
+    algo = _buffered_algo(tracker, buffer_max=2, buffer_top_n=2)
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1"),
+        make_global_trade(tx_hash="0xt2", market_id="m2", asset_id="a2"),
+    ])
+    stub_stats(fresh_stats())
+    assert len(list(algo.poll())) == 2
+
+
+def test_score_ranks_younger_wallet_higher(tracker):
+    """Same cash: an hour-old wallet is more suspicious than a 13-day-old
+    one near the freshness limit."""
+    algo = _buffered_algo(tracker)
+    row = make_global_trade()
+    young = algo._score(row, fresh_stats())
+    older = algo._score(row, fresh_stats(oldest_ts=NOW - 13 * 86_400))
+    assert young > older
+
+
+def test_emitted_features_include_buffer_context(
+    tracker, stub_firehose, stub_stats
+):
+    """Selection pressure itself must be visible in the training data —
+    the sanctioned derived-score exception."""
+    algo = _buffered_algo(tracker, buffer_top_n=2)
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1"),
+        make_global_trade(tx_hash="0xt2", market_id="m2", asset_id="a2"),
+    ])
+    stub_stats(fresh_stats())
+    assert list(algo.poll()) == []
+
+    algo._buffer_started -= 901
+    stub_firehose([])
+    intents = list(algo.poll())
+    assert len(intents) == 2
+    for intent in intents:
+        assert isinstance(intent.features["buffer_score"], float)
+        assert intent.features["buffer_cohort_size"] == 2
+
+
+def test_flush_rechecks_position_between_emits(
+    tracker, stub_firehose, stub_stats
+):
+    """Two same-market candidates in one flush: the runner records the fill
+    between yields (generator laziness), so the second emit must re-check
+    the position and skip instead of doubling it."""
+    algo = _buffered_algo(tracker, buffer_top_n=2)
+    stub_firehose([
+        make_global_trade(tx_hash="0xt1", wallet="0xw1"),
+        make_global_trade(tx_hash="0xt2", wallet="0xw2"),
+    ])
+    stub_stats(fresh_stats())
+    assert list(algo.poll()) == []
+
+    algo._buffer_started -= 901
+    stub_firehose([])
+    gen = algo.poll()
+    first = next(gen)
+    assert first.usdc_amount == 10.0
+    # Simulate the runner filling the first intent before the next yield.
+    seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
+    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20,
+                       paper=True)
+    assert list(gen) == []
 
 
 # ---------------------------------------------------------------------------
