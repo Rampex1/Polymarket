@@ -302,11 +302,11 @@ def test_category_verdict_cached_per_market(algo, stub_firehose, stub_stats,
     assert len(calls) == 1
 
 
-def test_exclude_categories_env_override(monkeypatch):
+def test_exclude_categories_override():
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    monkeypatch.setenv("INSIDERFLOW_EXCLUDE_CATEGORIES", "sports,crypto")
-    p = InsiderFlowParams()
+    assert InsiderFlowParams().exclude_categories == ("sports",)
+    p = InsiderFlowParams(exclude_categories=("sports", "crypto"))
     assert p.exclude_categories == ("sports", "crypto")
 
 
@@ -839,25 +839,22 @@ def test_settle_sweep_leaves_unresolved_markets_alone(
 
 
 # ---------------------------------------------------------------------------
-# Params — env overrides + fail-safe default mode
+# Params — schema overrides + fail-safe default mode
 # ---------------------------------------------------------------------------
 
 
-def test_params_env_overrides(monkeypatch):
+def test_params_overrides():
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    monkeypatch.setenv("INSIDERFLOW_MIN_CASH", "12000")
-    monkeypatch.setenv("INSIDERFLOW_MAX_ODDS", "0.5")
-    monkeypatch.setenv("INSIDERFLOW_MODE", "live")
-
-    p = InsiderFlowParams()
+    p = InsiderFlowParams(
+        min_cash_size_usdc=12_000.0, max_entry_odds=0.5, mode=Mode.LIVE,
+    )
     assert p.min_cash_size_usdc == 12_000.0
     assert p.max_entry_odds == 0.5
     assert p.mode == Mode.LIVE
 
 
-def test_params_default_mode_is_paper(monkeypatch):
+def test_params_default_mode_is_paper():
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    monkeypatch.delenv("INSIDERFLOW_MODE", raising=False)
     assert InsiderFlowParams().mode == Mode.PAPER

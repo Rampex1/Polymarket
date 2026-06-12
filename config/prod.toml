@@ -1,0 +1,16 @@
+# Prod profile — REAL MONEY. Loaded with PROFILE=prod (creds come from
+# .env.prod; this file holds behavior only — never secrets).
+#
+# Keep this list short and conservative. Mode must be explicit on every
+# block; promote a paper variant by copying its block from
+# experimental.toml and flipping mode to "live".
+
+[[algorithm]]
+type = "copy_trade"
+name = "copy_trade_prod"
+mode = "live"
+
+[algorithm.params]
+target_address = "0x9f2fe025f84839ca81dd8e0338892605702d2ca8"   # surfandturf
+# Sizing/risk knobs intentionally at schema defaults ($1/$2/$3 tiers,
+# $3 per-position cap, $12 exposure cap, $4 daily loss limit).

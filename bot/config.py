@@ -10,12 +10,13 @@ for every algorithm running in the process:
   * Database path.
   * Discord webhook URL and timezone.
 
-Mode (paper vs live) is **per-algorithm** now and lives in each algorithm's
-`params.py`. There is no global PAPER_TRADE toggle.
+Mode (paper vs live) is **per-algorithm** and declared per block in
+`config/<profile>.toml`. There is no global PAPER_TRADE toggle.
 
 Algorithm-specific settings (tiers, sizing, risk caps, poll cadence,
-slippage tolerance, target wallet, etc.) live with the algorithm in
-`algorithms/<algo_name>/params.py`.
+slippage tolerance, target wallet, etc.) are NOT env-driven — they live
+in `config/<profile>.toml`, validated against the schemas in
+`algorithms/<algo_name>/params.py` (see bot/profile_loader.py).
 
 Profiles
 --------
@@ -44,21 +45,6 @@ for _candidate in (f".env.{PROFILE}", ".env"):
     if os.path.exists(_candidate):
         load_dotenv(_candidate, override=True)
         break
-
-
-# ── Shared env helper (used by per-algorithm params modules) ─────────────────
-
-def env_value(*names: str, default: str = "") -> str:
-    """First non-empty value among environment variables `names`, else default.
-
-    Treats "" the same as unset so an empty assignment in a .env file
-    doesn't shadow a legacy fallback name.
-    """
-    for name in names:
-        val = os.getenv(name)
-        if val is not None and val != "":
-            return val
-    return default
 
 
 # ── Polymarket API base URLs ─────────────────────────────────────────────────

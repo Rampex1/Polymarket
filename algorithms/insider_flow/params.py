@@ -1,100 +1,67 @@
 """
-Configuration for the insider-flow algorithm.
+Insider-flow parameter schema.
 
-Env naming: every knob is `INSIDERFLOW_<NAME>`. Unlike copy_trade there is
-no legacy fallback — this algorithm is new.
-
-Every field reads its env var through `default_factory` so the environment
-is re-evaluated per instantiation (matters for tests, and means a profile
-can construct params before/after dotenv loading without import-order traps).
+Pure schema — names, types, defaults, docs. Deployment values live in
+`config/<profile>.toml`; this module reads no environment variables.
+`python -m bot.params insider_flow` prints the full knob list.
 """
 
-import os
 from dataclasses import dataclass, field
 
 from bot.algorithm import Mode
-from bot.config import env_value
-
-_P = "INSIDERFLOW_"
 
 
-def _env(name: str, default: str) -> str:
-    return env_value(_P + name, default=default)
+def _doc(default, doc: str):
+    return field(default=default, metadata={"doc": doc})
 
 
-def _default_mode() -> Mode:
-    return Mode(_env("MODE", "paper").lower())
-
-
-def _default_exclude_titles() -> tuple:
-    """Comma-separated env override; default screens out the sports firehose.
-
-    Caveat: " vs " also matches head-to-head political markets ("Trump vs.
-    Newsom…"). Acceptable for v1 — sports dominates the big-cash feed by an
-    order of magnitude. Clear INSIDERFLOW_EXCLUDE_TITLES to disable.
-    """
-    raw = os.getenv(_P + "EXCLUDE_TITLES")
-    if raw is not None and raw != "":
-        return tuple(p for p in raw.split(",") if p)
-    return (" vs. ", " vs ", "O/U", "Spread")
-
-
-def _default_exclude_categories() -> tuple:
-    """Gamma category/tag substrings to reject (lowercased). The authoritative
-    sports screen — title patterns miss formats like "Will <team> win on
-    <date>?", but Gamma tags those markets Sports. "sports" also matches
-    "esports" by substring."""
-    raw = os.getenv(_P + "EXCLUDE_CATEGORIES")
-    if raw is not None and raw != "":
-        return tuple(c.strip().lower() for c in raw.split(",") if c.strip())
-    return ("sports",)
+# Default screens out the sports firehose. Caveat: " vs " also matches
+# head-to-head political markets ("Trump vs. Newsom…"). Acceptable for v1 —
+# sports dominates the big-cash feed by an order of magnitude. Set
+# exclude_title_patterns = [] in the profile to disable.
+_DEFAULT_EXCLUDES = (" vs. ", " vs ", "O/U", "Spread")
 
 
 @dataclass(frozen=True)
 class InsiderFlowParams:
     name: str = "insider_flow"
-    mode: Mode = field(default_factory=_default_mode)
+    mode: Mode = Mode.PAPER          # fail-safe default; profiles set explicitly
 
     # ── Signal filters ───────────────────────────────────────────────────────
-    # Only copy BUYs ≥ this notional…
-    min_cash_size_usdc: float = field(
-        default_factory=lambda: float(_env("MIN_CASH", "5000")))
-    # …at long odds (insider EV lives below ~0.35; also auto-excludes
-    # market-makers and favorites bought at 0.9+)…
-    max_entry_odds: float = field(
-        default_factory=lambda: float(_env("MAX_ODDS", "0.35")))
-    # …from wallets younger than this / with fewer prior trades than this.
-    max_wallet_age_days: float = field(
-        default_factory=lambda: float(_env("MAX_WALLET_AGE_DAYS", "14")))
-    max_prior_trades: int = field(
-        default_factory=lambda: int(_env("MAX_PRIOR_TRADES", "10")))
-    exclude_title_patterns: tuple = field(default_factory=_default_exclude_titles)
-    exclude_categories: tuple = field(default_factory=_default_exclude_categories)
+    min_cash_size_usdc: float = _doc(5_000.0, "Only consider observed trades with at least this notional (USDC).")
+    max_entry_odds: float = _doc(0.35, "Only copy BUYs at/below these odds — insider EV lives at long odds; also auto-excludes market-makers and favorites.")
+    max_wallet_age_days: float = _doc(14.0, "Wallet freshness window — older wallets aren't 'fresh'.")
+    max_prior_trades: int = _doc(10, "Max prior trades for a wallet to count as fresh.")
+    exclude_title_patterns: tuple = field(
+        default=_DEFAULT_EXCLUDES,
+        metadata={"doc": "Skip markets whose title contains any of these (sports filter). Empty list disables."},
+    )
+    # The authoritative sports screen — title patterns miss formats like
+    # "Will <team> win on <date>?", but Gamma tags those markets Sports.
+    # "sports" also matches "esports" by substring.
+    exclude_categories: tuple = field(
+        default=("sports",),
+        metadata={"doc": "Gamma category/tag substrings to reject (lowercased). Empty list disables."},
+    )
 
     # ── Time-value gate ──────────────────────────────────────────────────────
     # Capital locked in a far-future market has opportunity cost (~10%/yr in
     # an index fund) and insiders act on *imminent* events — every documented
     # case resolved within days. Skip markets resolving further out than
-    # this, and require the win-case return, linearly annualized over the
-    # time to resolution, to clear a hurdle: +5% resolving tomorrow is a
-    # great trade, +5% locked for a year is strictly worse than the S&P.
-    max_days_to_resolution: float = field(
-        default_factory=lambda: float(_env("MAX_DAYS_TO_RESOLUTION", "30")))
-    min_annualized_return: float = field(
-        default_factory=lambda: float(_env("MIN_ANNUAL_RETURN", "1.0")))
+    # max_days_to_resolution, and require the win-case return, linearly
+    # annualized over the time to resolution, to clear a hurdle: +5% resolving
+    # tomorrow is a great trade, +5% locked for a year is strictly worse than
+    # the S&P. Unknown end date fails closed.
+    max_days_to_resolution: float = _doc(30.0, "Skip markets resolving further out than this many days.")
+    min_annualized_return: float = _doc(1.0, "Win-case return, annualized over time-to-resolution, must beat this (1.0 = +100%/yr).")
 
     # ── Sizing + cadence ─────────────────────────────────────────────────────
-    # Per-trade copy size. Kept small ($2) until paper results validate the
-    # detector — raise via INSIDERFLOW_BET_SIZE when the data justifies it.
-    bet_size_usdc: float = field(
-        default_factory=lambda: float(_env("BET_SIZE", "2")))
-    poll_interval_seconds: int = field(
-        default_factory=lambda: int(_env("POLL_INTERVAL", "15")))
-    firehose_limit: int = field(
-        default_factory=lambda: int(_env("FIREHOSE_LIMIT", "100")))
-    # Open positions are exited at resolution; sweep every N polls.
-    settle_check_every: int = field(
-        default_factory=lambda: int(_env("SETTLE_EVERY", "20")))
+    # Kept small until paper results validate the detector — raise via the
+    # profile TOML when the data justifies it.
+    bet_size_usdc: float = _doc(2.0, "Our copy size — top-up target per market (USDC).")
+    poll_interval_seconds: int = _doc(15, "Seconds between firehose polls.")
+    firehose_limit: int = _doc(100, "Rows per /trades firehose page.")
+    settle_check_every: int = _doc(20, "Polls between market-resolution sweeps.")
 
     # ── Candidate buffer — select the best signals, don't copy them all ─────
     # Passing candidates are held for this window, ranked by conviction
@@ -102,40 +69,32 @@ class InsiderFlowParams:
     # randomly dumb, not insiders). 0 disables buffering (copy immediately).
     # Trade-off: waiting costs entry price on fast movers — the slippage
     # gate still rejects anything that drifted > max_slippage meanwhile.
-    buffer_window_seconds: float = field(
-        default_factory=lambda: float(_env("BUFFER_SECONDS", "900")))
-    buffer_top_n: int = field(
-        default_factory=lambda: int(_env("BUFFER_TOP_N", "2")))
-    # Safety valve: a burst filling the buffer flushes it early.
-    buffer_max: int = field(
-        default_factory=lambda: int(_env("BUFFER_MAX", "20")))
+    buffer_window_seconds: float = _doc(900.0, "Candidate buffer window (seconds); 0 = copy immediately.")
+    buffer_top_n: int = _doc(2, "Copy only the N best-scored candidates per window.")
+    buffer_max: int = _doc(20, "Safety valve — a burst filling the buffer flushes it early.")
 
     # ── Risk caps (AlgoParams protocol — this algo's pool only) ─────────────
     # Sized for the real prod bankroll (~$20 total): $2 per market, at most
     # five concurrent positions (half the bankroll), stop after losing a
-    # quarter of it in a day. Scale via env when the bankroll grows.
-    max_position_size_usdc: float = field(
-        default_factory=lambda: float(_env("MAX_POSITION", "2")))
-    max_total_exposure_usdc: float = field(
-        default_factory=lambda: float(_env("MAX_EXPOSURE", "10")))
-    daily_loss_limit_usdc: float = field(
-        default_factory=lambda: float(_env("DAILY_LOSS_LIMIT", "5")))
-    min_order_size_usdc: float = field(
-        default_factory=lambda: float(_env("MIN_ORDER", "1")))
-    # Wider than copy_trade's 0.05 — these signals move fast and skipping on
-    # drift is adverse selection against exactly the trades we want.
-    max_slippage: float = field(
-        default_factory=lambda: float(_env("MAX_SLIPPAGE", "0.10")))
+    # quarter of it in a day. Scale via the profile TOML when it grows.
+    max_position_size_usdc: float = _doc(2.0, "Max spend per market.")
+    max_total_exposure_usdc: float = _doc(10.0, "Max total open exposure for this algorithm.")
+    daily_loss_limit_usdc: float = _doc(5.0, "Suspend buys if realized P&L is down this much today.")
+    min_order_size_usdc: float = _doc(1.0, "Skip orders smaller than this.")
+    max_slippage: float = _doc(0.10, "Wider than copy_trade — these signals move fast and skipping on drift is adverse selection against exactly the trades we want.")
 
     # ── Order placement / paper ──────────────────────────────────────────────
-    order_type: str = field(
-        default_factory=lambda: _env("ORDER_TYPE", "market").lower())
+    order_type: str = _doc("market", "'market' (FOK/FAK) or 'limit' (GTC).")
     # Mirrors the planned prod bankroll so paper results are observed under
     # the same cash constraint live trading will face.
-    paper_starting_balance: float = field(
-        default_factory=lambda: float(_env("PAPER_BALANCE", "20")))
-    paper_fee_bps: float = field(
-        default_factory=lambda: float(_env("PAPER_FEE_BPS", "0")))
+    paper_starting_balance: float = _doc(20.0, "Virtual balance — seeded into the DB on FIRST run only.")
+    paper_fee_bps: float = _doc(0.0, "Modeled paper fee, basis points.")
 
-
-PARAMS = InsiderFlowParams()
+    def validate(self) -> None:
+        """Boot-time sanity checks — called by the profile loader."""
+        if not (0.0 < self.max_entry_odds <= 1.0):
+            raise ValueError(f"max_entry_odds must be in (0, 1], got {self.max_entry_odds}.")
+        if self.order_type not in ("market", "limit"):
+            raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
+        if self.min_cash_size_usdc <= 0:
+            raise ValueError("min_cash_size_usdc must be positive.")

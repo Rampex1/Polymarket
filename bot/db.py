@@ -139,6 +139,20 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_signals_market
             ON signals(algo, market_id);
 
+        -- One row per worker boot: the exact resolved params (JSON) plus
+        -- git sha, so analytics can attribute every position/signal to the
+        -- config version that produced it. See bot/runs.py.
+        CREATE TABLE IF NOT EXISTS runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            algo        TEXT NOT NULL,
+            mode        TEXT NOT NULL,
+            profile     TEXT,
+            git_sha     TEXT,
+            params_json TEXT NOT NULL,
+            started_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_runs_algo ON runs(algo, started_at);
+
         CREATE INDEX IF NOT EXISTS idx_trade_log_paper_ts
             ON trade_log(paper, ts);
         CREATE INDEX IF NOT EXISTS idx_trade_log_market

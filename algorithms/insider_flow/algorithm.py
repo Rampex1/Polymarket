@@ -53,7 +53,7 @@ from bot import fetcher
 from bot.algorithm import Algorithm, Intent, Mode, OpenIntent, SettleIntent
 from bot.models import GlobalTrade
 
-from .params import PARAMS, InsiderFlowParams
+from .params import InsiderFlowParams
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +78,9 @@ class InsiderFlowAlgorithm(Algorithm):
         if params is not None:
             self.params = params
         elif name is not None:
-            from dataclasses import replace
-            self.params = replace(PARAMS, name=name)
+            self.params = InsiderFlowParams(name=name)
         else:
-            self.params = PARAMS
+            self.params = InsiderFlowParams()
 
         self._tracker = None        # PositionTracker, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER

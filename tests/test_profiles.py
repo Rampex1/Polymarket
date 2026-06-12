@@ -1,62 +1,183 @@
 """
-Profile + per-algorithm mode tests.
+Profile-loader + params-schema tests.
 
 Covers:
-  * Mode enum surfaces on params.
-  * Two CopyTradeAlgorithm instances with distinct names + modes coexist.
-  * COPYTRADE_MODE env var picks the default mode.
-  * Legacy PAPER_TRADE env var still chooses the default when COPYTRADE_MODE
-    is unset (backward compat bridge).
+  * The shipped config/*.toml files load and have the right shapes/modes.
+  * Loader validation: missing profile, missing keys, bad mode, unknown
+    type, unknown param, duplicate names, per-params validate().
+  * TOML list → tuple coercion for tuple-typed fields.
+  * Multiple instances of one algorithm class keep params separate.
 """
 
 import importlib
-import os
 
 import pytest
 
+from algorithms import REGISTRY
 from algorithms.copy_trade import CopyTradeAlgorithm, CopyTradeParams
 from bot.algorithm import Mode
-
-
-def test_default_mode_is_paper(monkeypatch):
-    """Fail-safe default: no env vars → PAPER."""
-    monkeypatch.delenv("COPYTRADE_MODE", raising=False)
-    monkeypatch.delenv("PAPER_TRADE", raising=False)
-    # Re-import to re-evaluate the default_factory.
-    from algorithms.copy_trade import params as params_mod
-    importlib.reload(params_mod)
-    assert params_mod.CopyTradeParams().mode == Mode.PAPER
-
-
-def test_explicit_copytrade_mode_env(monkeypatch):
-    monkeypatch.setenv("COPYTRADE_MODE", "live")
-    monkeypatch.delenv("PAPER_TRADE", raising=False)
-    from algorithms.copy_trade import params as params_mod
-    importlib.reload(params_mod)
-    assert params_mod.CopyTradeParams().mode == Mode.LIVE
-
-
-def test_legacy_paper_trade_env_bridge(monkeypatch):
-    """PAPER_TRADE=false (legacy) → LIVE when COPYTRADE_MODE unset."""
-    monkeypatch.delenv("COPYTRADE_MODE", raising=False)
-    monkeypatch.setenv("PAPER_TRADE", "false")
-    from algorithms.copy_trade import params as params_mod
-    importlib.reload(params_mod)
-    assert params_mod.CopyTradeParams().mode == Mode.LIVE
-
-
-def test_copytrade_mode_wins_over_legacy(monkeypatch):
-    """Explicit COPYTRADE_MODE takes precedence over legacy PAPER_TRADE."""
-    monkeypatch.setenv("COPYTRADE_MODE", "paper")
-    monkeypatch.setenv("PAPER_TRADE", "false")    # would otherwise mean LIVE
-    from algorithms.copy_trade import params as params_mod
-    importlib.reload(params_mod)
-    assert params_mod.CopyTradeParams().mode == Mode.PAPER
+from bot.profile_loader import ProfileError, load_profile
 
 
 # ---------------------------------------------------------------------------
-# Multiple instances coexist
+# Shipped profiles
 # ---------------------------------------------------------------------------
+
+
+def test_experimental_profile_loads_all_paper():
+    algos = load_profile("experimental", REGISTRY)
+    assert len(algos) >= 1
+    assert all(a.params.mode == Mode.PAPER for a in algos)
+
+
+def test_prod_profile_is_explicit_live():
+    algos = load_profile("prod", REGISTRY)
+    assert len(algos) >= 1
+    assert all(a.params.mode == Mode.LIVE for a in algos)
+    # Real-money algorithms must have a target configured.
+    assert all(
+        a.params.target_address or a.params.target_username for a in algos
+    )
+
+
+def test_default_profile_loads():
+    algos = load_profile("default", REGISTRY)
+    assert len(algos) >= 1
+
+
+def test_lazy_enabled_resolves(monkeypatch):
+    monkeypatch.setenv("PROFILE", "experimental")
+    import algorithms
+    importlib.reload(algorithms)
+    assert len(algorithms.ENABLED) >= 1
+    assert all(a.params.mode == Mode.PAPER for a in algorithms.ENABLED)
+
+
+# ---------------------------------------------------------------------------
+# Loader validation — every failure must name the file/block and be fail-fast
+# ---------------------------------------------------------------------------
+
+
+def _write_profile(tmp_path, body: str, name: str = "t") -> tuple[str, str]:
+    (tmp_path / f"{name}.toml").write_text(body)
+    return name, str(tmp_path)
+
+
+VALID = """
+[[algorithm]]
+type = "copy_trade"
+name = "ct"
+mode = "paper"
+[algorithm.params]
+target_address = "0xabc"
+"""
+
+
+def test_valid_minimal_profile(tmp_path):
+    name, d = _write_profile(tmp_path, VALID)
+    (algo,) = load_profile(name, REGISTRY, config_dir=d)
+    assert isinstance(algo, CopyTradeAlgorithm)
+    assert algo.params.name == "ct"
+    assert algo.params.mode == Mode.PAPER
+    assert algo.params.target_address == "0xabc"
+
+
+def test_missing_profile_lists_available(tmp_path):
+    _write_profile(tmp_path, VALID, name="exists")
+    with pytest.raises(ProfileError, match="exists"):
+        load_profile("nope", REGISTRY, config_dir=str(tmp_path))
+
+
+def test_empty_profile_rejected(tmp_path):
+    name, d = _write_profile(tmp_path, "# nothing here\n")
+    with pytest.raises(ProfileError, match="no .*algorithm.* blocks"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+@pytest.mark.parametrize("missing", ["type", "name", "mode"])
+def test_required_block_keys(tmp_path, missing):
+    lines = {
+        "type": 'type = "copy_trade"',
+        "name": 'name = "ct"',
+        "mode": 'mode = "paper"',
+    }
+    del lines[missing]
+    body = "[[algorithm]]\n" + "\n".join(lines.values()) + "\n"
+    name, d = _write_profile(tmp_path, body)
+    with pytest.raises(ProfileError, match=f"missing required key '{missing}'"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_unknown_type_rejected(tmp_path):
+    name, d = _write_profile(
+        tmp_path, '[[algorithm]]\ntype="hodl"\nname="x"\nmode="paper"\n')
+    with pytest.raises(ProfileError, match="unknown type 'hodl'"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_bad_mode_rejected(tmp_path):
+    name, d = _write_profile(
+        tmp_path, '[[algorithm]]\ntype="copy_trade"\nname="x"\nmode="yolo"\n')
+    with pytest.raises(ProfileError, match="paper.*live"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_unknown_param_key_rejected(tmp_path):
+    body = VALID + "\ntier1_sze = 5.0\n"  # typo inside [algorithm.params]
+    name, d = _write_profile(tmp_path, body)
+    with pytest.raises(ProfileError, match="tier1_sze"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_duplicate_names_rejected(tmp_path):
+    name, d = _write_profile(tmp_path, VALID + VALID)
+    with pytest.raises(ProfileError, match="duplicate name 'ct'"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_copy_trade_without_target_rejected(tmp_path):
+    name, d = _write_profile(
+        tmp_path, '[[algorithm]]\ntype="copy_trade"\nname="x"\nmode="paper"\n')
+    with pytest.raises(ProfileError, match="target"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_toml_list_coerced_to_tuple(tmp_path):
+    body = """
+[[algorithm]]
+type = "insider_flow"
+name = "if"
+mode = "paper"
+[algorithm.params]
+exclude_title_patterns = ["foo", "bar"]
+"""
+    name, d = _write_profile(tmp_path, body)
+    (algo,) = load_profile(name, REGISTRY, config_dir=d)
+    assert algo.params.exclude_title_patterns == ("foo", "bar")
+
+
+def test_params_validate_failure_names_block(tmp_path):
+    body = """
+[[algorithm]]
+type = "insider_flow"
+name = "if"
+mode = "paper"
+[algorithm.params]
+max_entry_odds = 1.5
+"""
+    name, d = _write_profile(tmp_path, body)
+    with pytest.raises(ProfileError, match="max_entry_odds"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+# ---------------------------------------------------------------------------
+# Params schema — fail-safe defaults, instance separation
+# ---------------------------------------------------------------------------
+
+
+def test_default_mode_is_paper():
+    """Fail-safe: a bare params object is PAPER unless a profile says LIVE."""
+    assert CopyTradeParams().mode == Mode.PAPER
 
 
 def test_two_instances_have_distinct_names_and_modes():
@@ -83,36 +204,7 @@ def test_two_instances_have_distinct_names_and_modes():
 
 
 def test_name_kwarg_clones_default_params():
-    """The shortcut `CopyTradeAlgorithm(name="x")` should rename PARAMS
-    without forcing the caller to construct a full params object."""
+    """The shortcut `CopyTradeAlgorithm(name="x")` should produce default
+    params under the new name without a full params object."""
     a = CopyTradeAlgorithm(name="copy_trade_variant")
     assert a.params.name == "copy_trade_variant"
-
-
-# ---------------------------------------------------------------------------
-# Profile loading via PROFILE env var
-# ---------------------------------------------------------------------------
-
-
-def test_profile_loads_named_module(monkeypatch):
-    """Setting PROFILE pulls in algorithms/profiles/<name>.py."""
-    monkeypatch.setenv("PROFILE", "experimental")
-    import algorithms
-    importlib.reload(algorithms)
-    # Experimental profile has at least one algorithm, all paper.
-    assert len(algorithms.ENABLED) >= 1
-    assert all(a.params.mode == Mode.PAPER for a in algorithms.ENABLED)
-
-
-def test_profile_missing_raises_clear_error(monkeypatch):
-    monkeypatch.setenv("PROFILE", "does_not_exist")
-    import algorithms
-    with pytest.raises(RuntimeError, match="not found"):
-        importlib.reload(algorithms)
-
-
-def test_default_profile_when_unset(monkeypatch):
-    monkeypatch.delenv("PROFILE", raising=False)
-    import algorithms
-    importlib.reload(algorithms)
-    assert len(algorithms.ENABLED) >= 1

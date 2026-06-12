@@ -32,7 +32,7 @@ import sys
 import threading
 
 from algorithms import ENABLED
-from bot import config, notifier, reconciliation, runner
+from bot import config, db, notifier, reconciliation, runner, runs
 from bot.algorithm import Algorithm, Mode
 from bot.positions import PositionTracker, RiskManager
 
@@ -70,6 +70,9 @@ def _run_worker(
         tracker = PositionTracker(algo=name)
         if paper:
             tracker.init_paper_balance(algo.params.paper_starting_balance)
+        # Provenance: stamp this boot's resolved params + git sha into the
+        # runs table so analytics can attribute results to config versions.
+        runs.record_run(algo.params, config.PROFILE)
         risk = RiskManager(tracker, algo.params)
         algo.setup(tracker, notifier, client)
 
@@ -136,10 +139,33 @@ def _run_worker(
         logger.info("[%s] Stopped.", name)
 
 
+def _warn_orphaned_algos() -> None:
+    """Warn if the DB holds open positions under names absent from the
+    profile — catches accidental renames in config/<profile>.toml, which
+    would silently orphan a paper bankroll and its position history."""
+    try:
+        enabled_names = {a.params.name for a in ENABLED}
+        rows = db.get().execute(
+            "SELECT DISTINCT algo FROM positions WHERE shares > 0"
+        ).fetchall()
+        for (orphan,) in rows:
+            if orphan not in enabled_names:
+                logger.warning(
+                    "DB has open positions under algo '%s', which is not in "
+                    "profile '%s' — renamed or removed in config? Its "
+                    "positions and paper bankroll are now unmanaged.",
+                    orphan, config.PROFILE,
+                )
+    except Exception:
+        logger.exception("orphan-name check failed (continuing)")
+
+
 def main() -> None:
     if not ENABLED:
         logger.error("No algorithms enabled (profile=%s).", config.PROFILE)
         sys.exit(1)
+
+    _warn_orphaned_algos()
 
     # Build the CLOB client only if at least one algorithm wants to trade
     # live. Saves creds-not-set warnings in paper-only deployments.

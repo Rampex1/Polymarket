@@ -39,7 +39,14 @@ TIMEZONE=America/Los_Angeles
 
 **Deliberately NO `POLY_*` credentials.** That is the safety guarantee: the
 experimental (paper) profile cannot touch real money even if misconfigured.
-All `INSIDERFLOW_*` knobs have sane defaults; nothing else is required.
+
+Nothing else goes in env. All algorithm behavior (targets, tiers, risk
+caps, paper balances) arrives via `config/experimental.toml` with the git
+pull. Sanity-check what will run with:
+
+```bash
+PROFILE=experimental python -m bot.params --effective
+```
 
 ## 4. Seed the archive with local data (one-time, worth doing)
 
@@ -82,6 +89,10 @@ Useful tmux: `tmux ls` (list), `tmux attach -t paper` (view), `Ctrl-b d`
 | Monthly | Win rate vs. implied odds on resolved signals — the number the whole thesis rides on. |
 
 ### Observability queries (`sqlite3 data/positions.db`)
+
+Most of these are canned in `python -m bot.report` (per-algo P&L, signal
+counts, skip reasons, win rate vs. entry odds) — run that first; drop to
+raw SQL for anything deeper.
 
 ```sql
 -- Signal rate per day

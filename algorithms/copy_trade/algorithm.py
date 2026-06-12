@@ -33,7 +33,7 @@ from typing import Iterator, Optional
 from bot import fetcher
 from bot.algorithm import Algorithm, CloseIntent, Intent, Mode, OpenIntent, SettleIntent
 
-from .params import PARAMS, CopyTradeParams
+from .params import CopyTradeParams
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +58,19 @@ class CopyTradeAlgorithm(Algorithm):
         """Create a copy-trade worker.
 
         Two ways to construct:
-          * `CopyTradeAlgorithm()` — uses the module-level PARAMS (env-driven
-            defaults). Convenient for single-algorithm setups.
+          * `CopyTradeAlgorithm()` — schema defaults. Convenient for tests.
           * `CopyTradeAlgorithm(name="my_variant", params=CopyTradeParams(...))`
-            — full control over each instance, so profiles can spin up
+            — full control over each instance, so a profile can spin up
             multiple copy-trade workers (different wallets, different tiers,
-            different paper/live modes) in the same process.
+            different paper/live modes) in the same process. Normally built
+            by the profile loader from config/<profile>.toml.
         """
         if params is not None:
             self.params = params
         elif name is not None:
-            # Cheap rename: clone PARAMS with the new name.
-            from dataclasses import replace
-            self.params = replace(PARAMS, name=name)
+            self.params = CopyTradeParams(name=name)
         else:
-            self.params = PARAMS
+            self.params = CopyTradeParams()
 
         self._address: str = ""
         self._tracker = None        # PositionTracker, set in setup()
@@ -112,8 +110,9 @@ class CopyTradeAlgorithm(Algorithm):
             self._address = fetcher.lookup_wallet(self.params.target_username) or ""
         if not self._address:
             raise RuntimeError(
-                f"[{self.params.name}] No target wallet configured. "
-                f"Set COPYTRADE_TARGET_ADDRESS or COPYTRADE_TARGET_USERNAME."
+                f"[{self.params.name}] No target wallet configured. Set "
+                f"target_address or target_username under [algorithm.params] "
+                f"in the profile's config/<profile>.toml."
             )
         logger.info("[%s] Monitoring address: %s", self.params.name, self._address)
 

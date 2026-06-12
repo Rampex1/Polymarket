@@ -1,0 +1,35 @@
+# Experimental profile — paper-mode algorithms being tuned or A/B tested.
+# Loaded with PROFILE=experimental (.env.experimental deliberately has no
+# POLY_* creds, so nothing here can touch real money even if misconfigured).
+
+# Fresh-wallet suspicious-flow detector — paper validation phase. Copies
+# large long-odds BUYs from young wallets (the documented insider
+# fingerprint). All knobs at schema defaults.
+[[algorithm]]
+type = "insider_flow"
+name = "insider_flow_paper"
+mode = "paper"
+
+# Baseline copy-trade — schema-default tiers, for A/B comparison against
+# the 2x variant below.
+[[algorithm]]
+type = "copy_trade"
+name = "copy_trade_paper_baseline"
+mode = "paper"
+
+[algorithm.params]
+target_address = "0x9f2fe025f84839ca81dd8e0338892605702d2ca8"   # surfandturf
+
+# 2x variant — larger tiers, higher caps. Same target, same logic.
+[[algorithm]]
+type = "copy_trade"
+name = "copy_trade_paper_2x"
+mode = "paper"
+
+[algorithm.params]
+target_address = "0x9f2fe025f84839ca81dd8e0338892605702d2ca8"   # surfandturf
+tier1_size = 2.0
+tier2_size = 4.0
+tier3_size = 6.0
+max_position_size_usdc = 6.0
+max_total_exposure_usdc = 24.0

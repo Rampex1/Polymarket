@@ -15,7 +15,19 @@ PROFILE=prod python main.py             # live profile → loads .env.prod
 PROFILE=experimental python main.py     # paper A/B profile → loads .env.experimental
 ```
 
-There is **no global paper/live flag**. Mode is per-algorithm (`Mode.PAPER` / `Mode.LIVE`), declared in each algorithm's params. A single process can run prod-live and paper-experimental algorithms side by side.
+There is **no global paper/live flag**. Mode is per-algorithm (`"paper"` / `"live"`), declared per algorithm block in `config/<profile>.toml`. A single process can run prod-live and paper-experimental algorithms side by side.
+
+**Configuration lives in two places, by kind:**
+- `config/<profile>.toml` — *behavior*: which algorithms run, their mode, targets, tiers, risk caps. Committed to git; tuning and prod promotion are TOML edits, never code edits.
+- `.env` / `.env.<profile>` — *infrastructure secrets*: `POLY_*` creds, Discord webhook, timezone, `DB_PATH`. Never committed.
+
+**Config tooling:**
+```bash
+python -m bot.params                  # list algorithm types
+python -m bot.params copy_trade       # every knob: default + doc
+python -m bot.params --effective      # fully-resolved config for $PROFILE (* = non-default)
+python -m bot.report                  # per-algo performance: P&L, signals, win rate vs odds
+```
 
 **Utility scripts:**
 ```bash
@@ -26,12 +38,20 @@ bash   scripts/ssh_vm.sh                     # SSH into the deployment VPS
 
 ## Architecture
 
-The bot is split into **shared infrastructure** (`bot/`) and **pluggable strategies** (`algorithms/`). Each strategy is an `Algorithm` that yields `Intent`s; a shared, stateless `runner` turns intents into orders. Writing a new strategy means subclassing `Algorithm` and inheriting all execution/risk/notify logic for free.
+The bot is split into **shared infrastructure** (`bot/`), **pluggable strategies** (`algorithms/`), and **declarative deployment config** (`config/`). Each strategy is an `Algorithm` that yields `Intent`s; a shared, stateless `runner` turns intents into orders. Writing a new strategy means subclassing `Algorithm`, registering it in `algorithms/__init__.py:REGISTRY`, and referencing it by type in a profile TOML.
 
 ```
 main.py                   # Entry point — one worker thread per enabled algorithm
+config/
+  default.toml            # Profile: single paper copy-trader (no PROFILE set)
+  prod.toml               # Profile: live algorithms — real money, keep conservative
+  experimental.toml       # Profile: paper variants for tuning / A/B testing
 bot/
   config.py               # Bot-wide infra only: API URLs, creds, DB path, Discord, timezone
+  profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
+  params.py               # CLI: knob discovery (`python -m bot.params [type] [--effective]`)
+  report.py               # CLI: per-algo performance report (`python -m bot.report`)
+  runs.py                 # Run provenance — stamps resolved params + git sha per boot
   algorithm.py            # Algorithm ABC + Intent types (Open/Close/Settle) + Mode + AlgoParams protocol
   runner.py               # Shared dispatch: slippage gate, CLOB orders, paper fills, DB writes, notify
   models.py               # Trade dataclass (legacy interface the runner adapts intents into)
@@ -43,17 +63,13 @@ bot/
   signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
   sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
 algorithms/
-  __init__.py             # Registry — PROFILE env var selects which profile's ALGORITHMS run
+  __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader
   copy_trade/             # Mirror a known target wallet
     algorithm.py          # CopyTradeAlgorithm: poll target → tier sizing → emit intents
-    params.py             # CopyTradeParams dataclass (COPYTRADE_* env-driven, legacy fallbacks)
+    params.py             # CopyTradeParams — pure schema: knobs, defaults, docs, validate()
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
-    params.py             # InsiderFlowParams dataclass (INSIDERFLOW_* env-driven)
-  profiles/
-    default.py            # env-driven single CopyTradeAlgorithm (no PROFILE set)
-    prod.py               # Mode.LIVE algorithms — real money, keep conservative
-    experimental.py       # Mode.PAPER variants for tuning / A/B testing (incl. insider_flow)
+    params.py             # InsiderFlowParams — pure schema: knobs, defaults, docs, validate()
 discovery/
   archive.py              # Price-history archiver (CLOB drops history at resolution — hoard it)
 data/                     # All SQLite files (positions.db, discovery_archive.db) — gitignored
@@ -94,62 +110,26 @@ The shared CLOB client is built **once**, and only if at least one enabled algor
 
 | Variable | Notes |
 |---|---|
-| `PROFILE` | Selects `algorithms/profiles/<name>.py` and prefers `.env.<profile>`. Default `default`. |
+| `PROFILE` | Selects `config/<name>.toml` and prefers `.env.<profile>`. Default `default`. |
 | `DB_PATH` | SQLite file path (default `data/positions.db`; an existing legacy `./positions.db` keeps working with a warning) |
 | `DISCORD_WEBHOOK_URL` | Discord incoming webhook (optional) |
 | `TIMEZONE` | Daily-summary rollover tz (default `UTC`) |
 | `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is your Polymarket **proxy wallet** (from the profile URL) and is required for live — without it orders sign correctly but debit the wrong account. |
 
-### Per-algorithm settings (`algorithms/copy_trade/params.py`, `COPYTRADE_*` env vars)
+### Per-algorithm settings (`config/<profile>.toml`)
 
-Canonical names are `COPYTRADE_*`; legacy unprefixed names (`TARGET_ADDRESS`, `TIER1_SIZE`, …) are still accepted as a fallback.
+All algorithm behavior is declared in the profile TOML — env vars are **not** read for algorithm params. Each `[[algorithm]]` block sets `type` (registry key), `name` (DB partition key — keep stable once set; renaming orphans its bankroll/history), `mode` (`"paper"`/`"live"`, always explicit), and an optional `[algorithm.params]` table; omitted knobs use schema defaults.
 
-| Variable (canonical) | Legacy | Default | Notes |
-|---|---|---|---|
-| `COPYTRADE_MODE` | `PAPER_TRADE` | `paper` | `paper` or `live` (per-algorithm) |
-| `COPYTRADE_TARGET_ADDRESS` | `TARGET_ADDRESS` | — | Target proxy wallet; or set username |
-| `COPYTRADE_TARGET_USERNAME` | `TARGET_USERNAME` | — | Resolved to a wallet via Gamma `/profiles` |
-| `COPYTRADE_POLL_INTERVAL` | `POLL_INTERVAL_SECONDS` | `20` | Poll cadence (seconds) |
-| `COPYTRADE_MIN_TRADE_SIZE` | `MIN_TRADE_SIZE_USDC` | `0.0` | Ignore target trades smaller than this |
-| `COPYTRADE_TIER1_MIN` | `TIER1_MIN` | `80000` | Holding below this → skip entirely |
-| `COPYTRADE_TIER1_MAX` / `TIER1_SIZE` | `TIER1_MAX` / `TIER1_SIZE` | `150000` / `1.0` | Tier 1: $1 bet |
-| `COPYTRADE_TIER2_MAX` / `TIER2_SIZE` | `TIER2_MAX` / `TIER2_SIZE` | `300000` / `2.0` | Tier 2: $2 bet |
-| `COPYTRADE_TIER3_SIZE` | `TIER3_SIZE` | `3.0` | Tier 3: $3 bet (>$300k holding) |
-| `COPYTRADE_MAX_POSITION` | `MAX_POSITION_SIZE_USDC` | `3.0` | Max spend per market |
-| `COPYTRADE_MAX_EXPOSURE` | `MAX_TOTAL_EXPOSURE_USDC` | `12.0` | Max total open exposure (this algo's pool) |
-| `COPYTRADE_DAILY_LOSS_LIMIT` | `DAILY_LOSS_LIMIT_USDC` | `4.0` | Suspend buys if down this much today |
-| `COPYTRADE_MIN_ORDER` | `MIN_ORDER_SIZE_USDC` | `1.0` | Skip top-ups smaller than this |
-| `COPYTRADE_MAX_SLIPPAGE` | `MAX_SLIPPAGE` | `0.05` | Skip order if price moved > this fraction |
-| `COPYTRADE_ORDER_TYPE` | `ORDER_TYPE` | `market` | `market` (FOK) or `limit` (GTC) |
-| `COPYTRADE_PAPER_BALANCE` | `PAPER_STARTING_BALANCE` | `10000.0` | Virtual balance (paper) |
-| `COPYTRADE_PAPER_FEE_BPS` | `PAPER_FEE_BPS` | `0` | Modeled paper fee (basis points) |
+The knob schemas (names, defaults, docs, boot-time `validate()`) live in `algorithms/<type>/params.py`. Don't enumerate them here — discover them with:
 
-Tier knobs are per-instance, so profiles can run multiple copy-trade variants with different sizing (see `experimental.py`).
+```bash
+python -m bot.params copy_trade       # or insider_flow
+python -m bot.params --effective      # what $PROFILE actually resolves to
+```
 
-### Per-algorithm settings — insider_flow (`algorithms/insider_flow/params.py`, `INSIDERFLOW_*` env vars)
+The loader fails fast at boot on unknown keys, duplicate names, bad modes, and `validate()` violations — a typo in a TOML key is a crash, never a silent no-op.
 
-Detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), screens markets against Gamma category/tags (sports = gambling, not signal) and a time-value gate (must resolve soon and out-earn an index fund for the wait — unknown end date fails closed), then vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed). Survivors are buffered for a window, ranked by conviction score, and only the top N are copied. Exits at market resolution via a periodic Gamma sweep. Defaults are sized for a **~$20 prod bankroll** — scale via env when capital grows.
-
-| Variable | Default | Notes |
-|---|---|---|
-| `INSIDERFLOW_MODE` | `paper` | `paper` or `live` |
-| `INSIDERFLOW_MIN_CASH` | `5000` | Min observed-trade notional (USDC) |
-| `INSIDERFLOW_MAX_ODDS` | `0.35` | Only copy BUYs at/below these odds |
-| `INSIDERFLOW_MAX_WALLET_AGE_DAYS` | `14` | Wallet freshness window |
-| `INSIDERFLOW_MAX_PRIOR_TRADES` | `10` | Max prior trades for "fresh" |
-| `INSIDERFLOW_BET_SIZE` | `2` | Our copy size (top-up target, USDC) |
-| `INSIDERFLOW_EXCLUDE_TITLES` | `" vs. ", " vs ", O/U, Spread` | Comma-sep title patterns (sports pre-filter) |
-| `INSIDERFLOW_EXCLUDE_CATEGORIES` | `sports` | Gamma category/tag substrings to reject — the authoritative sports screen |
-| `INSIDERFLOW_MAX_DAYS_TO_RESOLUTION` | `30` | Skip markets resolving further out (insiders bet on imminent events) |
-| `INSIDERFLOW_MIN_ANNUAL_RETURN` | `1.0` | Win-case return, annualized over time-to-resolution, must beat this (1.0 = +100%/yr) |
-| `INSIDERFLOW_BUFFER_SECONDS` | `900` | Candidate buffer window; 0 = copy immediately |
-| `INSIDERFLOW_BUFFER_TOP_N` | `2` | Copy only the N best-scored candidates per window |
-| `INSIDERFLOW_BUFFER_MAX` | `20` | Buffer overflow → early flush |
-| `INSIDERFLOW_POLL_INTERVAL` | `15` | Firehose poll cadence (seconds) |
-| `INSIDERFLOW_SETTLE_EVERY` | `20` | Polls between resolution sweeps |
-| `INSIDERFLOW_MAX_POSITION` / `MAX_EXPOSURE` / `DAILY_LOSS_LIMIT` | `2` / `10` / `5` | Risk caps (this algo's pool) |
-| `INSIDERFLOW_PAPER_BALANCE` | `20` | Paper bankroll — mirrors planned prod capital |
-| `INSIDERFLOW_MAX_SLIPPAGE` | `0.10` | Wider than copy_trade — these signals move fast |
+**insider_flow** detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), screens markets against Gamma category/tags (sports = gambling, not signal) and a time-value gate (must resolve soon and out-earn an index fund for the wait — unknown end date fails closed), then vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed). Survivors are buffered for a window, ranked by conviction score, and only the top N are copied. Exits at market resolution via a periodic Gamma sweep. Its `max_slippage` default (0.10) is deliberately wider than copy_trade's — these signals move fast. Defaults are sized for a **~$20 prod bankroll** — scale via the profile TOML when capital grows.
 
 ### Discovery price archiver
 
@@ -177,6 +157,7 @@ Thread-local connections, WAL mode. All rows are partitioned by an `algo` column
 - `daily_stats` — per-(date, algo) realized P&L
 - `paper_account` — virtual cash balance, PK `algo`
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON captured at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data for confidence models — log raw observables, never derived scores.
+- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Lets `bot.report` attribute results to the exact config version that produced them.
 
 `db._migrate()` upgrades older v0/v1 databases in place (adds `paper`/`algo` columns, repartitions PKs) idempotently.
 

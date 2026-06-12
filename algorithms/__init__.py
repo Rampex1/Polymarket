@@ -1,36 +1,51 @@
 """
-Algorithm registry — profile-driven.
+Algorithm registry — declarative, config-driven profiles.
 
-The `PROFILE` env var selects which bundle of algorithms this process runs.
-The profile module under `algorithms.profiles.<name>` must export a list
-called `ALGORITHMS`. Each entry runs in its own worker thread with its own
-poll cadence, tracker, risk pool, and paper bankroll.
+The `PROFILE` env var selects `config/<profile>.toml`, which declares the
+bundle of algorithms this process runs (see bot/profile_loader.py for the
+file shape). Each entry runs in its own worker thread with its own poll
+cadence, tracker, risk pool, and paper bankroll.
 
 Examples:
-    PROFILE=prod          → algorithms/profiles/prod.py
-    PROFILE=experimental  → algorithms/profiles/experimental.py
-    PROFILE unset         → algorithms/profiles/default.py
+    PROFILE=prod          → config/prod.toml
+    PROFILE=experimental  → config/experimental.toml
+    PROFILE unset         → config/default.toml
 
 To add a new strategy:
   1. Create `algorithms/<your_algo>/{__init__.py, algorithm.py, params.py}`.
-  2. Import its class in whichever profile(s) should run it.
+  2. Register it in REGISTRY below.
+  3. Reference it by type in whichever config/<profile>.toml should run it.
+
+`ENABLED` is resolved lazily (PEP 562 module __getattr__) so tooling that
+only needs REGISTRY — e.g. `python -m bot.params` — can import this package
+without requiring a valid profile file.
 """
 
 import os
-from importlib import import_module
 
-from .copy_trade import CopyTradeAlgorithm
+from bot.profile_loader import load_profile
 
-_profile_name = os.getenv("PROFILE", "default")
+from .copy_trade import CopyTradeAlgorithm, CopyTradeParams
+from .insider_flow import InsiderFlowAlgorithm, InsiderFlowParams
 
-try:
-    _profile = import_module(f"algorithms.profiles.{_profile_name}")
-except ModuleNotFoundError as e:
-    raise RuntimeError(
-        f"Profile '{_profile_name}' not found at algorithms/profiles/{_profile_name}.py. "
-        f"Create the file or set PROFILE to an existing one."
-    ) from e
+# type string (used in config TOML) → (AlgorithmCls, ParamsCls)
+REGISTRY = {
+    "copy_trade": (CopyTradeAlgorithm, CopyTradeParams),
+    "insider_flow": (InsiderFlowAlgorithm, InsiderFlowParams),
+}
 
-ENABLED = _profile.ALGORITHMS
+PROFILE = os.getenv("PROFILE", "default")
 
-__all__ = ["ENABLED", "CopyTradeAlgorithm"]
+_enabled = None
+
+
+def __getattr__(name):
+    if name == "ENABLED":
+        global _enabled
+        if _enabled is None:
+            _enabled = load_profile(PROFILE, REGISTRY)
+        return _enabled
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["ENABLED", "REGISTRY", "CopyTradeAlgorithm", "InsiderFlowAlgorithm"]

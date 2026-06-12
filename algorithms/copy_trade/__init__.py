@@ -1,4 +1,4 @@
 from .algorithm import CopyTradeAlgorithm
-from .params import PARAMS, CopyTradeParams
+from .params import CopyTradeParams
 
-__all__ = ["CopyTradeAlgorithm", "CopyTradeParams", "PARAMS"]
+__all__ = ["CopyTradeAlgorithm", "CopyTradeParams"]
