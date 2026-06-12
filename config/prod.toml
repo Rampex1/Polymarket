@@ -1,9 +1,13 @@
-# Prod profile — REAL MONEY. Loaded with PROFILE=prod (creds come from
-# .env.prod; this file holds behavior only — never secrets).
+# Prod profile — REAL MONEY. Loaded with PROFILE=prod (POLY_* creds come
+# from .env / .env.prod; this file holds behavior only — never secrets).
 #
 # Keep this list short and conservative. Mode must be explicit on every
 # block; promote a paper variant by copying its block from
 # experimental.toml and flipping mode to "live".
+
+# Real-money opt-in: the loader rejects any mode="live" block in a profile
+# that doesn't set this. Only prod should ever set it.
+allow_live = true
 
 [[algorithm]]
 type = "copy_trade"

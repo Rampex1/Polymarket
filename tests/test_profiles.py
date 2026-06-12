@@ -83,6 +83,28 @@ target_address = "0xabc"
 """
 
 
+LIVE_BLOCK = """
+[[algorithm]]
+type = "copy_trade"
+name = "ct_live"
+mode = "live"
+[algorithm.params]
+target_address = "0xabc"
+"""
+
+
+def test_live_mode_requires_allow_live_opt_in(tmp_path):
+    name, d = _write_profile(tmp_path, LIVE_BLOCK)
+    with pytest.raises(ProfileError, match="allow_live"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_allow_live_unlocks_live_mode(tmp_path):
+    name, d = _write_profile(tmp_path, "allow_live = true\n" + LIVE_BLOCK)
+    (algo,) = load_profile(name, REGISTRY, config_dir=d)
+    assert algo.params.mode == Mode.LIVE
+
+
 def test_valid_minimal_profile(tmp_path):
     name, d = _write_profile(tmp_path, VALID)
     (algo,) = load_profile(name, REGISTRY, config_dir=d)

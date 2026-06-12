@@ -18,9 +18,10 @@ PROFILE=experimental python main.py     # paper A/B profile → loads .env.exper
 
 There is **no global paper/live flag**. Mode is per-algorithm (`"paper"` / `"live"`), declared per algorithm block in `config/<profile>.toml`. A single process can run prod-live and paper-experimental algorithms side by side.
 
-**Configuration lives in two places, by kind:**
-- `config/<profile>.toml` — *behavior*: which algorithms run, their mode, targets, tiers, risk caps. Committed to git; tuning and prod promotion are TOML edits, never code edits.
-- `.env` / `.env.<profile>` — *infrastructure secrets*: `POLY_*` creds, Discord webhook, timezone, `DB_PATH`. Never committed.
+**Configuration lives in three places, by kind:**
+- `config/<profile>.toml` — *behavior*: which algorithms run, their mode, targets, tiers, risk caps. A profile must set top-level `allow_live = true` before any `mode = "live"` block is accepted. Committed to git; tuning and prod promotion are TOML edits, never code edits.
+- `config/webhooks.toml` — *Discord webhook registry*: routes each PROFILE to its channel via per-block `profiles` lists. Committed (repo is private — rotate webhooks before ever going public).
+- `.env` / `.env.<profile>` — *secrets only*: the five `POLY_*` creds. Never committed. Optional overrides (`DISCORD_WEBHOOK_URL`, `TIMEZONE`, `DB_PATH`, `POLY_SIGNATURE_TYPE`) exist but defaults/registry normally cover them.
 
 **Config tooling:**
 ```bash
@@ -46,6 +47,7 @@ main.py                   # Entry point — one worker thread per enabled algori
 config/
   prod.toml               # Profile: live algorithms — real money, keep conservative
   experimental.toml       # Profile: paper variants for tuning / A/B testing
+  webhooks.toml           # Discord webhook registry — PROFILE → channel routing
 bot/
   config.py               # Bot-wide infra only: API URLs, creds, DB path, Discord, timezone
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
@@ -112,8 +114,8 @@ The shared CLOB client is built **once**, and only if at least one enabled algor
 |---|---|
 | `PROFILE` | Selects `config/<name>.toml` and prefers `.env.<profile>`. **Required** — no default; the bot refuses to boot without it. |
 | `DB_PATH` | SQLite file path (default `data/positions.db`; an existing legacy `./positions.db` keeps working with a warning) |
-| `DISCORD_WEBHOOK_URL` | Discord incoming webhook (optional) |
-| `TIMEZONE` | Daily-summary rollover tz (default `UTC`) |
+| `DISCORD_WEBHOOK_URL` | Optional override — webhooks normally resolve from `config/webhooks.toml` by PROFILE |
+| `TIMEZONE` | Daily-summary rollover tz (default `America/Los_Angeles`) |
 | `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is your Polymarket **proxy wallet** (from the profile URL) and is required for live — without it orders sign correctly but debit the wrong account. |
 
 ### Per-algorithm settings (`config/<profile>.toml`)

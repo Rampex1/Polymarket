@@ -9,6 +9,10 @@ to code.
 
 File shape:
 
+    allow_live = true          # required (top-level) before any mode="live"
+                               # block is accepted — a profile must opt in
+                               # to real money explicitly
+
     [[algorithm]]
     type = "copy_trade"        # registry key → algorithms/<type>/
     name = "copy_trade_prod"   # DB partition key — keep stable once set
@@ -120,6 +124,13 @@ def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> 
             raise ProfileError(
                 f"{where}: mode must be 'paper' or 'live', got '{block['mode']}'."
             ) from None
+
+        if mode is Mode.LIVE and data.get("allow_live") is not True:
+            raise ProfileError(
+                f"{where}: mode='live' but the profile does not set "
+                f"`allow_live = true` (top level). A profile must opt in "
+                f"to real-money trading explicitly."
+            )
 
         algo_cls, params_cls = registry[algo_type]
         param_kwargs = block.get("params", {})

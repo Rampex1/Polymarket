@@ -30,19 +30,17 @@ Do the `mv` while the bot is **stopped** (restart window). Skipping the move
 also works — the legacy fallback keeps `./positions.db` functional and just
 logs a warning on every boot.
 
-## 3. Create `.env.experimental` on the VPS (if missing)
+## 3. Env files on the VPS
 
-```
-DISCORD_WEBHOOK_URL=<webhook — consider a separate channel for paper noise>
-TIMEZONE=America/Los_Angeles
-```
+One `.env` holding only the five `POLY_*` creds — that's it. Webhooks
+route per-profile via the committed `config/webhooks.toml` (arrives with
+the git pull), and `.env.experimental` should NOT exist (a leftover one
+shadows `.env` and its stale webhook overrides the registry — delete it).
 
-**Deliberately NO `POLY_*` credentials.** That is the safety guarantee: the
-experimental (paper) profile cannot touch real money even if misconfigured.
-
-Nothing else goes in env. All algorithm behavior (targets, tiers, risk
-caps, paper balances) arrives via `config/experimental.toml` with the git
-pull. Sanity-check what will run with:
+The paper-can't-touch-money guarantee is enforced in config now, not by
+env-file separation: the loader rejects any `mode="live"` block in a
+profile without top-level `allow_live = true`, and only `prod.toml` sets
+that. Sanity-check what will run with:
 
 ```bash
 PROFILE=experimental python -m bot.params --effective

@@ -32,6 +32,7 @@ path, Discord channel, etc.
 """
 
 import os
+import tomllib
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
@@ -109,7 +110,31 @@ DB_PATH: str = _default_db_path()
 
 # ── Notifications ────────────────────────────────────────────────────────────
 
-DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
+_WEBHOOK_REGISTRY = os.path.join("config", "webhooks.toml")
+
+
+def resolve_webhook(profile: str, registry_path: str = _WEBHOOK_REGISTRY) -> str:
+    """Webhook for this profile: env override first, then the committed
+    registry (config/webhooks.toml blocks route via their `profiles` list).
+
+    The env var is an escape hatch, not the normal path — keeping webhooks
+    in the registry makes channel changes git-pull-deployable.
+    """
+    env = os.getenv("DISCORD_WEBHOOK_URL", "")
+    if env:
+        return env
+    try:
+        with open(registry_path, "rb") as f:
+            registry = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    for block in registry.values():
+        if isinstance(block, dict) and profile and profile in block.get("profiles", []):
+            return str(block.get("url", ""))
+    return ""
+
+
+DISCORD_WEBHOOK_URL: str = resolve_webhook(PROFILE)
 
 # Timezone for daily-summary rollovers. Defaults to US Pacific so the
 # rollover lands at midnight PT regardless of where the VPS is hosted.
