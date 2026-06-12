@@ -1,0 +1,21 @@
+# Discord webhook registry — single place to track every webhook in use.
+#
+# Webhook URLs are write-access secrets (anyone holding one can post to the
+# channel). Committed on the explicit call that this repo is PRIVATE —
+# if the repo ever goes public, rotate every webhook below first; they
+# live in git history forever.
+#
+# The bot reads webhooks only via DISCORD_WEBHOOK_URL in .env /
+# .env.<profile>; this registry is the operator's map of which URL lives
+# where. When adding one: add a block here, then point the relevant
+# .env.<profile> at it (locally AND on the VPS).
+
+[prod]
+url = "https://discord.com/api/webhooks/1513777234547048619/XX_f2STzSQDlGiVxOOksbVPF36TYdjzp2hKLJSmQgvNBGxHSxlc0XHN5UKSoAoNnk__h"
+used_by = [".env (prod profile falls back to it)", "VPS ~/Polymarket/.env"]
+notes = "Original webhook — real-money trade alerts. Keep low-noise."
+
+[experimental]
+url = "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q"
+used_by = [".env.experimental (local)", "VPS ~/Polymarket/.env.experimental (pending — apply on next VPS visit)"]
+notes = "Paper-trading noise channel, added 2026-06-11."
