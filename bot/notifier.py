@@ -13,6 +13,7 @@ whatever the VPS local time happened to be.
 import logging
 import re
 import threading
+import time
 from datetime import datetime, timedelta
 
 import requests as http
@@ -61,6 +62,31 @@ def _prefix(algo_name: str) -> str:
     return f"[{_esc(algo_name)}] " if algo_name else ""
 
 
+def _feature_line(features: dict) -> str:
+    """Compact human summary of the signal's logged features, for Discord.
+    Only renders keys that are present — algorithms without features get ''."""
+    if not features:
+        return ""
+    parts = []
+    age = features.get("wallet_age_seconds")
+    if age is not None:
+        parts.append(f"wallet {age / 86_400:.1f}d old")
+    trade_count = features.get("trade_count")
+    if trade_count is not None:
+        parts.append(f"{trade_count} prior trades")
+    portfolio = features.get("portfolio_value_usdc")
+    if portfolio is not None:
+        parts.append(f"portfolio ${portfolio:,.0f}")
+    category = features.get("market_category")
+    if category:
+        parts.append(_esc(str(category)))
+    end_ts = features.get("market_end_ts")
+    if end_ts is not None:
+        days = max(0.0, (end_ts - time.time()) / 86_400)
+        parts.append(f"resolves in {days:.0f}d")
+    return " · ".join(parts)
+
+
 def on_signal(intent, algo_name: str = "") -> None:
     """Generic detection notification — intent-based, works for any algorithm."""
     from .algorithm import OpenIntent, CloseIntent, SettleIntent
@@ -79,11 +105,19 @@ def on_signal(intent, algo_name: str = "") -> None:
     else:
         line = "Unknown intent"
 
-    send(
-        f"{_prefix(algo_name)}👀 **Signal detected**\n"
-        f"{line}\n"
-        f"{_esc((intent.question or '')[:80])}"
-    )
+    lines = [
+        f"{_prefix(algo_name)}👀 **Signal detected**",
+        line,
+        f"{_esc((intent.question or '')[:80])}",
+    ]
+    # The WHY — wallet context is the point of the alert.
+    reason = getattr(intent, "reason", "")
+    if reason:
+        lines.append(f"↳ {_esc(reason)}")
+    feature_summary = _feature_line(getattr(intent, "features", None) or {})
+    if feature_summary:
+        lines.append(f"↳ {feature_summary}")
+    send("\n".join(lines))
 
 
 def on_trade_detected(trade: Trade, algo_name: str = "") -> None:
@@ -103,9 +137,15 @@ def on_buy_executed(
     algo_name: str = "",
 ) -> None:
     tag = "📄 PAPER" if paper else "✅ BUY"
+    shares = spent_usdc / fill_price if fill_price > 0 else 0.0
+    drift = ""
+    if trade.price > 0 and fill_price > 0:
+        drift_pct = (fill_price - trade.price) / trade.price * 100
+        drift = f" (signal {trade.price:.3f}, {drift_pct:+.1f}%)"
     send(
         f"{_prefix(algo_name)}{tag}\n"
-        f"${spent_usdc:.2f} of {_esc(trade.outcome)} @ {fill_price:.3f}\n"
+        f"${spent_usdc:.2f} → {shares:.2f} shares of {_esc(trade.outcome)} "
+        f"@ {fill_price:.3f}{drift}\n"
         f"{_esc(trade.question[:80])}"
     )
 

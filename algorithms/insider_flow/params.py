@@ -39,6 +39,17 @@ def _default_exclude_titles() -> tuple:
     return (" vs. ", " vs ", "O/U", "Spread")
 
 
+def _default_exclude_categories() -> tuple:
+    """Gamma category/tag substrings to reject (lowercased). The authoritative
+    sports screen — title patterns miss formats like "Will <team> win on
+    <date>?", but Gamma tags those markets Sports. "sports" also matches
+    "esports" by substring."""
+    raw = os.getenv(_P + "EXCLUDE_CATEGORIES")
+    if raw is not None and raw != "":
+        return tuple(c.strip().lower() for c in raw.split(",") if c.strip())
+    return ("sports",)
+
+
 @dataclass(frozen=True)
 class InsiderFlowParams:
     name: str = "insider_flow"
@@ -58,10 +69,25 @@ class InsiderFlowParams:
     max_prior_trades: int = field(
         default_factory=lambda: int(_env("MAX_PRIOR_TRADES", "10")))
     exclude_title_patterns: tuple = field(default_factory=_default_exclude_titles)
+    exclude_categories: tuple = field(default_factory=_default_exclude_categories)
+
+    # ── Time-value gate ──────────────────────────────────────────────────────
+    # Capital locked in a far-future market has opportunity cost (~10%/yr in
+    # an index fund) and insiders act on *imminent* events — every documented
+    # case resolved within days. Skip markets resolving further out than
+    # this, and require the win-case return, linearly annualized over the
+    # time to resolution, to clear a hurdle: +5% resolving tomorrow is a
+    # great trade, +5% locked for a year is strictly worse than the S&P.
+    max_days_to_resolution: float = field(
+        default_factory=lambda: float(_env("MAX_DAYS_TO_RESOLUTION", "30")))
+    min_annualized_return: float = field(
+        default_factory=lambda: float(_env("MIN_ANNUAL_RETURN", "1.0")))
 
     # ── Sizing + cadence ─────────────────────────────────────────────────────
+    # Per-trade copy size. Kept small ($2) until paper results validate the
+    # detector — raise via INSIDERFLOW_BET_SIZE when the data justifies it.
     bet_size_usdc: float = field(
-        default_factory=lambda: float(_env("BET_SIZE", "10")))
+        default_factory=lambda: float(_env("BET_SIZE", "2")))
     poll_interval_seconds: int = field(
         default_factory=lambda: int(_env("POLL_INTERVAL", "15")))
     firehose_limit: int = field(
@@ -70,13 +96,30 @@ class InsiderFlowParams:
     settle_check_every: int = field(
         default_factory=lambda: int(_env("SETTLE_EVERY", "20")))
 
+    # ── Candidate buffer — select the best signals, don't copy them all ─────
+    # Passing candidates are held for this window, ranked by conviction
+    # score, and only the top N are copied (the rest are real people being
+    # randomly dumb, not insiders). 0 disables buffering (copy immediately).
+    # Trade-off: waiting costs entry price on fast movers — the slippage
+    # gate still rejects anything that drifted > max_slippage meanwhile.
+    buffer_window_seconds: float = field(
+        default_factory=lambda: float(_env("BUFFER_SECONDS", "900")))
+    buffer_top_n: int = field(
+        default_factory=lambda: int(_env("BUFFER_TOP_N", "2")))
+    # Safety valve: a burst filling the buffer flushes it early.
+    buffer_max: int = field(
+        default_factory=lambda: int(_env("BUFFER_MAX", "20")))
+
     # ── Risk caps (AlgoParams protocol — this algo's pool only) ─────────────
+    # Sized for the real prod bankroll (~$20 total): $2 per market, at most
+    # five concurrent positions (half the bankroll), stop after losing a
+    # quarter of it in a day. Scale via env when the bankroll grows.
     max_position_size_usdc: float = field(
-        default_factory=lambda: float(_env("MAX_POSITION", "10")))
+        default_factory=lambda: float(_env("MAX_POSITION", "2")))
     max_total_exposure_usdc: float = field(
-        default_factory=lambda: float(_env("MAX_EXPOSURE", "100")))
+        default_factory=lambda: float(_env("MAX_EXPOSURE", "10")))
     daily_loss_limit_usdc: float = field(
-        default_factory=lambda: float(_env("DAILY_LOSS_LIMIT", "50")))
+        default_factory=lambda: float(_env("DAILY_LOSS_LIMIT", "5")))
     min_order_size_usdc: float = field(
         default_factory=lambda: float(_env("MIN_ORDER", "1")))
     # Wider than copy_trade's 0.05 — these signals move fast and skipping on
@@ -87,8 +130,10 @@ class InsiderFlowParams:
     # ── Order placement / paper ──────────────────────────────────────────────
     order_type: str = field(
         default_factory=lambda: _env("ORDER_TYPE", "market").lower())
+    # Mirrors the planned prod bankroll so paper results are observed under
+    # the same cash constraint live trading will face.
     paper_starting_balance: float = field(
-        default_factory=lambda: float(_env("PAPER_BALANCE", "10000")))
+        default_factory=lambda: float(_env("PAPER_BALANCE", "20")))
     paper_fee_bps: float = field(
         default_factory=lambda: float(_env("PAPER_FEE_BPS", "0")))
 
