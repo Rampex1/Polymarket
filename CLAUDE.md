@@ -36,6 +36,7 @@ python -m bot.report                  # per-algo performance: P&L, signals, win 
 python scripts/reset_paper_trade_db.py      # Wipe and reset paper trading DB
 python scripts/trading_account_summary.py   # Print portfolio snapshot
 bash   scripts/ssh_vm.sh                     # SSH into the deployment VPS
+bash   scripts/setup_vm.sh                   # On the VPS: zero-to-running deploy (pull, deps, env checks, restart all tmux sessions)
 ```
 
 ## Architecture

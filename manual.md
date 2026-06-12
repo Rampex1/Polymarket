@@ -14,21 +14,21 @@ git checkout main && git pull
 git branch -d new_feature_uwu
 ```
 
-## 2. Update the VPS
+## 2. Update the VPS — one command
 
 ```bash
 bash scripts/ssh_vm.sh
 # then on the VPS:
-cd ~/Polymarket                   # adjust if the repo lives elsewhere
-git pull
-source .venv/bin/activate
-pip install -r requirements.txt
-mkdir -p data && mv positions.db* data/ 2>/dev/null   # adopt new layout
+cd ~/Polymarket && bash scripts/setup_vm.sh
 ```
 
-Do the `mv` while the bot is **stopped** (restart window). Skipping the move
-also works — the legacy fallback keeps `./positions.db` functional and just
-logs a warning on every boot.
+`setup_vm.sh` does everything sections 2–5 used to describe by hand:
+git pull, venv + deps, data/ layout migration, env hygiene (removes the
+obsolete `.env.experimental`, verifies the five `POLY_*` secrets),
+profile validation, and a clean restart of all three tmux sessions
+(`paper`, `prod`, `archive`) with crash-visible panes. Idempotent —
+re-run it after every push. It exits non-zero if any session dies at
+boot and prints that session's last output.
 
 ## 3. Env files on the VPS
 
@@ -46,27 +46,34 @@ that. Sanity-check what will run with:
 PROFILE=experimental python -m bot.params --effective
 ```
 
-## 4. Seed the archive with local data (one-time, worth doing)
+## 4. Merging archive data between machines (done 2026-06-12; keep for reference)
 
-The laptop's archive holds price points for recently-resolved markets whose
-history is now gone from the public API — irreplaceable. Ship it up before
-the VPS archiver's first pass:
+Never `scp` one `discovery_archive.db` over another — both machines accumulate
+history the other lacks, and an overwrite destroys data. Upload under a temp
+name and merge (both tables have natural PKs, so `INSERT OR IGNORE` dedupes
+exactly):
 
 ```bash
-# from the laptop
 scp -i ~/.ssh/ssh-key-2026-05-31.key data/discovery_archive.db \
-    opc@148.116.94.154:~/Polymarket/data/
+    opc@148.116.94.154:~/Polymarket/data/laptop_archive.db
+# then on the VPS:
+cd ~/Polymarket/data && cp discovery_archive.db discovery_archive.db.bak && \
+../.venv/bin/python - <<'EOF'
+import sqlite3
+db = sqlite3.connect("discovery_archive.db")
+db.execute("ATTACH 'laptop_archive.db' AS laptop")
+db.execute("INSERT OR IGNORE INTO price_history SELECT * FROM laptop.price_history")
+db.execute("INSERT OR IGNORE INTO tracked_markets SELECT * FROM laptop.tracked_markets")
+db.commit()
+EOF
+rm laptop_archive.db
 ```
 
-## 5. Start both processes (tmux survives disconnects)
+## 5. tmux cheat-sheet (sessions are started by setup_vm.sh)
 
-```bash
-tmux new -d -s paper   'cd ~/Polymarket && source .venv/bin/activate && PROFILE=experimental python main.py'
-tmux new -d -s archive 'cd ~/Polymarket && source .venv/bin/activate && python -m discovery.archive --loop --every 3600'
-```
-
-Useful tmux: `tmux ls` (list), `tmux attach -t paper` (view), `Ctrl-b d`
-(detach without killing), `tmux kill-session -t paper` (stop).
+`tmux ls` (list), `tmux attach -t paper` (view), `Ctrl-b d` (detach without
+killing), `tmux kill-session -t paper` (stop one). Panes survive a process
+crash (`remain-on-exit`), so attach shows the traceback.
 
 ## 6. Verify within the first 10 minutes
 
