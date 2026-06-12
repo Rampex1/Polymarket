@@ -139,7 +139,7 @@ Detects the documented insider fingerprint: **fresh wallets making large first b
 | `INSIDERFLOW_MAX_PRIOR_TRADES` | `10` | Max prior trades for "fresh" |
 | `INSIDERFLOW_BET_SIZE` | `2` | Our copy size (top-up target, USDC) |
 | `INSIDERFLOW_EXCLUDE_TITLES` | `" vs. ", " vs ", O/U, Spread` | Comma-sep title patterns (sports pre-filter) |
-| `INSIDERFLOW_EXCLUDE_CATEGORIES` | `sports` | Gamma category/tag substrings to reject — the authoritative sports screen |
+| `INSIDERFLOW_EXCLUDE_CATEGORIES` | `sports,crypto` | Gamma category/tag substrings to reject — no-insider-signal classes (sports = gambling, crypto price levels = privately unknowable) |
 | `INSIDERFLOW_MAX_DAYS_TO_RESOLUTION` | `30` | Skip markets resolving further out (insiders bet on imminent events) |
 | `INSIDERFLOW_MIN_ANNUAL_RETURN` | `1.0` | Win-case return, annualized over time-to-resolution, must beat this (1.0 = +100%/yr) |
 | `INSIDERFLOW_BUFFER_SECONDS` | `900` | Candidate buffer window; 0 = copy immediately |
