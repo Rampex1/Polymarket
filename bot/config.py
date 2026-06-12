@@ -21,9 +21,11 @@ in `config/<profile>.toml`, validated against the schemas in
 Profiles
 --------
 A "profile" is the bundle of algorithms a given process runs. Pick one at
-startup via the `PROFILE` env var (default: `default`). This file looks for
-`.env.<profile>` first and falls back to `.env`, so each profile can have
-its own credentials, DB path, Discord channel, etc.
+startup via the `PROFILE` env var — there is deliberately no default: the
+bot refuses to boot without an explicit profile, so paper config can never
+be confused with live. This file looks for `.env.<profile>` first and
+falls back to `.env`, so each profile can have its own credentials, DB
+path, Discord channel, etc.
 
     PROFILE=prod          python main.py     # loads .env.prod
     PROFILE=experimental  python main.py     # loads .env.experimental
@@ -37,11 +39,15 @@ from dotenv import load_dotenv
 
 # ── Profile selection (must run before any os.getenv reads below) ────────────
 
-PROFILE: str = os.getenv("PROFILE", "default")
+# No default on purpose — enforcement (refusing to boot) lives where the
+# profile TOML is resolved (algorithms.ENABLED), so schema-only tooling
+# like `python -m bot.params copy_trade` still works without a profile.
+PROFILE: str = os.getenv("PROFILE", "")
 
 # Load .env.<profile> if it exists, otherwise fall back to plain .env.
 # `override=True` so a stale shell env doesn't shadow file values.
-for _candidate in (f".env.{PROFILE}", ".env"):
+_candidates = ([f".env.{PROFILE}"] if PROFILE else []) + [".env"]
+for _candidate in _candidates:
     if os.path.exists(_candidate):
         load_dotenv(_candidate, override=True)
         break

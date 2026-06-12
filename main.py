@@ -31,7 +31,13 @@ import signal
 import sys
 import threading
 
-from algorithms import ENABLED
+from bot.profile_loader import ProfileError
+
+try:
+    from algorithms import ENABLED
+except ProfileError as e:
+    raise SystemExit(f"error: {e}") from None
+
 from bot import config, db, notifier, reconciliation, runner, runs
 from bot.algorithm import Algorithm, Mode
 from bot.positions import PositionTracker, RiskManager

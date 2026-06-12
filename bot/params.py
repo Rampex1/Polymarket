@@ -56,9 +56,14 @@ def show_schema(registry, algo_type: str) -> None:
 
 
 def show_effective() -> None:
-    import algorithms  # profile resolves here — may exit with ProfileError
+    import algorithms
 
-    enabled = algorithms.ENABLED
+    from bot.profile_loader import ProfileError
+
+    try:
+        enabled = algorithms.ENABLED
+    except ProfileError as e:
+        sys.exit(f"error: {e}")
     print(f"PROFILE={algorithms.PROFILE} → config/{algorithms.PROFILE}.toml\n")
     for algo in enabled:
         p = algo.params

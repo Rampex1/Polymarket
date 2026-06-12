@@ -10,10 +10,11 @@ The core thesis baked into the default strategy: only copy *high-conviction* pos
 
 ```bash
 source .venv/bin/activate
-python main.py                          # default profile
 PROFILE=prod python main.py             # live profile → loads .env.prod
 PROFILE=experimental python main.py     # paper A/B profile → loads .env.experimental
 ```
+
+`PROFILE` is **required** — there is deliberately no default profile, so the bot can never run under an implicitly-selected config. A bare `python main.py` exits with an error naming the available profiles.
 
 There is **no global paper/live flag**. Mode is per-algorithm (`"paper"` / `"live"`), declared per algorithm block in `config/<profile>.toml`. A single process can run prod-live and paper-experimental algorithms side by side.
 
@@ -43,7 +44,6 @@ The bot is split into **shared infrastructure** (`bot/`), **pluggable strategies
 ```
 main.py                   # Entry point — one worker thread per enabled algorithm
 config/
-  default.toml            # Profile: single paper copy-trader (no PROFILE set)
   prod.toml               # Profile: live algorithms — real money, keep conservative
   experimental.toml       # Profile: paper variants for tuning / A/B testing
 bot/
@@ -110,7 +110,7 @@ The shared CLOB client is built **once**, and only if at least one enabled algor
 
 | Variable | Notes |
 |---|---|
-| `PROFILE` | Selects `config/<name>.toml` and prefers `.env.<profile>`. Default `default`. |
+| `PROFILE` | Selects `config/<name>.toml` and prefers `.env.<profile>`. **Required** — no default; the bot refuses to boot without it. |
 | `DB_PATH` | SQLite file path (default `data/positions.db`; an existing legacy `./positions.db` keeps working with a warning) |
 | `DISCORD_WEBHOOK_URL` | Discord incoming webhook (optional) |
 | `TIMEZONE` | Daily-summary rollover tz (default `UTC`) |

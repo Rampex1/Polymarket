@@ -9,7 +9,9 @@ cadence, tracker, risk pool, and paper bankroll.
 Examples:
     PROFILE=prod          → config/prod.toml
     PROFILE=experimental  → config/experimental.toml
-    PROFILE unset         → config/default.toml
+    PROFILE unset         → refuses to boot — running a trading bot under
+                            an implicit profile is how paper config ends
+                            up trading real money (or vice versa)
 
 To add a new strategy:
   1. Create `algorithms/<your_algo>/{__init__.py, algorithm.py, params.py}`.
@@ -23,7 +25,7 @@ without requiring a valid profile file.
 
 import os
 
-from bot.profile_loader import load_profile
+from bot.profile_loader import ProfileError, available_profiles, load_profile
 
 from .copy_trade import CopyTradeAlgorithm, CopyTradeParams
 from .insider_flow import InsiderFlowAlgorithm, InsiderFlowParams
@@ -34,7 +36,7 @@ REGISTRY = {
     "insider_flow": (InsiderFlowAlgorithm, InsiderFlowParams),
 }
 
-PROFILE = os.getenv("PROFILE", "default")
+PROFILE = os.getenv("PROFILE")
 
 _enabled = None
 
@@ -43,6 +45,14 @@ def __getattr__(name):
     if name == "ENABLED":
         global _enabled
         if _enabled is None:
+            if not PROFILE:
+                avail = ", ".join(available_profiles()) or "none found"
+                raise ProfileError(
+                    "PROFILE is not set — refusing to guess which config to "
+                    "trade with. Run with an explicit profile, e.g. "
+                    "PROFILE=experimental (paper) or PROFILE=prod (live). "
+                    f"Available: {avail}."
+                )
             _enabled = load_profile(PROFILE, REGISTRY)
         return _enabled
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

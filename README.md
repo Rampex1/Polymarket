@@ -43,10 +43,13 @@ instead of silently doing nothing.
 ## Running
 
 ```bash
-python main.py                          # default profile (paper)
 PROFILE=experimental python main.py     # paper A/B variants
 PROFILE=prod python main.py             # live — needs POLY_* creds in .env.prod
 ```
+
+`PROFILE` is required — there is no default profile, by design. A bare
+`python main.py` exits with an error instead of guessing which config
+(and which mode) to trade with.
 
 The discovery price archiver should run alongside (the public API drops
 price history at resolution):

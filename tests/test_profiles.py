@@ -40,9 +40,19 @@ def test_prod_profile_is_explicit_live():
     )
 
 
-def test_default_profile_loads():
-    algos = load_profile("default", REGISTRY)
-    assert len(algos) >= 1
+def test_unset_profile_refuses_to_boot(monkeypatch):
+    """No implicit profile: a bare `python main.py` must crash, not trade."""
+    monkeypatch.delenv("PROFILE", raising=False)
+    import algorithms
+    importlib.reload(algorithms)
+    try:
+        with pytest.raises(ProfileError, match="PROFILE is not set"):
+            algorithms.ENABLED
+    finally:
+        # Reload once more so later tests see a module untainted by the
+        # deleted env var (ENABLED is cached at first access).
+        monkeypatch.setenv("PROFILE", "experimental")
+        importlib.reload(algorithms)
 
 
 def test_lazy_enabled_resolves(monkeypatch):

@@ -38,7 +38,7 @@ class ProfileError(RuntimeError):
     """A profile file is missing or invalid. Message says what and where."""
 
 
-def _available_profiles(config_dir: str) -> list[str]:
+def available_profiles(config_dir: str = CONFIG_DIR) -> list[str]:
     if not os.path.isdir(config_dir):
         return []
     return sorted(
@@ -64,7 +64,7 @@ def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> 
     """
     path = os.path.join(config_dir, f"{profile}.toml")
     if not os.path.exists(path):
-        avail = ", ".join(_available_profiles(config_dir)) or "none found"
+        avail = ", ".join(available_profiles(config_dir)) or "none found"
         raise ProfileError(
             f"Profile '{profile}' not found at {path}. Available: {avail}."
         )

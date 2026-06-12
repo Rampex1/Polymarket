@@ -3,6 +3,7 @@ Run-provenance + report/params CLI smoke tests.
 """
 
 import json
+import os
 import subprocess
 import sys
 
@@ -40,10 +41,11 @@ def test_record_run_never_raises(monkeypatch):
     runs.record_run(CopyTradeParams(target_address="0xabc"), profile="x")  # no raise
 
 
-def _run_module(mod, *args):
+def _run_module(mod, *args, env_extra=None):
+    env = {**os.environ, **(env_extra or {})}
     return subprocess.run(
         [sys.executable, "-m", mod, *args],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, env=env,
     )
 
 
@@ -63,10 +65,22 @@ def test_params_cli_shows_schema_with_docs():
 
 
 def test_params_cli_effective_marks_overrides():
-    out = _run_module("bot.params", "--effective")
+    out = _run_module("bot.params", "--effective",
+                      env_extra={"PROFILE": "prod"})
     assert out.returncode == 0, out.stderr
     assert "copy_trade" in out.stdout
     assert "target_address" in out.stdout
+
+
+def test_params_cli_effective_requires_profile():
+    """No implicit profile — --effective without PROFILE must fail clearly."""
+    env = {k: v for k, v in os.environ.items() if k != "PROFILE"}
+    out = subprocess.run(
+        [sys.executable, "-m", "bot.params", "--effective"],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert out.returncode != 0
+    assert "PROFILE is not set" in out.stderr
 
 
 def test_report_cli_runs_on_fresh_db(tmp_path, monkeypatch):
