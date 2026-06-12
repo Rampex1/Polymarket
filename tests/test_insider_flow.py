@@ -326,13 +326,13 @@ def test_exclude_categories_env_override(monkeypatch):
     assert p.exclude_categories == ("sports", "weather")
 
 
-def test_default_excludes_sports_and_crypto(monkeypatch):
-    """Both default exclusions are no-insider-signal classes: sports is
-    gambling, crypto price levels are privately unknowable."""
+def test_default_exclusions_are_no_insider_signal_classes(monkeypatch):
+    """Sports is gambling, crypto price levels and weather are privately
+    unknowable — none of them can carry insider signal."""
     from algorithms.insider_flow.params import InsiderFlowParams
 
     monkeypatch.delenv("INSIDERFLOW_EXCLUDE_CATEGORIES", raising=False)
-    assert InsiderFlowParams().exclude_categories == ("sports", "crypto")
+    assert InsiderFlowParams().exclude_categories == ("sports", "crypto", "weather")
 
 
 def test_features_include_market_category(algo, stub_firehose, stub_stats):
