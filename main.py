@@ -84,10 +84,6 @@ def _run_worker(
 
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url
-        notifier.start_daily_summary(
-            tracker, paper=paper, stop_event=stop_event, algo_name=display_name,
-            webhook_url=webhook_url,
-        )
         notifier.on_startup(
             "PAPER" if paper else "LIVE",
             tracker.total_exposure_usdc(paper=paper),
@@ -146,6 +142,42 @@ def _run_worker(
             pass
         notifier.on_shutdown(algo_name=algo.display_name, webhook_url=algo.params.webhook_url)
         logger.info("[%s] Stopped.", name)
+
+
+def _start_profile_summary(
+    algos,
+    client,
+    stop_event: threading.Event,
+) -> None:
+    """Start a single daily summary thread for the whole profile.
+
+    Sends to the profile-level summary webhook (config/webhooks.toml) at
+    midnight. Creates fresh PositionTracker instances at send time so it
+    doesn't hold live references to worker state.
+    """
+    summary_webhook = config.resolve_summary_webhook(config.PROFILE)
+    if not summary_webhook:
+        logger.info("No summary webhook configured for profile '%s' — skipping daily summary.", config.PROFILE)
+        return
+
+    algo_infos = [
+        (a.params.name, a.params.mode == Mode.PAPER or client is None)
+        for a in algos
+    ]
+
+    def _loop() -> None:
+        while True:
+            wait_s = notifier._seconds_until_midnight()
+            if stop_event.wait(wait_s):
+                return
+            try:
+                notifier.send_profile_summary(algo_infos, summary_webhook, config.PROFILE)
+            except Exception:
+                logger.exception("Profile daily summary raised, continuing")
+
+    t = threading.Thread(target=_loop, daemon=True, name="daily-summary")
+    t.start()
+    logger.info("Profile daily summary thread started (profile=%s).", config.PROFILE)
 
 
 def _warn_orphaned_algos() -> None:
@@ -210,6 +242,10 @@ def main() -> None:
     ]
     for w in workers:
         w.start()
+
+    # One profile-level daily summary thread — aggregates all algorithms
+    # into a single message sent to the profile's summary channel.
+    _start_profile_summary(ENABLED, client, stop_event)
 
     # Block the main thread until shutdown is signaled.
     try:

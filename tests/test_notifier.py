@@ -154,6 +154,65 @@ def test_skip_when_webhook_missing(monkeypatch):
     assert not posted
 
 
+def test_send_profile_summary_format(fresh_db, monkeypatch):
+    """Profile summary includes per-algo blocks and a combined total."""
+    from bot import notifier
+    from bot.positions import PositionTracker
+    from tests.conftest import make_trade
+
+    # Seed one position into the DB for algo "a1".
+    t = PositionTracker(algo="a1")
+    t.init_paper_balance(100.0)
+    trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.40)
+    t.record_buy(trade, spent_usdc=2.0, shares=5.0, fill_price=0.40, paper=True)
+
+    sent = []
+    monkeypatch.setattr(notifier.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
+
+    notifier.send_profile_summary([("a1", True)], webhook_url="http://test", profile="experimental")
+
+    assert len(sent) == 1
+    body = sent[0]["content"]
+    assert "experimental" in body
+    assert "**a1**" in body
+    assert "PAPER" in body
+    assert "`YES`" in body
+    assert "Total" in body
+    assert "────" in body   # separator present
+
+
+def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
+    from bot import notifier
+    sent = []
+    monkeypatch.setattr(notifier.http, "post", lambda *a, **kw: sent.append(1))
+    notifier.send_profile_summary([("a1", True)], webhook_url="")
+    assert not sent
+
+
+def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
+    """Combined P&L/exposure sums across all algos."""
+    from bot import notifier
+    from bot.positions import PositionTracker
+    from tests.conftest import make_trade
+
+    for name, usdc in [("b1", 3.0), ("b2", 5.0)]:
+        t = PositionTracker(algo=name)
+        t.init_paper_balance(100.0)
+        trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.50)
+        t.record_buy(trade, spent_usdc=usdc, shares=usdc * 2, fill_price=0.50, paper=True)
+
+    sent = []
+    monkeypatch.setattr(notifier.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
+    notifier.send_profile_summary([("b1", True), ("b2", True)], webhook_url="http://test")
+
+    body = sent[0]["content"]
+    assert "2 algorithms" in body
+    assert "**b1**" in body
+    assert "**b2**" in body
+    # Combined exposure = $3 + $5 = $8
+    assert "$8.00" in body
+
+
 def test_seconds_until_midnight_differs_between_timezones(monkeypatch):
     """Midnight is computed in config.TIMEZONE. To prove the timezone is
     actually consulted (rather than ignored and falling through to local),

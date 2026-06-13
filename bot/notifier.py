@@ -267,6 +267,76 @@ def _send_daily_summary(tracker, paper: bool, algo_name: str = "", webhook_url: 
     send("\n".join(lines), webhook_url=webhook_url)
 
 
+def send_profile_summary(
+    algo_infos: list,
+    webhook_url: str,
+    profile: str = "",
+) -> None:
+    """Profile-level daily summary — one message per profile to a shared channel.
+
+    `algo_infos` is a list of (algo_name, paper) tuples. Fresh PositionTracker
+    instances are created per algo so this can run from any thread without
+    holding live tracker references.
+
+    Layout:
+      📊 **Daily Summary · DATE · PROFILE**
+
+      **algo_name** · PAPER/LIVE
+      > Realized P&L: +$X.XX
+      > Open: N positions · Exposure: $X.XX
+      > `OUTCOME` Xsh @ X.XXX · Question text…
+      (blank line between algos)
+      ────────────────────
+      **Total · N algorithms**
+      > P&L: +$X.XX · Exposure: $X.XX
+    """
+    if not webhook_url:
+        return
+
+    from bot.positions import PositionTracker
+
+    today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
+    profile_label = _esc(profile) if profile else "all"
+
+    lines = [f"📊 **Daily Summary · {today_str} · {profile_label}**", ""]
+
+    total_pnl = 0.0
+    total_exposure = 0.0
+
+    for name, paper in algo_infos:
+        tracker = PositionTracker(algo=name)
+        positions = tracker.all_open(paper=paper)
+        exposure = tracker.total_exposure_usdc(paper=paper)
+        pnl = tracker.today_pnl_usdc(paper=paper)
+        total_pnl += pnl
+        total_exposure += exposure
+
+        sign = "+" if pnl >= 0 else ""
+        mode_tag = "PAPER" if paper else "LIVE"
+        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+
+        lines.append(f"**{_esc(name)}** · {mode_tag}")
+        lines.append(f"> {pnl_emoji} Realized P&L: **{sign}${pnl:.2f}**")
+        lines.append(f"> Open: {len(positions)} positions · Exposure: **${exposure:.2f}**")
+        if positions:
+            lines.append(">")
+            for p in positions:
+                lines.append(
+                    f"> `{_esc(p.outcome)}` {p.shares:.1f}sh @ {p.avg_price:.3f}"
+                    f"  ·  {_esc(p.question[:55])}"
+                )
+        lines.append("")
+
+    sign = "+" if total_pnl >= 0 else ""
+    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+    algo_word = "algorithm" if len(algo_infos) == 1 else "algorithms"
+    lines.append("─" * 22)
+    lines.append(f"**Total · {len(algo_infos)} {algo_word}**")
+    lines.append(f"> {pnl_emoji} P&L: **{sign}${total_pnl:.2f}** · Exposure: **${total_exposure:.2f}**")
+
+    send("\n".join(lines), webhook_url=webhook_url)
+
+
 def _seconds_until_midnight() -> float:
     """Time until the next midnight in the configured timezone."""
     now = datetime.now(tz=config.TIMEZONE)

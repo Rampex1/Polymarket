@@ -136,6 +136,29 @@ def resolve_webhook(profile: str, registry_path: str = _WEBHOOK_REGISTRY) -> str
 
 DISCORD_WEBHOOK_URL: str = resolve_webhook(PROFILE)
 
+
+def resolve_summary_webhook(profile: str, registry_path: str = _WEBHOOK_REGISTRY) -> str:
+    """Summary webhook for this profile — the channel that receives the
+    profile-level daily summary (all algos + combined total).
+
+    Looks for a block in webhooks.toml with type = "summary" and
+    profile = <name>. Returns "" if not configured (summary is skipped).
+    """
+    try:
+        with open(registry_path, "rb") as f:
+            registry = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    for block in registry.values():
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "summary"
+            and profile
+            and block.get("profile") == profile
+        ):
+            return str(block.get("url", ""))
+    return ""
+
 # Timezone for daily-summary rollovers. Defaults to US Pacific so the
 # rollover lands at midnight PT regardless of where the VPS is hosted.
 _TZ_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
