@@ -164,6 +164,30 @@ Thread-local connections, WAL mode. All rows are partitioned by an `algo` column
 
 `db._migrate()` upgrades older v0/v1 databases in place (adds `paper`/`algo` columns, repartitions PKs) idempotently.
 
+## Discord Bot (slash commands)
+
+Two-way interface — runs as a daemon thread alongside workers. Each profile (prod / experimental) runs its own bot instance; Discord shows them separately in the slash-command picker by application name.
+
+**Commands:**
+| Command | Description |
+|---|---|
+| `/status` | All algorithms: mode, exposure, today's P&L |
+| `/positions [algo]` | Open positions, optionally filtered by algo name |
+| `/pnl` | Realized P&L + exposure per algo and combined |
+| `/summary` | Send the daily summary to the summary channel immediately |
+
+**One-time setup:**
+1. [discord.com/developers](https://discord.com/developers) → New Application (one per profile, e.g. "Polymarket Prod") → **Bot** → Reset Token → copy it
+2. **OAuth2** → URL Generator → scopes: `bot` + `applications.commands` → bot permissions: `Send Messages`, `Use Slash Commands` → open invite URL → add to server
+3. Add to `.env`:
+   ```
+   DISCORD_BOT_TOKEN=<token>
+   DISCORD_GUILD_ID=<server-id>   # optional but instant — right-click server → Copy Server ID (needs Developer Mode)
+   ```
+4. Deploy (`setup_vm.sh`) — the bot thread starts automatically with the process.
+
+Without `DISCORD_BOT_TOKEN` the bot is silently disabled; webhooks for trade alerts and daily summaries still work normally.
+
 ## Setup
 
 ```bash
@@ -183,4 +207,36 @@ pytest tests/test_copy_trade.py
 
 ## Deployment
 
-Runs on a VPS (plain Python process under a virtualenv; Docker has been removed). `scripts/ssh_vm.sh` is a helper for SSH access. Persist `positions.db` and the appropriate `.env.<profile>` on the host.
+Runs on a VPS (plain Python process under a virtualenv; Docker has been removed).
+
+**Host:** `opc@148.116.94.154`  
+**SSH key:** `~/.ssh/ssh-key-2026-05-31.key`  
+**Repo path on VPS:** `~/Polymarket/`
+
+```bash
+# Interactive shell
+ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154
+
+# Run a command remotely without opening a shell
+ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154 '<command>'
+
+# Full redeploy (pull, deps, env hygiene, validate, restart all tmux sessions)
+ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154 'bash ~/Polymarket/scripts/setup_vm.sh'
+```
+
+The three tmux sessions on the VPS:
+
+| Session | Profile | What runs |
+|---|---|---|
+| `prod` | `PROFILE=prod` | copy_trade (live) |
+| `paper` | `PROFILE=experimental` | insider_flow (paper) |
+| `archive` | — | discovery price archiver |
+
+```bash
+# Attach to a session (Ctrl-b d to detach)
+tmux attach -t prod
+tmux attach -t paper
+tmux attach -t archive
+```
+
+Persist `data/positions.db` and `.env` (5 `POLY_*` secrets) on the host — both are gitignored and must not be wiped between deploys.

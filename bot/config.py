@@ -108,6 +108,18 @@ def _default_db_path() -> str:
 DB_PATH: str = _default_db_path()
 
 
+# ── Discord bot (optional two-way interface) ─────────────────────────────────
+
+# Bot token from discord.com/developers → Application → Bot → Reset Token.
+# Without this the bot is disabled; webhooks still work for one-way alerts.
+DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
+
+# Guild (server) ID for instant slash-command registration. Without it,
+# commands are registered globally and can take up to 1 hour to appear.
+# Enable Developer Mode in Discord → right-click server → Copy Server ID.
+DISCORD_GUILD_ID: str = os.getenv("DISCORD_GUILD_ID", "")
+
+
 # ── Notifications ────────────────────────────────────────────────────────────
 
 _WEBHOOK_REGISTRY = os.path.join("config", "webhooks.toml")
