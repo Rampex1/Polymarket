@@ -436,12 +436,12 @@ def test_settle_sweep_cadence(tracker, monkeypatch):
         lambda mid: sweep_calls.append(mid) or {"closed": False},
     )
 
-    list(a.poll())   # poll 1 — no sweep
+    list(a.poll())   # poll 1 — startup sweep fires immediately
     list(a.poll())   # poll 2 — no sweep
     list(a.poll())   # poll 3 — sweep fires (3 % 3 == 0)
-    assert len(sweep_calls) == 1
+    assert len(sweep_calls) == 2
 
     list(a.poll())   # poll 4 — no sweep
     list(a.poll())   # poll 5 — no sweep
-    list(a.poll())   # poll 6 — sweep fires
-    assert len(sweep_calls) == 2
+    list(a.poll())   # poll 6 — sweep fires (6 % 3 == 0)
+    assert len(sweep_calls) == 3

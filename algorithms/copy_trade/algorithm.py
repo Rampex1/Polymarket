@@ -142,7 +142,7 @@ class CopyTradeAlgorithm(Algorithm):
             logger.info("[%s] New trade detected: %s", self.params.name, t)
             yield from self._intents_for(t)
 
-        if self._poll_count % self.params.settle_check_every == 0:
+        if self._poll_count == 1 or self._poll_count % self.params.settle_check_every == 0:
             yield from self._settle_sweep()
 
     # ── Exit safety net: settle resolved markets ─────────────────────────────
