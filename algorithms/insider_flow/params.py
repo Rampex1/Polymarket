@@ -83,6 +83,9 @@ class InsiderFlowParams:
     min_order_size_usdc: float = _doc(1.0, "Skip orders smaller than this.")
     max_slippage: float = _doc(0.10, "Wider than copy_trade — these signals move fast and skipping on drift is adverse selection against exactly the trades we want.")
 
+    # ── Notifications ────────────────────────────────────────────────────────
+    webhook_url: str = _doc("", "Per-algorithm Discord webhook URL. Overrides the global registry; '' falls back to config/webhooks.toml routing.")
+
     # ── Order placement / paper ──────────────────────────────────────────────
     order_type: str = _doc("market", "'market' (FOK/FAK) or 'limit' (GTC).")
     # Mirrors the planned prod bankroll so paper results are observed under

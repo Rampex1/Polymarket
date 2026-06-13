@@ -27,16 +27,17 @@ logger = logging.getLogger(__name__)
 _DISCORD_MAX_LEN = 2000
 
 
-def send(text: str) -> None:
-    """Fire-and-forget Discord webhook message. Silently skips if not configured."""
-    if not config.DISCORD_WEBHOOK_URL:
+def send(text: str, webhook_url: str = "") -> None:
+    """Fire-and-forget Discord webhook message. Silently skips if not configured.
+
+    `webhook_url` overrides the global config URL — pass the algorithm's
+    per-algo webhook so each algorithm posts to its own channel.
+    """
+    url = webhook_url or config.DISCORD_WEBHOOK_URL
+    if not url:
         return
     try:
-        http.post(
-            config.DISCORD_WEBHOOK_URL,
-            json={"content": text[:_DISCORD_MAX_LEN]},
-            timeout=5,
-        )
+        http.post(url, json={"content": text[:_DISCORD_MAX_LEN]}, timeout=5)
     except Exception as e:
         logger.warning("Discord send failed: %s", e)
 
@@ -97,7 +98,7 @@ def _feature_line(features: dict) -> str:
 # disambiguated when multiple algorithms run side-by-side.
 
 
-def on_signal(intent, algo_name: str = "") -> None:
+def on_signal(intent, algo_name: str = "", webhook_url: str = "") -> None:
     """Generic detection notification — intent-based, works for any algorithm."""
     from .algorithm import OpenIntent, CloseIntent, SettleIntent
     if isinstance(intent, OpenIntent):
@@ -126,10 +127,10 @@ def on_signal(intent, algo_name: str = "") -> None:
     feature_summary = _feature_line(getattr(intent, "features", None) or {})
     if feature_summary:
         lines.append(f"↳ {feature_summary}")
-    send("\n".join(lines))
+    send("\n".join(lines), webhook_url=webhook_url)
 
 
-def on_trade_detected(trade: Trade, algo_name: str = "") -> None:
+def on_trade_detected(trade: Trade, algo_name: str = "", webhook_url: str = "") -> None:
     """Legacy entry point — kept for the wallet-watching CopyTrade flow that
     classifies a Trade before issuing an Intent. New algorithms should call
     `on_signal` instead."""
@@ -137,13 +138,14 @@ def on_trade_detected(trade: Trade, algo_name: str = "") -> None:
         f"📥 **SIGNAL**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
         f"{_esc(trade.action)} `{_esc(trade.outcome)}`  "
-        f"${trade.size_usdc:,.0f} @ **{trade.price:.3f}**"
+        f"${trade.size_usdc:,.0f} @ **{trade.price:.3f}**",
+        webhook_url=webhook_url,
     )
 
 
 def on_buy_executed(
     trade: Trade, spent_usdc: float, paper: bool, fill_price: float,
-    algo_name: str = "",
+    algo_name: str = "", webhook_url: str = "",
 ) -> None:
     tag = "📄 **PAPER BUY**" if paper else "✅ **BUY**"
     shares = spent_usdc / fill_price if fill_price > 0 else 0.0
@@ -155,21 +157,23 @@ def on_buy_executed(
         f"{tag}{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
         f"`{_esc(trade.outcome)}`  ${spent_usdc:.2f} → {shares:.2f} shares "
-        f"@ **{fill_price:.3f}**{slip}"
+        f"@ **{fill_price:.3f}**{slip}",
+        webhook_url=webhook_url,
     )
 
 
-def on_buy_failed(trade: Trade, reason: str, algo_name: str = "") -> None:
+def on_buy_failed(trade: Trade, reason: str, algo_name: str = "", webhook_url: str = "") -> None:
     send(
         f"❌ **BUY failed**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
-        f"{_esc(reason)}"
+        f"{_esc(reason)}",
+        webhook_url=webhook_url,
     )
 
 
 def on_sell_executed(
     trade: Trade, shares: float, pnl: float, paper: bool, fill_price: float,
-    algo_name: str = "",
+    algo_name: str = "", webhook_url: str = "",
 ) -> None:
     tag = "📄 **PAPER SELL**" if paper else "✅ **SELL**"
     sign = "+" if pnl >= 0 else ""
@@ -177,27 +181,30 @@ def on_sell_executed(
         f"{tag}{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
         f"`{_esc(trade.outcome)}`  {shares:.2f} shares @ **{fill_price:.3f}** · "
-        f"P&L **{sign}${pnl:.2f}**"
+        f"P&L **{sign}${pnl:.2f}**",
+        webhook_url=webhook_url,
     )
 
 
-def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "") -> None:
+def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "", webhook_url: str = "") -> None:
     send(
         f"⚠️ **Risk block**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
-        f"{_esc(reason)}"
+        f"{_esc(reason)}",
+        webhook_url=webhook_url,
     )
 
 
-def on_startup(mode: str, exposure: float, algo_name: str = "") -> None:
+def on_startup(mode: str, exposure: float, algo_name: str = "", webhook_url: str = "") -> None:
     send(
         f"🚀 **Bot started**{_subtitle(algo_name)} — {_esc(mode)} mode\n"
-        f"Exposure: **${exposure:.2f}**"
+        f"Exposure: **${exposure:.2f}**",
+        webhook_url=webhook_url,
     )
 
 
-def on_shutdown(algo_name: str = "") -> None:
-    send(f"🛑 **Bot stopped**{_subtitle(algo_name)}")
+def on_shutdown(algo_name: str = "", webhook_url: str = "") -> None:
+    send(f"🛑 **Bot stopped**{_subtitle(algo_name)}", webhook_url=webhook_url)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +216,7 @@ def start_daily_summary(
     paper: bool,
     stop_event: threading.Event | None = None,
     algo_name: str = "",
+    webhook_url: str = "",
 ) -> None:
     """Send a portfolio summary every day at midnight (config.TIMEZONE).
 
@@ -224,7 +232,8 @@ def start_daily_summary(
                     return
             else:
                 threading.Event().wait(wait_s)
-            _send_daily_summary(tracker, paper=paper, algo_name=algo_name)
+            _send_daily_summary(tracker, paper=paper, algo_name=algo_name,
+                                webhook_url=webhook_url)
 
     thread_name = f"daily-summary-{algo_name}" if algo_name else "daily-summary"
     t = threading.Thread(target=_loop, daemon=True, name=thread_name)
@@ -235,7 +244,7 @@ def start_daily_summary(
     )
 
 
-def _send_daily_summary(tracker, paper: bool, algo_name: str = "") -> None:
+def _send_daily_summary(tracker, paper: bool, algo_name: str = "", webhook_url: str = "") -> None:
     positions = tracker.all_open(paper=paper)
     exposure = tracker.total_exposure_usdc(paper=paper)
     pnl = tracker.today_pnl_usdc(paper=paper)
@@ -255,7 +264,7 @@ def _send_daily_summary(tracker, paper: bool, algo_name: str = "") -> None:
                 f"> `{_esc(p.outcome)}` {p.shares:.1f}sh @ {p.avg_price:.3f} · "
                 f"{_esc(p.question[:50])}"
             )
-    send("\n".join(lines))
+    send("\n".join(lines), webhook_url=webhook_url)
 
 
 def _seconds_until_midnight() -> float:

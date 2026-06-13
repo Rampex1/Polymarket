@@ -83,13 +83,16 @@ def _run_worker(
         algo.setup(tracker, notifier, client)
 
         display_name = algo.display_name
+        webhook_url = algo.params.webhook_url
         notifier.start_daily_summary(
             tracker, paper=paper, stop_event=stop_event, algo_name=display_name,
+            webhook_url=webhook_url,
         )
         notifier.on_startup(
             "PAPER" if paper else "LIVE",
             tracker.total_exposure_usdc(paper=paper),
             algo_name=display_name,
+            webhook_url=webhook_url,
         )
 
         logger.info(
@@ -141,7 +144,7 @@ def _run_worker(
             tracker.print_summary(paper=paper)
         except Exception:
             pass
-        notifier.on_shutdown(algo_name=algo.display_name)
+        notifier.on_shutdown(algo_name=algo.display_name, webhook_url=algo.params.webhook_url)
         logger.info("[%s] Stopped.", name)
 
 

@@ -11,4 +11,5 @@ name = "insider_flow_paper"
 mode = "paper"
 
 [algorithm.params]
+webhook_url = "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q"
 max_total_exposure_usdc = 1000000.0   # no cap for paper

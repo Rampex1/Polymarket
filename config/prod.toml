@@ -16,5 +16,6 @@ mode = "live"
 
 [algorithm.params]
 target_address = "0x9f2fe025f84839ca81dd8e0338892605702d2ca8"   # surfandturf
+webhook_url = "https://discord.com/api/webhooks/1513777234547048619/XX_f2STzSQDlGiVxOOksbVPF36TYdjzp2hKLJSmQgvNBGxHSxlc0XHN5UKSoAoNnk__h"
 # Sizing/risk knobs intentionally at schema defaults ($1/$2/$3 tiers,
 # $3 per-position cap, $12 exposure cap, $4 daily loss limit).

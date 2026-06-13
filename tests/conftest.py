@@ -90,6 +90,7 @@ class _TestParams:
     target_username: str = ""
     min_trade_size_usdc: float = 0.0
     settle_check_every: int = 999  # large so sweep never fires unexpectedly in tests
+    webhook_url: str = ""
 
 
 @pytest.fixture

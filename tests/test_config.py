@@ -52,9 +52,11 @@ def test_malformed_registry_is_not_fatal(tmp_path, monkeypatch):
     assert resolve_webhook("prod", _registry(tmp_path, "not [ toml")) == ""
 
 
-def test_shipped_registry_routes_shipped_profiles(monkeypatch):
-    """The real config/webhooks.toml must cover both runnable profiles."""
+def test_shipped_registry_is_reference_only(monkeypatch):
+    """Routing is now per-algorithm (webhook_url in profile TOMLs).
+    The registry is a reference doc; resolve_webhook returns '' for any
+    profile since no `profiles` list exists in the new format."""
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
     for profile in ("prod", "experimental"):
         url = resolve_webhook(profile)
-        assert url.startswith("https://discord.com/api/webhooks/"), profile
+        assert url == "", f"Expected no profile-based routing for {profile}"

@@ -120,6 +120,9 @@ class AlgoParams(Protocol):
     order_type: str              # "market" or "limit"
     paper_fee_bps: float
 
+    # Notifications
+    webhook_url: str             # per-algorithm Discord webhook; "" falls back to global
+
 
 # ---------------------------------------------------------------------------
 # Algorithm base class

@@ -52,6 +52,9 @@ class CopyTradeParams:
     # ── Order placement ──────────────────────────────────────────────────────
     order_type: str = _doc("market", "'market' (FOK/FAK) or 'limit' (GTC).")
 
+    # ── Notifications ────────────────────────────────────────────────────────
+    webhook_url: str = _doc("", "Per-algorithm Discord webhook URL. Overrides the global registry; '' falls back to config/webhooks.toml routing.")
+
     # ── Paper mode ───────────────────────────────────────────────────────────
     paper_starting_balance: float = _doc(10_000.0, "Virtual balance — seeded into the DB on FIRST run only; later edits need scripts/reset_paper_trade_db.py or a manual UPDATE.")
     paper_fee_bps: float = _doc(0.0, "Modeled paper fee, basis points.")
