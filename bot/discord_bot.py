@@ -9,6 +9,7 @@ Slash commands:
   /positions    — open positions (optional algo name filter)
   /pnl          — P&L + exposure per algo, combined total
   /summary      — send daily summaries to all profile summary channels now
+  /restart      — git pull + restart all VPS sessions (admin only)
 
 Entry point: scripts/run_discord_bot.py
 Config:      DISCORD_BOT_TOKEN + DISCORD_GUILD_ID in .env
@@ -23,8 +24,11 @@ Setup (one-time):
 
 import asyncio
 import logging
+import os
+import subprocess
 import threading
 from datetime import datetime
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -190,6 +194,33 @@ def _register_commands(client: _TradingClient) -> None:
             await interaction.response.send_message(
                 "⚠️ No summary webhooks configured for any profile.", ephemeral=True
             )
+
+    @client.tree.command(
+        name="restart",
+        description="git pull + restart all bot sessions on the VPS (admin only)",
+    )
+    async def restart_cmd(interaction: discord.Interaction) -> None:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "⛔ Administrator permission required.", ephemeral=True
+            )
+            return
+
+        requester = notifier._esc(interaction.user.display_name)
+        await interaction.response.send_message(
+            f"⏳ **Restarting…** _(requested by {requester})_\n"
+            "> Pulling latest code, installing deps, validating profiles.\n"
+            "> All sessions will go offline briefly — watch for the startup messages."
+        )
+
+        # Delay so the response lands in Discord before the process is killed
+        # by setup_vm.sh restarting the discord tmux session.
+        async def _run() -> None:
+            await asyncio.sleep(1)
+            script = Path(__file__).parent.parent / "scripts" / "setup_vm.sh"
+            subprocess.Popen(["bash", str(script)], cwd=str(script.parent.parent))
+
+        asyncio.create_task(_run())
 
 
 # ---------------------------------------------------------------------------
