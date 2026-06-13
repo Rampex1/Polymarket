@@ -153,6 +153,18 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_runs_algo ON runs(algo, started_at);
 
+        -- Discord thread registry: maps (market_id, algo, paper) → thread_id
+        -- so position-lifecycle notifications route into the thread instead of
+        -- flooding the main channel. See bot/threads.py.
+        CREATE TABLE IF NOT EXISTS discord_threads (
+            market_id  TEXT    NOT NULL,
+            algo       TEXT    NOT NULL,
+            paper      INTEGER NOT NULL,
+            thread_id  TEXT    NOT NULL,
+            created_at INTEGER,
+            PRIMARY KEY (market_id, algo, paper)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_trade_log_paper_ts
             ON trade_log(paper, ts);
         CREATE INDEX IF NOT EXISTS idx_trade_log_market

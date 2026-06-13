@@ -134,7 +134,8 @@ def dispatch(
     signals so the same intent is not emitted twice. The runner does not
     re-check.
     """
-    notifier.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url)
+    notifier.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
+                       paper=paper)
 
     if isinstance(intent, OpenIntent):
         _handle_open(intent, algo, tracker, risk, client, paper)
@@ -168,7 +169,8 @@ def _handle_open(
     if not approved:
         logger.warning("[%s] Risk check failed — %s | %s",
                        algo.name, reason, trade.question[:50])
-        notifier.on_risk_blocked(reason, trade, algo.display_name, webhook_url=algo.params.webhook_url)
+        notifier.on_risk_blocked(reason, trade, algo.display_name, webhook_url=algo.params.webhook_url,
+                                 paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"risk: {reason}")
         return
@@ -188,7 +190,8 @@ def _handle_open(
         reason_str = fill.reason if fill else "no fill"
         logger.warning("[%s] BUY did not fill (%s) — not recording.",
                        algo.name, reason_str)
-        notifier.on_buy_failed(trade, reason_str, algo.display_name, webhook_url=algo.params.webhook_url)
+        notifier.on_buy_failed(trade, reason_str, algo.display_name, webhook_url=algo.params.webhook_url,
+                               paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"no fill: {reason_str}")
         return
@@ -327,13 +330,16 @@ def _handle_settle(
     signals.label_outcomes(algo.name, intent.market_id, close_price, pnl, paper)
     tracker.print_summary(paper=paper)
 
-    sign = "+" if pnl >= 0 else ""
-    tag = "📄 **PAPER SETTLE**" if paper else ("✅ **WIN**" if result == "WIN" else "❌ **LOSS**")
-    notifier.send(
-        f"{tag}{notifier._subtitle(algo.display_name)}\n"
-        f"**{notifier._esc((intent.question or position.question)[:80])}**\n"
-        f"`{notifier._esc(position.outcome)}` resolved | {position.shares:.2f} shares "
-        f"→ **${proceeds:.2f}** | P&L **{sign}${pnl:.2f}**",
+    notifier.on_settle_executed(
+        market_id=intent.market_id,
+        question=intent.question or position.question,
+        outcome=position.outcome,
+        shares=position.shares,
+        proceeds=proceeds,
+        pnl=pnl,
+        close_price=close_price,
+        paper=paper,
+        algo_name=algo.display_name,
         webhook_url=algo.params.webhook_url,
     )
 

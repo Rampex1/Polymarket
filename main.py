@@ -48,6 +48,12 @@ from bot.positions import PositionTracker, RiskManager
 # quickly without hammering the Data API.
 RECONCILE_EVERY_N_POLLS = 30
 
+# Alert on Discord after this many consecutive poll-loop exceptions.
+# At the default 20s interval, 5 failures ≈ 100 s of continuous errors.
+# Subsequent alerts fire every CRASH_ALERT_AFTER_N_ERRORS failures so
+# the channel isn't spammed if the problem persists.
+CRASH_ALERT_AFTER_N_ERRORS = 5
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -111,16 +117,22 @@ def _run_worker(
         )
 
         poll_count = 0
+        consecutive_errors = 0
         while not stop_event.is_set():
             try:
                 for intent in algo.poll():
                     if stop_event.is_set():
                         break
                     runner.dispatch(intent, algo, tracker, risk, client, paper)
-            except Exception:
-                # One bad tick must not kill this algorithm. Log and keep
-                # going — siblings continue regardless.
+                consecutive_errors = 0
+            except Exception as exc:
+                consecutive_errors += 1
                 logger.exception("[%s] poll/dispatch raised, continuing", name)
+                if consecutive_errors % CRASH_ALERT_AFTER_N_ERRORS == 0:
+                    notifier.on_worker_unstable(
+                        display_name, consecutive_errors, exc,
+                        webhook_url=webhook_url,
+                    )
 
             # Periodic reconciliation. Failures inside reconcile_positions
             # only log; they never abort the worker.
@@ -246,6 +258,30 @@ def main() -> None:
     # One profile-level daily summary thread — aggregates all algorithms
     # into a single message sent to the profile's summary channel.
     _start_profile_summary(ENABLED, client, stop_event)
+
+    # Heartbeat — periodic liveness ping to the summary channel.
+    summary_webhook = config.resolve_summary_webhook(config.PROFILE)
+    if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
+        algo_infos = [
+            (a.params.name, a.params.mode == Mode.PAPER or client is None)
+            for a in ENABLED
+        ]
+        notifier.start_heartbeat(
+            algo_infos, summary_webhook, stop_event,
+            profile=config.PROFILE,
+            interval_hours=config.HEARTBEAT_INTERVAL_HOURS,
+        )
+
+    # Weekly signal performance digest — posts every Sunday to the same channel.
+    summary_webhook = config.resolve_summary_webhook(config.PROFILE)
+    if summary_webhook:
+        algo_infos = [
+            (a.params.name, a.params.mode == Mode.PAPER or client is None)
+            for a in ENABLED
+        ]
+        notifier.start_weekly_digest(
+            algo_infos, summary_webhook, stop_event, profile=config.PROFILE
+        )
 
 
     # Block the main thread until shutdown is signaled.

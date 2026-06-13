@@ -171,6 +171,9 @@ def resolve_summary_webhook(profile: str, registry_path: str = _WEBHOOK_REGISTRY
             return str(block.get("url", ""))
     return ""
 
+# How often the heartbeat ping fires. Set HEARTBEAT_INTERVAL_HOURS=0 to disable.
+HEARTBEAT_INTERVAL_HOURS: float = float(os.getenv("HEARTBEAT_INTERVAL_HOURS", "6"))
+
 # Timezone for daily-summary rollovers. Defaults to US Pacific so the
 # rollover lands at midnight PT regardless of where the VPS is hosted.
 _TZ_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
