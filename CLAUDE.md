@@ -1,5 +1,10 @@
 # CLAUDE.md — Polymarket Copy-Trading Bot
 
+## Claude Behavior
+
+- After implementing changes, **commit automatically** (no need to ask).
+- **Do not push** until the user explicitly says to.
+
 ## Project Overview
 
 A Python bot that automatically mirrors trades from one or more target Polymarket wallets. It detects BUY/SELL/MERGE/REDEEM signals via API polling, applies tiered bet-sizing, enforces risk limits, and runs each strategy in paper (simulated) or live mode.
