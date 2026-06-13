@@ -1,25 +1,24 @@
 """
 Discord bot — two-way interactive interface.
 
-Runs as a daemon thread alongside trading workers. Exposes slash commands
-so you can query bot state from Discord without SSH:
+Runs as a standalone daemon (its own tmux session) so a single bot
+instance serves all profiles without needing one token per profile.
 
-  /status       — all algorithms: mode, exposure, today's P&L
+Slash commands:
+  /status       — all algorithms grouped by profile: mode, exposure, P&L
   /positions    — open positions (optional algo name filter)
-  /pnl          — P&L breakdown per algo + combined total
-  /summary      — send the daily summary to the summary channel right now
+  /pnl          — P&L + exposure per algo, combined total
+  /summary      — send daily summaries to all profile summary channels now
 
-Two bots (prod + experimental) can coexist in the same Discord server —
-Discord disambiguates them by application name in the slash-command picker.
+Entry point: scripts/run_discord_bot.py
+Config:      DISCORD_BOT_TOKEN + DISCORD_GUILD_ID in .env
 
 Setup (one-time):
   1. discord.com/developers → New Application → Bot → Reset Token → copy it
   2. OAuth2 → URL Generator → scopes: bot + applications.commands
      → bot permissions: Send Messages, Use Slash Commands → invite URL
-  3. Set DISCORD_BOT_TOKEN in .env
-  4. Optionally set DISCORD_GUILD_ID (right-click server → Copy Server ID with
-     Developer Mode on) — guild-scoped commands appear instantly; global
-     commands can take up to 1 hour to propagate.
+  3. Set DISCORD_BOT_TOKEN and DISCORD_GUILD_ID in .env
+     (DISCORD_GUILD_ID: right-click server → Copy Server ID, needs Developer Mode)
 """
 
 import asyncio
@@ -35,9 +34,21 @@ from .positions import PositionTracker
 
 logger = logging.getLogger(__name__)
 
-# Set by start() before the bot thread launches.
-_algo_infos: list = []   # [(name: str, paper: bool)]
-_profile: str = ""
+# Set by start_standalone() before the bot thread launches.
+# Each entry: (algo_name, paper, profile)
+_algo_infos: list = []
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _by_profile() -> dict:
+    """Group _algo_infos by profile, preserving insertion order."""
+    result: dict[str, list] = {}
+    for name, paper, profile in _algo_infos:
+        result.setdefault(profile, []).append((name, paper))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -46,30 +57,33 @@ _profile: str = ""
 
 def _status_text() -> str:
     today = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d %H:%M")
-    lines = [f"🤖 **Bot Status · {notifier._esc(_profile)} · {today}**", ""]
-    for name, paper in _algo_infos:
-        tracker = PositionTracker(algo=name)
-        n_pos = len(tracker.all_open(paper=paper))
-        exposure = tracker.total_exposure_usdc(paper=paper)
-        pnl = tracker.today_pnl_usdc(paper=paper)
-        sign = "+" if pnl >= 0 else ""
-        mode = "📄 PAPER" if paper else "🟢 LIVE"
-        lines.append(
-            f"**{notifier._esc(name)}** · {mode}\n"
-            f"> {n_pos} open · **${exposure:.2f}** exposure · today **{sign}${pnl:.2f}**"
-        )
-    return "\n".join(lines)
+    lines = [f"🤖 **Bot Status · {today}**", ""]
+    for profile, algos in _by_profile().items():
+        lines.append(f"**{notifier._esc(profile)}**")
+        for name, paper in algos:
+            tracker = PositionTracker(algo=name)
+            n_pos = len(tracker.all_open(paper=paper))
+            exposure = tracker.total_exposure_usdc(paper=paper)
+            pnl = tracker.today_pnl_usdc(paper=paper)
+            sign = "+" if pnl >= 0 else ""
+            mode = "📄 PAPER" if paper else "🟢 LIVE"
+            lines.append(
+                f"> **{notifier._esc(name)}** · {mode} · "
+                f"{n_pos} open · **${exposure:.2f}** · today **{sign}${pnl:.2f}**"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _positions_text(algo_filter: str = "") -> str:
     lines = []
-    for name, paper in _algo_infos:
+    for name, paper, profile in _algo_infos:
         if algo_filter and algo_filter.lower() not in name.lower():
             continue
         tracker = PositionTracker(algo=name)
         positions = tracker.all_open(paper=paper)
         mode = "PAPER" if paper else "LIVE"
-        lines.append(f"📋 **{notifier._esc(name)}** · {mode}")
+        lines.append(f"📋 **{notifier._esc(name)}** · {mode} · {notifier._esc(profile)}")
         if not positions:
             lines.append("> _No open positions_")
         else:
@@ -88,7 +102,7 @@ def _pnl_text() -> str:
     lines = [f"💰 **P&L Summary · {today}**", ""]
     total_pnl = 0.0
     total_exp = 0.0
-    for name, paper in _algo_infos:
+    for name, paper, profile in _algo_infos:
         tracker = PositionTracker(algo=name)
         pnl = tracker.today_pnl_usdc(paper=paper)
         exp = tracker.total_exposure_usdc(paper=paper)
@@ -97,7 +111,7 @@ def _pnl_text() -> str:
         sign = "+" if pnl >= 0 else ""
         mode = "PAPER" if paper else "LIVE"
         lines.append(
-            f"**{notifier._esc(name)}** ({mode}): "
+            f"**{notifier._esc(name)}** ({mode} · {notifier._esc(profile)}): "
             f"today **{sign}${pnl:.2f}** · exposure **${exp:.2f}**"
         )
     sign = "+" if total_pnl >= 0 else ""
@@ -137,14 +151,14 @@ class _TradingClient(discord.Client):
 def _register_commands(client: _TradingClient) -> None:
     @client.tree.command(
         name="status",
-        description="Show all algorithms: mode, exposure, and today's P&L",
+        description="Show all algorithms grouped by profile: mode, exposure, today's P&L",
     )
     async def status_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(_status_text())
 
     @client.tree.command(
         name="positions",
-        description="List open positions",
+        description="List open positions across all profiles",
     )
     @app_commands.describe(algo="Filter by algorithm name (optional, partial match)")
     async def positions_cmd(interaction: discord.Interaction, algo: str = "") -> None:
@@ -152,35 +166,44 @@ def _register_commands(client: _TradingClient) -> None:
 
     @client.tree.command(
         name="pnl",
-        description="Today's realized P&L and open exposure by algorithm",
+        description="Today's realized P&L and open exposure, all algorithms combined",
     )
     async def pnl_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(_pnl_text())
 
     @client.tree.command(
         name="summary",
-        description="Send the daily summary to the summary channel right now",
+        description="Send daily summaries to all profile summary channels right now",
     )
     async def summary_cmd(interaction: discord.Interaction) -> None:
-        webhook = config.resolve_summary_webhook(_profile)
-        if not webhook:
+        sent = []
+        for profile, algos in _by_profile().items():
+            webhook = config.resolve_summary_webhook(profile)
+            if webhook:
+                notifier.send_profile_summary(algos, webhook, profile)
+                sent.append(profile)
+        if sent:
             await interaction.response.send_message(
-                "⚠️ No summary webhook configured for this profile.", ephemeral=True
+                f"✅ Summary sent for: {', '.join(sent)}", ephemeral=True
             )
-            return
-        notifier.send_profile_summary(_algo_infos, webhook, _profile)
-        await interaction.response.send_message("✅ Summary sent.", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                "⚠️ No summary webhooks configured for any profile.", ephemeral=True
+            )
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-def start(algo_infos: list, profile: str) -> None:
-    """Launch the Discord bot in a daemon thread. No-op if token is not set."""
-    global _algo_infos, _profile
+def start_standalone(algo_infos: list) -> None:
+    """Launch the bot in a daemon thread.
+
+    `algo_infos` is a list of (algo_name, paper, profile) triples collected
+    from all loaded profiles. No-op if DISCORD_BOT_TOKEN is not set.
+    """
+    global _algo_infos
     _algo_infos = algo_infos
-    _profile = profile
 
     if not config.DISCORD_BOT_TOKEN:
         logger.info("DISCORD_BOT_TOKEN not set — Discord bot disabled.")
@@ -199,4 +222,8 @@ def start(algo_infos: list, profile: str) -> None:
             loop.close()
 
     threading.Thread(target=_run, daemon=True, name="discord-bot").start()
-    logger.info("Discord bot thread started (profile=%s).", profile)
+    logger.info(
+        "Discord bot thread started (%d algo(s) across %d profile(s)).",
+        len(algo_infos),
+        len({p for _, _, p in algo_infos}),
+    )

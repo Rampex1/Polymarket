@@ -73,11 +73,12 @@ start_session() {
 start_session paper   "PROFILE=experimental python main.py"
 start_session prod    "PROFILE=prod python main.py"
 start_session archive "python -m discovery.archive --loop --every 3600"
+start_session discord "python scripts/run_discord_bot.py"
 
 echo "==> Verifying (give workers a moment to boot)"
 sleep 8
 fail=0
-for s in paper prod archive; do
+for s in paper prod archive discord; do
     dead=$(tmux list-panes -t "$s" -F '#{pane_dead}' 2>/dev/null || echo 1)
     if [ "$dead" = "0" ]; then
         echo "  [$s] running"
@@ -90,5 +91,5 @@ done
 
 echo
 tmux ls
-[ "$fail" = "0" ] && echo "All sessions up. Attach with: tmux attach -t paper|prod|archive (Ctrl-b d to detach)."
+[ "$fail" = "0" ] && echo "All sessions up. Attach with: tmux attach -t paper|prod|archive|discord (Ctrl-b d to detach)."
 exit "$fail"

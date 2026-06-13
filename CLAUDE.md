@@ -176,15 +176,17 @@ Two-way interface — runs as a daemon thread alongside workers. Each profile (p
 | `/pnl` | Realized P&L + exposure per algo and combined |
 | `/summary` | Send the daily summary to the summary channel immediately |
 
+Runs in its own tmux session (`discord`) independent of the trading workers — one bot, one token, all profiles. If a worker crashes the bot stays up; if the bot crashes the workers keep trading.
+
 **One-time setup:**
-1. [discord.com/developers](https://discord.com/developers) → New Application (one per profile, e.g. "Polymarket Prod") → **Bot** → Reset Token → copy it
+1. [discord.com/developers](https://discord.com/developers) → **New Application** (one bot total, e.g. "Polymarket Bot") → **Bot** → Reset Token → copy it
 2. **OAuth2** → URL Generator → scopes: `bot` + `applications.commands` → bot permissions: `Send Messages`, `Use Slash Commands` → open invite URL → add to server
-3. Add to `.env`:
+3. Add to the shared `.env` on the VPS:
    ```
    DISCORD_BOT_TOKEN=<token>
-   DISCORD_GUILD_ID=<server-id>   # optional but instant — right-click server → Copy Server ID (needs Developer Mode)
+   DISCORD_GUILD_ID=<server-id>   # right-click server → Copy Server ID (needs Developer Mode on)
    ```
-4. Deploy (`setup_vm.sh`) — the bot thread starts automatically with the process.
+4. Deploy via `setup_vm.sh` — the `discord` session starts automatically.
 
 Without `DISCORD_BOT_TOKEN` the bot is silently disabled; webhooks for trade alerts and daily summaries still work normally.
 
@@ -231,6 +233,7 @@ The three tmux sessions on the VPS:
 | `prod` | `PROFILE=prod` | copy_trade (live) |
 | `paper` | `PROFILE=experimental` | insider_flow (paper) |
 | `archive` | — | discovery price archiver |
+| `discord` | — | Discord bot (all profiles, slash commands) |
 
 ```bash
 # Attach to a session (Ctrl-b d to detach)

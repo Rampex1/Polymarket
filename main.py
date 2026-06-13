@@ -38,7 +38,7 @@ try:
 except ProfileError as e:
     raise SystemExit(f"error: {e}") from None
 
-from bot import config, db, discord_bot, notifier, reconciliation, runner, runs
+from bot import config, db, notifier, reconciliation, runner, runs
 from bot.algorithm import Algorithm, Mode
 from bot.positions import PositionTracker, RiskManager
 
@@ -247,13 +247,6 @@ def main() -> None:
     # into a single message sent to the profile's summary channel.
     _start_profile_summary(ENABLED, client, stop_event)
 
-    # Two-way Discord bot — slash commands for /status, /positions, /pnl, /summary.
-    # No-op if DISCORD_BOT_TOKEN is not set in .env.
-    algo_infos = [
-        (a.params.name, a.params.mode == Mode.PAPER or client is None)
-        for a in ENABLED
-    ]
-    discord_bot.start(algo_infos, config.PROFILE)
 
     # Block the main thread until shutdown is signaled.
     try:
