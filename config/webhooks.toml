@@ -1,20 +1,6 @@
-# Discord webhook registry — reference list of all webhook URLs.
+# Discord webhook registry — reserved for future use.
 #
-# Routing is now per-algorithm: each [[algorithm]] block in a profile TOML
-# sets its own `webhook_url` param. This file is kept as a registry so all
-# URLs stay visible in one place for rotation / auditing.
-#
-# Webhook URLs are write-access secrets (anyone holding one can post to the
-# channel). Committed on the explicit call that this repo is PRIVATE —
-# if the repo ever goes public, rotate every webhook below first; they
-# live in git history forever.
-
-[copy_trade_prod]
-url = "https://discord.com/api/webhooks/1513777234547048619/XX_f2STzSQDlGiVxOOksbVPF36TYdjzp2hKLJSmQgvNBGxHSxlc0XHN5UKSoAoNnk__h"
-used_by = ["config/prod.toml → copy_trade_prod"]
-notes = "Real-money copy_trade alerts. Keep low-noise."
-
-[insider_flow_paper]
-url = "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q"
-used_by = ["config/experimental.toml → insider_flow_paper"]
-notes = "Paper insider_flow channel, added 2026-06-11."
+# Webhook URLs now live directly in each [[algorithm]] block in the
+# profile TOMLs (config/prod.toml, config/experimental.toml) as the
+# `webhook_url` param. Add entries here when a use case arises that
+# requires routing outside of a single algorithm's scope.
