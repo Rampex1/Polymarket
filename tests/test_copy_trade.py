@@ -333,3 +333,115 @@ def test_poll_filters_below_min_trade_size(algo_with_tracker, monkeypatch,
     )
     stub_holding(100_000)
     assert list(algo_with_tracker.poll()) == []
+
+
+# ---------------------------------------------------------------------------
+# Settle sweep — periodic resolution check on our own open positions
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def algo_sweeping(tracker):
+    """Algorithm wired for sweep testing: settle_check_every=1 so every poll triggers."""
+    a = CopyTradeAlgorithm(params=CopyTradeParams(
+        name="sweep_test",
+        target_address="0xtarget",
+        settle_check_every=1,
+    ))
+    a._tracker = tracker
+    a._paper = True
+    a._address = "0xtarget"
+    return a
+
+
+def _stub_poll(monkeypatch, trades=None):
+    """Stub fetcher.fetch_recent_trades to return an empty list (no new signals)."""
+    from bot import fetcher
+    monkeypatch.setattr(fetcher, "fetch_recent_trades", lambda *a, **kw: trades or [])
+
+
+def test_settle_sweep_emits_settle_for_resolved_market(
+    algo_sweeping, tracker, monkeypatch
+):
+    from bot import fetcher
+
+    seed = make_trade(action="BUY", market_id="m1", price=0.50)
+    tracker.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
+
+    _stub_poll(monkeypatch)
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"closed": True, "outcomePrices": '["1", "0"]'},
+    )
+
+    intents = list(algo_sweeping.poll())
+    assert len(intents) == 1
+    assert isinstance(intents[0], SettleIntent)
+    assert intents[0].market_id == "m1"
+    assert intents[0].reason == "market resolved (sweep)"
+
+
+def test_settle_sweep_skips_closed_but_undetermined_market(
+    algo_sweeping, tracker, monkeypatch
+):
+    """Closed but outcome not yet binary (UMA dispute window) — must NOT settle."""
+    from bot import fetcher
+
+    seed = make_trade(action="BUY", market_id="m1", price=0.50)
+    tracker.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
+
+    _stub_poll(monkeypatch)
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: {"closed": True, "outcomePrices": '["0.97", "0.03"]'},
+    )
+    assert list(algo_sweeping.poll()) == []
+
+
+def test_settle_sweep_leaves_unresolved_markets_alone(
+    algo_sweeping, tracker, monkeypatch
+):
+    from bot import fetcher
+
+    seed = make_trade(action="BUY", market_id="m1", price=0.50)
+    tracker.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
+
+    _stub_poll(monkeypatch)
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution", lambda mid: {"closed": False},
+    )
+    assert list(algo_sweeping.poll()) == []
+
+
+def test_settle_sweep_cadence(tracker, monkeypatch):
+    """Sweep fires every `settle_check_every` polls, not every poll."""
+    from bot import fetcher
+
+    a = CopyTradeAlgorithm(params=CopyTradeParams(
+        name="cadence_test",
+        target_address="0xtarget",
+        settle_check_every=3,
+    ))
+    a._tracker = tracker
+    a._paper = True
+    a._address = "0xtarget"
+
+    seed = make_trade(action="BUY", market_id="m1", price=0.50)
+    tracker.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
+
+    sweep_calls = []
+    monkeypatch.setattr(fetcher, "fetch_recent_trades", lambda *a, **kw: [])
+    monkeypatch.setattr(
+        fetcher, "fetch_market_resolution",
+        lambda mid: sweep_calls.append(mid) or {"closed": False},
+    )
+
+    list(a.poll())   # poll 1 — no sweep
+    list(a.poll())   # poll 2 — no sweep
+    list(a.poll())   # poll 3 — sweep fires (3 % 3 == 0)
+    assert len(sweep_calls) == 1
+
+    list(a.poll())   # poll 4 — no sweep
+    list(a.poll())   # poll 5 — no sweep
+    list(a.poll())   # poll 6 — sweep fires
+    assert len(sweep_calls) == 2

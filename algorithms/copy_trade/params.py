@@ -28,6 +28,7 @@ class CopyTradeParams:
     # ── Polling ──────────────────────────────────────────────────────────────
     poll_interval_seconds: int = _doc(20, "Seconds between polls of the target's activity feed.")
     min_trade_size_usdc: float = _doc(0.0, "Ignore target trades smaller than this notional. 0 = no filter.")
+    settle_check_every: int = _doc(45, "Polls between resolution sweeps of our open positions — safety net for target REDEEMs missed while the bot was offline.")
 
     # ── Tier sizing — total target position size for our bet ─────────────────
     # Holding < tier1_min          → skip

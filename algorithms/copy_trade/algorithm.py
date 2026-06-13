@@ -77,6 +77,7 @@ class CopyTradeAlgorithm(Algorithm):
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen_ids = fetcher.SeenRing(SEEN_IDS_MAX)
         self.holding_cache = fetcher.TargetHoldingCache()
+        self._poll_count = 0
 
     @property
     def display_name(self) -> str:
@@ -129,6 +130,7 @@ class CopyTradeAlgorithm(Algorithm):
     # ── Poll → Intents ──────────────────────────────────────────────────────
 
     def poll(self) -> Iterator[Intent]:
+        self._poll_count += 1
         trades = fetcher.fetch_recent_trades(self._address)
         # Skip trades smaller than the configured floor (dust filter).
         if self.params.min_trade_size_usdc > 0:
@@ -139,6 +141,37 @@ class CopyTradeAlgorithm(Algorithm):
             self._seen_ids.mark(t.id)
             logger.info("[%s] New trade detected: %s", self.params.name, t)
             yield from self._intents_for(t)
+
+        if self._poll_count % self.params.settle_check_every == 0:
+            yield from self._settle_sweep()
+
+    # ── Exit safety net: settle resolved markets ─────────────────────────────
+
+    def _settle_sweep(self) -> Iterator[SettleIntent]:
+        """Periodic Gamma check on our own open positions.
+
+        The primary exit signal is the target's REDEEM in their activity
+        feed — but if this bot is offline when that happens, the dedupe
+        ring is re-seeded past it on restart and the position would stay
+        open forever (this orphaned a resolved position on 2026-06-12).
+        Same strict finality gate as insider_flow: `closed` alone means
+        trading ended, not that the outcome is determined (UMA dispute
+        window) — undetermined markets just wait for a later sweep.
+        """
+        for pos in self._tracker.all_open(paper=self._paper):
+            market = fetcher.fetch_market_resolution(pos.market_id)
+            if market and fetcher.market_outcome_is_final(market):
+                logger.info(
+                    "[%s] Market resolved — settling: %s",
+                    self.params.name, pos.question[:55],
+                )
+                yield SettleIntent(
+                    market_id=pos.market_id,
+                    question=pos.question,
+                    outcome=pos.outcome,
+                    signal_id=f"settle:{pos.market_id}:{self._poll_count}",
+                    reason="market resolved (sweep)",
+                )
 
     # ── Trade → Intent translation ──────────────────────────────────────────
 

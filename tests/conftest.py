@@ -89,6 +89,7 @@ class _TestParams:
     target_address: str = "0xtarget"
     target_username: str = ""
     min_trade_size_usdc: float = 0.0
+    settle_check_every: int = 999  # large so sweep never fires unexpectedly in tests
 
 
 @pytest.fixture
