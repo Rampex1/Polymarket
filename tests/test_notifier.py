@@ -77,7 +77,7 @@ def test_buy_executed_format(capture_send):
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
     body = capture_send[-1]["content"]
-    assert "📄 PAPER" in body
+    assert "📄 **PAPER BUY**" in body
     assert "$1.00" in body
     assert "0.550" in body
 
@@ -91,8 +91,7 @@ def test_buy_executed_shows_shares_and_drift(capture_send):
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
     body = capture_send[-1]["content"]
     assert "1.82 shares" in body                  # 1.0 / 0.55
-    assert "signal 0.500" in body
-    assert "+10.0%" in body
+    assert "+10.0% slip" in body
 
 
 def test_signal_message_includes_reason_and_features(capture_send):

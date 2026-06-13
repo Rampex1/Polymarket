@@ -2,8 +2,8 @@
 Discord notifications + midnight daily summary thread.
 
 Messages are sent to a Discord channel via an incoming webhook. User-
-controlled strings (market titles, outcomes, error reasons) are escaped
-for Discord markdown so a `*` or `_` in a title can't break formatting.
+controlled strings (market questions, outcomes, reasons) are escaped for
+Discord markdown so a `*` or `_` in a title can't break formatting.
 
 The midnight summary thread uses `config.TIMEZONE` instead of naive
 `datetime.now()`. Without an explicit tz the rollover would happen at
@@ -50,16 +50,18 @@ def _esc(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Canned message helpers
+# Layout helpers
 # ---------------------------------------------------------------------------
-#
-# Each helper accepts an optional `algo_name` so the message can be
-# disambiguated when multiple algorithms run side-by-side. Pass "" to
-# suppress the prefix (single-algo deployments).
 
 
-def _prefix(algo_name: str) -> str:
-    return f"[{_esc(algo_name)}] " if algo_name else ""
+def _subtitle(algo_name: str) -> str:
+    """Returns ' · algo_name' suffix for header lines, or '' if not set."""
+    return f" · {_esc(algo_name)}" if algo_name else ""
+
+
+def _q(question: str) -> str:
+    """Bold the market question — the most important context in every message."""
+    return f"**{_esc((question or '')[:80])}**"
 
 
 def _feature_line(features: dict) -> str:
@@ -87,30 +89,37 @@ def _feature_line(features: dict) -> str:
     return " · ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Canned message helpers
+# ---------------------------------------------------------------------------
+#
+# Each helper accepts an optional `algo_name` so the message can be
+# disambiguated when multiple algorithms run side-by-side.
+
+
 def on_signal(intent, algo_name: str = "") -> None:
     """Generic detection notification — intent-based, works for any algorithm."""
     from .algorithm import OpenIntent, CloseIntent, SettleIntent
     if isinstance(intent, OpenIntent):
-        line = (
-            f"OPEN {_esc(intent.outcome) or '—'} — "
-            f"${intent.usdc_amount:,.2f} @ {intent.signal_price:.3f}"
+        action_line = (
+            f"OPEN `{_esc(intent.outcome) or '—'}`  "
+            f"${intent.usdc_amount:,.2f} @ **{intent.signal_price:.3f}**"
         )
     elif isinstance(intent, CloseIntent):
-        line = (
-            f"CLOSE {intent.fraction * 100:.0f}% of {_esc(intent.outcome) or 'position'} "
-            f"@ {intent.signal_price:.3f}"
+        action_line = (
+            f"CLOSE `{_esc(intent.outcome) or 'position'}`  "
+            f"{intent.fraction * 100:.0f}% @ **{intent.signal_price:.3f}**"
         )
     elif isinstance(intent, SettleIntent):
-        line = f"SETTLE {_esc(intent.outcome) or 'position'}"
+        action_line = f"SETTLE `{_esc(intent.outcome) or 'position'}`"
     else:
-        line = "Unknown intent"
+        action_line = "Unknown intent"
 
     lines = [
-        f"{_prefix(algo_name)}👀 **Signal detected**",
-        line,
-        f"{_esc((intent.question or '')[:80])}",
+        f"📥 **SIGNAL**{_subtitle(algo_name)}",
+        _q(intent.question),
+        action_line,
     ]
-    # The WHY — wallet context is the point of the alert.
     reason = getattr(intent, "reason", "")
     if reason:
         lines.append(f"↳ {_esc(reason)}")
@@ -125,10 +134,10 @@ def on_trade_detected(trade: Trade, algo_name: str = "") -> None:
     classifies a Trade before issuing an Intent. New algorithms should call
     `on_signal` instead."""
     send(
-        f"{_prefix(algo_name)}👀 **Signal detected**\n"
-        f"{_esc(trade.action)} {_esc(trade.outcome)} — "
-        f"${trade.size_usdc:,.0f} @ {trade.price:.3f}\n"
-        f"{_esc(trade.question[:80])}"
+        f"📥 **SIGNAL**{_subtitle(algo_name)}\n"
+        f"{_q(trade.question)}\n"
+        f"{_esc(trade.action)} `{_esc(trade.outcome)}`  "
+        f"${trade.size_usdc:,.0f} @ **{trade.price:.3f}**"
     )
 
 
@@ -136,25 +145,25 @@ def on_buy_executed(
     trade: Trade, spent_usdc: float, paper: bool, fill_price: float,
     algo_name: str = "",
 ) -> None:
-    tag = "📄 PAPER" if paper else "✅ BUY"
+    tag = "📄 **PAPER BUY**" if paper else "✅ **BUY**"
     shares = spent_usdc / fill_price if fill_price > 0 else 0.0
-    drift = ""
+    slip = ""
     if trade.price > 0 and fill_price > 0:
         drift_pct = (fill_price - trade.price) / trade.price * 100
-        drift = f" (signal {trade.price:.3f}, {drift_pct:+.1f}%)"
+        slip = f" _({drift_pct:+.1f}% slip)_"
     send(
-        f"{_prefix(algo_name)}{tag}\n"
-        f"${spent_usdc:.2f} → {shares:.2f} shares of {_esc(trade.outcome)} "
-        f"@ {fill_price:.3f}{drift}\n"
-        f"{_esc(trade.question[:80])}"
+        f"{tag}{_subtitle(algo_name)}\n"
+        f"{_q(trade.question)}\n"
+        f"`{_esc(trade.outcome)}`  ${spent_usdc:.2f} → {shares:.2f} shares "
+        f"@ **{fill_price:.3f}**{slip}"
     )
 
 
 def on_buy_failed(trade: Trade, reason: str, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}❌ **BUY failed**\n"
-        f"{_esc(reason)}\n"
-        f"{_esc(trade.question[:80])}"
+        f"❌ **BUY failed**{_subtitle(algo_name)}\n"
+        f"{_q(trade.question)}\n"
+        f"{_esc(reason)}"
     )
 
 
@@ -162,33 +171,33 @@ def on_sell_executed(
     trade: Trade, shares: float, pnl: float, paper: bool, fill_price: float,
     algo_name: str = "",
 ) -> None:
-    tag = "📄 PAPER" if paper else "✅ SELL"
+    tag = "📄 **PAPER SELL**" if paper else "✅ **SELL**"
     sign = "+" if pnl >= 0 else ""
     send(
-        f"{_prefix(algo_name)}{tag}\n"
-        f"{shares:.2f} shares of {_esc(trade.outcome)} @ {fill_price:.3f} "
-        f"| P&L {sign}${pnl:.2f}\n"
-        f"{_esc(trade.question[:80])}"
+        f"{tag}{_subtitle(algo_name)}\n"
+        f"{_q(trade.question)}\n"
+        f"`{_esc(trade.outcome)}`  {shares:.2f} shares @ **{fill_price:.3f}** · "
+        f"P&L **{sign}${pnl:.2f}**"
     )
 
 
 def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}⚠️ **Risk block**\n"
-        f"{_esc(reason)}\n"
-        f"{_esc(trade.question[:80])}"
+        f"⚠️ **Risk block**{_subtitle(algo_name)}\n"
+        f"{_q(trade.question)}\n"
+        f"{_esc(reason)}"
     )
 
 
 def on_startup(mode: str, exposure: float, algo_name: str = "") -> None:
     send(
-        f"{_prefix(algo_name)}🚀 **Bot started** — {_esc(mode)} mode\n"
-        f"Exposure: ${exposure:.2f}"
+        f"🚀 **Bot started**{_subtitle(algo_name)} — {_esc(mode)} mode\n"
+        f"Exposure: **${exposure:.2f}**"
     )
 
 
 def on_shutdown(algo_name: str = "") -> None:
-    send(f"{_prefix(algo_name)}🛑 **Bot stopped**")
+    send(f"🛑 **Bot stopped**{_subtitle(algo_name)}")
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +231,7 @@ def start_daily_summary(
     t.start()
     logger.info(
         "%sDaily summary thread started (timezone=%s, mode=%s).",
-        _prefix(algo_name), config.TIMEZONE.key, "PAPER" if paper else "LIVE",
+        _subtitle(algo_name) or "", config.TIMEZONE.key, "PAPER" if paper else "LIVE",
     )
 
 
@@ -232,19 +241,20 @@ def _send_daily_summary(tracker, paper: bool, algo_name: str = "") -> None:
     pnl = tracker.today_pnl_usdc(paper=paper)
     sign = "+" if pnl >= 0 else ""
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
-    mode_tag = "📄 PAPER" if paper else "💵 LIVE"
+    mode_tag = "PAPER" if paper else "LIVE"
 
     lines = [
-        f"{_prefix(algo_name)}📊 **Daily Summary — {today_str}** ({mode_tag})",
-        f"Realized P&L: {sign}${pnl:.2f}",
-        f"Open positions: {len(positions)} | Exposure: ${exposure:.2f}",
+        f"📊 **Daily Summary · {today_str} · {mode_tag}**{_subtitle(algo_name)}",
+        f"> Realized P&L: **{sign}${pnl:.2f}**",
+        f"> Open: {len(positions)} positions · Exposure: **${exposure:.2f}**",
     ]
-    for p in positions:
-        lines.append(
-            f"  • {_esc(p.outcome)} {p.shares:.1f}sh @ {p.avg_price:.3f} — "
-            f"{_esc(p.question[:45])}"
-        )
-
+    if positions:
+        lines.append(">")
+        for p in positions:
+            lines.append(
+                f"> `{_esc(p.outcome)}` {p.shares:.1f}sh @ {p.avg_price:.3f} · "
+                f"{_esc(p.question[:50])}"
+            )
     send("\n".join(lines))
 
 
