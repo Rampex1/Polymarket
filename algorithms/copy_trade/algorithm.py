@@ -117,10 +117,14 @@ class CopyTradeAlgorithm(Algorithm):
             )
         logger.info("[%s] Monitoring address: %s", self.params.name, self._address)
 
-        # Seed dedupe ring with the current activity tail so we don't
-        # re-execute everything from history on startup.
+        # Seed dedupe ring with recent BUYs and SELLs so we don't re-execute
+        # them on startup. REDEEM and MERGE are intentionally excluded: if
+        # one happened while the bot was offline the dedupe ring would mark
+        # it as seen and the missed exit would never be processed. Re-running
+        # a REDEEM/MERGE against a position that was already closed is a no-op
+        # (runner checks shares > 0), so replaying them is safe.
         for t in fetcher.fetch_recent_trades(self._address):
-            if t.id:
+            if t.id and t.action not in ("REDEEM", "MERGE"):
                 self._seen_ids.mark(t.id)
         logger.info(
             "[%s] Seeded with %d existing trades. Watching for new ones...",
@@ -150,17 +154,19 @@ class CopyTradeAlgorithm(Algorithm):
     def _settle_sweep(self) -> Iterator[SettleIntent]:
         """Periodic Gamma check on our own open positions.
 
-        The primary exit signal is the target's REDEEM in their activity
-        feed — but if this bot is offline when that happens, the dedupe
-        ring is re-seeded past it on restart and the position would stay
-        open forever (this orphaned a resolved position on 2026-06-12).
-        Same strict finality gate as insider_flow: `closed` alone means
-        trading ended, not that the outcome is determined (UMA dispute
-        window) — undetermined markets just wait for a later sweep.
+        Primary gate: Gamma marks the market as fully final (resolved flag or
+        UMA status). Fallback: CLOB resolution price is already binarized
+        (> 0.95 or < 0.05), which means the CLOB settled the market even if
+        Gamma's REST API is lagging behind.
         """
         for pos in self._tracker.all_open(paper=self._paper):
             market = fetcher.fetch_market_resolution(pos.market_id)
-            if market and fetcher.market_outcome_is_final(market):
+            is_final = bool(market and fetcher.market_outcome_is_final(market))
+            if not is_final:
+                # Gamma may be lagging — check CLOB as fallback.
+                clob = fetcher.fetch_resolution_price(pos.asset_id)
+                is_final = clob is not None and (clob > 0.95 or clob < 0.05)
+            if is_final:
                 logger.info(
                     "[%s] Market resolved — settling: %s",
                     self.params.name, pos.question[:55],
