@@ -146,8 +146,69 @@ class CopyTradeAlgorithm(Algorithm):
             logger.info("[%s] New trade detected: %s", self.params.name, t)
             yield from self._intents_for(t)
 
+        if self._poll_count == 1:
+            yield from self._startup_buy_sweep()
         if self._poll_count == 1 or self._poll_count % self.params.settle_check_every == 0:
             yield from self._settle_sweep()
+
+    # ── Entry safety net: fill gaps from downtime ────────────────────────────
+
+    def _startup_buy_sweep(self) -> Iterator[OpenIntent]:
+        """On first poll, reconcile target's live positions against ours.
+
+        The dedupe ring seeds BUY trades on startup so we don't re-execute
+        positions we already hold — but that same seeding suppresses any BUY
+        that happened while the bot was offline. This sweep bypasses the ring:
+        it looks at what the target *currently holds* and tops us up to the
+        matching tier for any market where we're short. signal_price=0 disables
+        the slippage gate (no signal price available at startup).
+        """
+        if self._address.lower() == _SMOKE_TEST_WALLET:
+            return
+
+        target_positions = fetcher.fetch_user_positions(self._address)
+        # Group by market_id — a wallet can hold both sides; take the largest.
+        by_market: dict[str, dict] = {}
+        for row in target_positions:
+            market_id = row.get("conditionId") or row.get("market_id")
+            if not market_id:
+                continue
+            val = float(row.get("currentValue") or row.get("value") or 0)
+            if val > float((by_market.get(market_id) or {}).get("currentValue") or 0):
+                by_market[market_id] = row
+
+        for market_id, row in by_market.items():
+            holding = float(row.get("currentValue") or row.get("value") or 0)
+            if holding < self.params.tier1_min:
+                continue
+
+            self.holding_cache.set(market_id, holding)
+            tier = self._tier_for_holding(holding)
+            our_position = self._tracker.get(market_id, self._paper)
+            current_cost = our_position.total_cost_usdc if our_position else 0.0
+
+            top_up = round(tier - current_cost, 8)
+            if top_up < self.params.min_order_size_usdc:
+                continue
+
+            question = row.get("title") or (our_position.question if our_position else "") or ""
+            outcome = row.get("outcome") or (our_position.outcome if our_position else "") or ""
+            asset_id = row.get("asset") or ""
+
+            logger.info(
+                "[%s] Startup gap: target $%.0f, ours $%.2f → topping up $%.2f | %s",
+                self.params.name, holding, current_cost, top_up, question[:55],
+            )
+            yield OpenIntent(
+                market_id=market_id,
+                asset_id=asset_id,
+                usdc_amount=top_up,
+                signal_price=0.0,
+                question=question,
+                outcome=outcome,
+                signal_id=f"startup:{market_id}",
+                reason=f"startup gap fill (target ${holding:,.0f}, ours ${current_cost:.2f})",
+            )
 
     # ── Exit safety net: settle resolved markets ─────────────────────────────
 
