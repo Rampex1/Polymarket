@@ -495,6 +495,12 @@ def _resolve_delayed(resp: dict, client: ClobClient, retries: int = 6, wait: flo
     makingAmount are empty strings until it matches or is cancelled. We wait
     up to retries*wait seconds (default 12s) before giving up and returning
     the original response (which _parse_fill will then treat as no-fill).
+
+    get_order() returns a different schema than post_order():
+      post_order: takingAmount (shares), makingAmount (USDC)
+      get_order:  size_matched (shares), price (per share)
+    We normalise the get_order response into the post_order shape so
+    _parse_fill can handle both without branching.
     """
     import time as _time
     if not isinstance(resp, dict):
@@ -511,9 +517,25 @@ def _resolve_delayed(resp: dict, client: ClobClient, retries: int = 6, wait: flo
         try:
             order = client.get_order(order_id)
             logger.info("Order %s status check %d: %r", order_id[:16], attempt + 1, order)
-            status = (order.get("status") or "").lower() if isinstance(order, dict) else ""
-            if status not in ("delayed", ""):
-                return order
+            if not isinstance(order, dict):
+                continue
+            status = (order.get("status") or "").lower()
+            if status in ("delayed", ""):
+                continue
+            # Normalise get_order schema → post_order schema for _parse_fill.
+            # get_order gives size_matched (shares) + price (per share);
+            # _parse_fill expects takingAmount (shares) + makingAmount (USDC).
+            size_matched = order.get("size_matched")
+            price_str = order.get("price")
+            if size_matched and price_str and not order.get("takingAmount"):
+                try:
+                    shares = float(size_matched)
+                    usdc = shares * float(price_str)
+                    order["takingAmount"] = str(shares)
+                    order["makingAmount"] = str(usdc)
+                except (TypeError, ValueError):
+                    pass
+            return order
         except Exception as e:
             logger.warning("get_order(%s) failed (attempt %d): %s", order_id[:16], attempt + 1, e)
     logger.warning("Order %s still delayed after %d attempts — treating as no-fill.", order_id[:16], retries)
