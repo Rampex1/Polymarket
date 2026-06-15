@@ -141,10 +141,28 @@ class CopyTradeAlgorithm(Algorithm):
             trades = [t for t in trades if t.size_usdc >= self.params.min_trade_size_usdc]
 
         new_trades = [t for t in trades if t.id and t.id not in self._seen_ids]
+
+        # One open per market per poll cycle. The target may place many small
+        # buys in the same market in quick succession (all appear as "new"
+        # trades on restart if they fell outside the dedupe-ring seed window).
+        # Without this guard, each trade spawns a top-up attempt — the first
+        # one's fill isn't recorded yet, so every subsequent one also sees
+        # current_cost < tier_target and tries to buy again.
+        opened_this_poll: set[str] = set()
+
         for t in sorted(new_trades, key=lambda x: x.timestamp):
             self._seen_ids.mark(t.id)
             logger.info("[%s] New trade detected: %s", self.params.name, t)
-            yield from self._intents_for(t)
+            for intent in self._intents_for(t):
+                if isinstance(intent, OpenIntent):
+                    if intent.market_id in opened_this_poll:
+                        logger.info(
+                            "[%s] Skipping duplicate open for same market this poll: %s",
+                            self.params.name, (intent.question or intent.market_id)[:55],
+                        )
+                        continue
+                    opened_this_poll.add(intent.market_id)
+                yield intent
 
         if self._poll_count == 1:
             yield from self._startup_buy_sweep()

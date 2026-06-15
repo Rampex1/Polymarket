@@ -194,6 +194,17 @@ def _handle_open(
                                paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"no fill: {reason_str}")
+        # Suspend further buys for this market if the wallet is out of funds.
+        # Without this, every subsequent signal for the same market in every
+        # poll fires another rejected order until the bot is restarted.
+        if "not enough balance" in reason_str.lower():
+            risk.suspend_market(intent.market_id)
+            logger.error(
+                "[%s] Insufficient CLOB balance — buys for %s suspended until restart. "
+                "Deposit USDC to %s to resume.",
+                algo.name, (intent.question or intent.market_id)[:55],
+                config.POLY_FUNDER_ADDRESS,
+            )
         return
 
     signals.record(algo.name, intent, paper, executed=True)
@@ -569,6 +580,12 @@ def _parse_fill(resp, side: str) -> FillResult:
         return FillResult(False, 0, 0, 0, reason="unparseable amounts")
 
     if taking <= 0 and making <= 0:
+        # Log at ERROR so the raw response can be inspected in the tmux buffer
+        # and the field aliases extended if the CLOB changes its response shape.
+        logger.error(
+            "CLOB returned success but no parseable fill amounts — "
+            "order may have silently filled on-chain. Full response: %r", resp,
+        )
         return FillResult(
             False, 0, 0, 0,
             reason="success but no fill amounts in response",
