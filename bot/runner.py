@@ -134,6 +134,9 @@ def dispatch(
     signals so the same intent is not emitted twice. The runner does not
     re-check.
     """
+    if isinstance(intent, OpenIntent) and risk.is_suspended(intent.market_id):
+        return  # prior BUY failed — suppress all further signals silently
+
     notifier.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
                        paper=paper)
 
@@ -169,10 +172,11 @@ def _handle_open(
     if not approved:
         logger.warning("[%s] Risk check failed — %s | %s",
                        algo.name, reason, trade.question[:50])
-        notifier.on_risk_blocked(reason, trade, algo.display_name, webhook_url=algo.params.webhook_url,
-                                 paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"risk: {reason}")
+        if "suspended" not in reason:
+            notifier.on_risk_blocked(reason, trade, algo.display_name,
+                                     webhook_url=algo.params.webhook_url, paper=paper)
         return
 
     current_price = _get_current_price(trade, client)
@@ -194,17 +198,12 @@ def _handle_open(
                                paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"no fill: {reason_str}")
-        # Suspend further buys for this market if the wallet is out of funds.
-        # Without this, every subsequent signal for the same market in every
-        # poll fires another rejected order until the bot is restarted.
-        if "not enough balance" in reason_str.lower():
-            risk.suspend_market(intent.market_id)
-            logger.error(
-                "[%s] Insufficient CLOB balance — buys for %s suspended until restart. "
-                "Deposit USDC to %s to resume.",
-                algo.name, (intent.question or intent.market_id)[:55],
-                config.POLY_FUNDER_ADDRESS,
-            )
+        # Suspend further buy attempts for this market this session.
+        # dispatch() will silently drop all subsequent OpenIntents for it,
+        # preventing retry loops and Discord spam after any failed fill.
+        risk.suspend_market(intent.market_id)
+        logger.warning("[%s] BUY suspended for %s until restart.",
+                       algo.name, (intent.question or intent.market_id)[:55])
         return
 
     signals.record(algo.name, intent, paper, executed=True)

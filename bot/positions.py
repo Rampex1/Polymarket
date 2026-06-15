@@ -383,13 +383,15 @@ class RiskManager:
     def __init__(self, tracker: PositionTracker, params) -> None:
         self.tracker = tracker
         self.params = params
-        # Markets suspended due to "not enough balance" CLOB rejection.
-        # Cleared only on process restart. Prevents infinite retry loops when
-        # the wallet runs out of USDC.
-        self._balance_suspended_markets: set[str] = set()
+        # Markets where a BUY has failed this session. Cleared on restart.
+        # Prevents retry loops and Discord spam after any unrecoverable failure.
+        self._buy_failed_markets: set[str] = set()
 
     def suspend_market(self, market_id: str) -> None:
-        self._balance_suspended_markets.add(market_id)
+        self._buy_failed_markets.add(market_id)
+
+    def is_suspended(self, market_id: str) -> bool:
+        return market_id in self._buy_failed_markets
 
     def check(
         self,
@@ -405,8 +407,8 @@ class RiskManager:
         if trade.action != "BUY":
             return True, ""
 
-        if trade.market_id in self._balance_suspended_markets:
-            return False, "CLOB balance insufficient (suspended until restart)"
+        if trade.market_id in self._buy_failed_markets:
+            return False, "buy previously failed (suspended until restart)"
 
         ok, reason = self._check_min_order(scaled_usdc)
         if not ok:
