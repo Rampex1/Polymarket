@@ -488,6 +488,38 @@ def _simulate_sell(
 # Live order placement
 # ---------------------------------------------------------------------------
 
+def _resolve_delayed(resp: dict, client: ClobClient, retries: int = 6, wait: float = 2.0) -> dict:
+    """If the CLOB returns status='delayed', poll get_order() until resolved.
+
+    'delayed' means the matching engine queued the order — takingAmount and
+    makingAmount are empty strings until it matches or is cancelled. We wait
+    up to retries*wait seconds (default 12s) before giving up and returning
+    the original response (which _parse_fill will then treat as no-fill).
+    """
+    import time as _time
+    if not isinstance(resp, dict):
+        return resp
+    if (resp.get("status") or "").lower() != "delayed":
+        return resp
+    order_id = resp.get("orderID") or resp.get("order_id")
+    if not order_id:
+        return resp
+    logger.info("Order %s is delayed — polling for resolution (up to %.0fs)...",
+                order_id[:16], retries * wait)
+    for attempt in range(retries):
+        _time.sleep(wait)
+        try:
+            order = client.get_order(order_id)
+            logger.info("Order %s status check %d: %r", order_id[:16], attempt + 1, order)
+            status = (order.get("status") or "").lower() if isinstance(order, dict) else ""
+            if status not in ("delayed", ""):
+                return order
+        except Exception as e:
+            logger.warning("get_order(%s) failed (attempt %d): %s", order_id[:16], attempt + 1, e)
+    logger.warning("Order %s still delayed after %d attempts — treating as no-fill.", order_id[:16], retries)
+    return resp
+
+
 def _place_buy(
     trade: Trade, scaled_usdc: float, client: ClobClient, order_type: str
 ) -> FillResult:
@@ -520,6 +552,12 @@ def _place_buy(
         # the snake_case aliases remain unverified — keep this log until
         # they have been seen in the wild too.
         logger.info("RAW BUY order response: %r", resp)
+
+        # The CLOB matching engine is async — small orders sometimes land with
+        # status='delayed' and empty takingAmount/makingAmount. Poll get_order()
+        # until the order resolves (matched/live/cancelled) before parsing.
+        resp = _resolve_delayed(resp, client)
+
         return _parse_fill(resp, side="BUY")
     except Exception as e:
         logger.error("BUY order failed: %s", e)
