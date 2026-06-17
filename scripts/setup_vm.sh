@@ -4,11 +4,12 @@
 #     bash scripts/setup_vm.sh
 #
 # Idempotent — safe to re-run after every git push; it restarts the tmux
-# sessions cleanly. Goes from a bare checkout + .env to all three
-# processes running:
+# sessions cleanly. Goes from a bare checkout + .env to processes running:
 #
 #   paper   — PROFILE=experimental python main.py
 #   prod    — PROFILE=prod         python main.py   (REAL MONEY)
+#             only started if config/prod.toml has [[algorithm]] blocks —
+#             an intentionally empty prod (paused) is not an error
 #   archive — python -m discovery.archive --loop --every 3600
 set -euo pipefail
 
@@ -58,7 +59,11 @@ rm -f .env.bak
 
 echo "==> Validating profiles (fail fast before touching tmux)"
 PROFILE=experimental python -m bot.params --effective > /dev/null
-PROFILE=prod         python -m bot.params --effective > /dev/null
+# prod may intentionally have zero [[algorithm]] blocks (paused, no live
+# trading) — the loader fails fast on that by design, so don't validate
+# it as a hard prerequisite for the rest of the deploy.
+prod_has_algorithms=true
+PROFILE=prod python -m bot.params --effective > /dev/null || prod_has_algorithms=false
 
 echo "==> Restarting tmux sessions"
 start_session() {
@@ -71,14 +76,21 @@ start_session() {
     tmux set-option -t "$name" remain-on-exit on
 }
 start_session paper   "PROFILE=experimental python main.py"
-start_session prod    "PROFILE=prod python main.py"
+if [ "$prod_has_algorithms" = true ]; then
+    start_session prod "PROFILE=prod python main.py"
+else
+    tmux kill-session -t prod 2>/dev/null || true
+    echo "  [prod] no [[algorithm]] blocks configured — session not started"
+fi
 start_session archive "python -m discovery.archive --loop --every 3600"
 start_session discord "python scripts/run_discord_bot.py"
 
 echo "==> Verifying (give workers a moment to boot)"
 sleep 8
 fail=0
-for s in paper prod archive discord; do
+sessions_to_check="paper archive discord"
+[ "$prod_has_algorithms" = true ] && sessions_to_check="paper prod archive discord"
+for s in $sessions_to_check; do
     dead=$(tmux list-panes -t "$s" -F '#{pane_dead}' 2>/dev/null || echo 1)
     if [ "$dead" = "0" ]; then
         echo "  [$s] running"

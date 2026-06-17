@@ -30,14 +30,10 @@ def test_experimental_profile_loads_all_paper():
     assert all(a.params.mode == Mode.PAPER for a in algos)
 
 
-def test_prod_profile_is_explicit_live():
-    algos = load_profile("prod", REGISTRY)
-    assert len(algos) >= 1
-    assert all(a.params.mode == Mode.LIVE for a in algos)
-    # Real-money algorithms must have a target configured.
-    assert all(
-        a.params.target_address or a.params.target_username for a in algos
-    )
+def test_prod_profile_is_paused():
+    """Prod is intentionally empty (no live trading) — loader fails fast."""
+    with pytest.raises(ProfileError, match="no \\[\\[algorithm\\]\\] blocks"):
+        load_profile("prod", REGISTRY)
 
 
 def test_unset_profile_refuses_to_boot(monkeypatch):

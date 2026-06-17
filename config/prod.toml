@@ -9,13 +9,8 @@
 # that doesn't set this. Only prod should ever set it.
 allow_live = true
 
-[[algorithm]]
-type = "copy_trade"
-name = "copy_trade_prod"
-mode = "live"
-
-[algorithm.params]
-target_address = "0x9f2fe025f84839ca81dd8e0338892605702d2ca8"   # surfandturf
-webhook_url = "https://discord.com/api/webhooks/1513777234547048619/XX_f2STzSQDlGiVxOOksbVPF36TYdjzp2hKLJSmQgvNBGxHSxlc0XHN5UKSoAoNnk__h"
-# Sizing/risk knobs intentionally at schema defaults ($1/$2/$3 tiers,
-# $3 per-position cap, $12 exposure cap, $4 daily loss limit).
+# Intentionally no [[algorithm]] blocks — prod is paused, no live trading.
+# The loader fails fast (ProfileError) if PROFILE=prod is booted in this
+# state, by design: a typo or accidental restart can never "succeed" into
+# silently running nothing. To resume, add a block back (e.g. copy_trade)
+# and run scripts/setup_vm.sh.

@@ -66,10 +66,18 @@ def test_params_cli_shows_schema_with_docs():
 
 def test_params_cli_effective_marks_overrides():
     out = _run_module("bot.params", "--effective",
-                      env_extra={"PROFILE": "prod"})
+                      env_extra={"PROFILE": "experimental"})
     assert out.returncode == 0, out.stderr
-    assert "copy_trade" in out.stdout
-    assert "target_address" in out.stdout
+    assert "insider_flow" in out.stdout
+    assert "webhook_url" in out.stdout
+
+
+def test_params_cli_effective_prod_paused():
+    """Prod has no [[algorithm]] blocks right now — --effective fails fast."""
+    out = _run_module("bot.params", "--effective",
+                      env_extra={"PROFILE": "prod"})
+    assert out.returncode != 0
+    assert "no [[algorithm]] blocks" in out.stdout + out.stderr
 
 
 def test_params_cli_effective_requires_profile():
