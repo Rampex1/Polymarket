@@ -22,16 +22,16 @@ def current_price(trade: Trade, client: Optional[ClobClient]) -> Optional[float]
 
 
 def slippage_ok(
-    trade: Trade, current: Optional[float], max_slippage: float, algo_name: str,
+    trade: Trade, current_price: Optional[float], max_slippage: float, algo_name: str,
 ) -> bool:
     """Reject unavailable prices and excessive drift from the signal price."""
-    if current is None:
+    if current_price is None:
         logger.warning("[%s] No current price for slippage check — refusing: %s",
                        algo_name, trade.question[:50])
         return False
     if trade.price <= 0:
         return True
-    drift = abs(current - trade.price) / trade.price
+    drift = abs(current_price - trade.price) / trade.price
     if drift > max_slippage:
         logger.warning("[%s] Slippage %.1f%% > max %.1f%%, skipping: %s",
                        algo_name, drift * 100, max_slippage * 100,

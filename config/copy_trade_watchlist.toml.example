@@ -1,0 +1,21 @@
+# Copy this to a profile file, then set PROFILE to that profile name.
+# Before running, import a normalized Dune export with:
+# python scripts/import_wallet_history.py /path/to/resolved_bets.csv
+
+[[algorithm]]
+type = "copy_trade"
+name = "ranked_copy_paper"
+mode = "paper"
+
+[algorithm.params]
+watchlist_size = 5
+watchlist_candidate_wallets = ["0xleader1", "0xleader2", "0xleader3"]
+watchlist_refresh_seconds = 86400
+watchlist_min_resolved_bets = 50
+watchlist_min_copyability_score = 0.5
+consensus_window_seconds = 1800
+consensus_min_leaders = 2
+consensus_size_multiplier = 2.0
+max_concurrent_positions = 8
+max_position_size_usdc = 3.0
+max_total_exposure_usdc = 12.0

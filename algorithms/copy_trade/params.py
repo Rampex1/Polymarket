@@ -25,6 +25,21 @@ class CopyTradeParams:
     target_address: str = _doc("", "Target's proxy wallet (from their Polymarket profile URL). Preferred over username.")
     target_username: str = _doc("", "Target's username — resolved to a wallet via Gamma /profiles at startup.")
 
+    # ── Ranked multi-leader mode ────────────────────────────────────────────
+    # ``watchlist_size=0`` preserves the original single-target behavior.
+    # A positive value activates the scorer-backed watchlist instead of the
+    # static target fields above.
+    watchlist_size: int = _doc(0, "Top ranked wallets to watch; 0 keeps legacy single-target mode.")
+    watchlist_candidate_wallets: tuple = _doc((), "Candidate proxy-wallet addresses supplied to the offline/history source.")
+    watchlist_refresh_seconds: int = _doc(86_400, "How often to rescore and atomically replace the active wallet cohort.")
+    watchlist_min_resolved_bets: int = _doc(50, "Minimum resolved bets before a wallet is eligible.")
+    watchlist_confidence_z: float = _doc(1.645, "One-sided confidence multiplier used for the edge lower bound.")
+    watchlist_min_copyability_score: float = _doc(0.0, "Reject wallets below this historical copyability score (0..1).")
+    consensus_window_seconds: int = _doc(1_800, "Time window in which distinct leader entries form a consensus.")
+    consensus_min_leaders: int = _doc(2, "Distinct active leaders required for consensus sizing.")
+    consensus_size_multiplier: float = _doc(2.0, "Multiplier applied to a tier target after consensus, capped by max position size.")
+    max_concurrent_positions: int = _doc(8, "Hard cap on simultaneously open markets for ranked multi-leader mode.")
+
     # ── Polling ──────────────────────────────────────────────────────────────
     poll_interval_seconds: int = _doc(20, "Seconds between polls of the target's activity feed.")
     min_trade_size_usdc: float = _doc(0.0, "Ignore target trades smaller than this notional. 0 = no filter.")
@@ -61,12 +76,22 @@ class CopyTradeParams:
 
     def validate(self) -> None:
         """Boot-time sanity checks — called by the profile loader."""
-        if not (self.target_address or self.target_username):
+        if self.watchlist_size < 0:
+            raise ValueError("watchlist_size must be zero or positive.")
+        if self.watchlist_size == 0 and not (self.target_address or self.target_username):
             raise ValueError(
-                "copy_trade needs a target — set target_address or "
-                "target_username under [algorithm.params]."
+                "copy_trade needs a target, or set watchlist_size > 0 for "
+                "ranked multi-leader mode."
             )
         if self.order_type not in ("market", "limit"):
             raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
         if not (0 < self.tier1_min <= self.tier1_max <= self.tier2_max):
             raise ValueError("tiers must satisfy 0 < tier1_min <= tier1_max <= tier2_max.")
+        if self.watchlist_size > 0 and not self.watchlist_candidate_wallets:
+            raise ValueError("ranked multi-leader mode needs watchlist_candidate_wallets.")
+        if self.watchlist_refresh_seconds <= 0 or self.consensus_window_seconds <= 0:
+            raise ValueError("watchlist_refresh_seconds and consensus_window_seconds must be positive.")
+        if self.consensus_min_leaders < 2 or self.consensus_size_multiplier < 1:
+            raise ValueError("consensus requires at least two leaders and a multiplier of at least one.")
+        if self.max_concurrent_positions <= 0:
+            raise ValueError("max_concurrent_positions must be positive.")

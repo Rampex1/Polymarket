@@ -216,6 +216,31 @@ def test_dispatch_open_intent_paper(tracker, risk, algo, default_params, stub_pr
     assert tracker.paper_balance() == 10_000.0 - 1.0
 
 
+def test_dispatch_open_records_leader_attributed_lot(
+    tracker, risk, algo, default_params, stub_price,
+):
+    """A multi-leader fill creates an exit-attributable lot after it fills."""
+    from bot import copy_lots, runner
+
+    stub_price(0.50)
+    intent = OpenIntent(
+        market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
+        signal_id="leader-event", leader_wallet="0xleader",
+        leader_event_id="0xleader:leader-event",
+    )
+    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+
+    assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 2.0
+
+    runner.dispatch(
+        CloseIntent(
+            market_id="m1", fraction=1.0, signal_price=0.5,
+            leader_wallet="0xleader", leader_event_id="0xleader:leader-sell",
+        ), algo, tracker, risk, client=None, paper=True,
+    )
+    assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 0.0
+
+
 def test_dispatch_open_skipped_by_slippage(tracker, risk, algo, default_params, stub_price):
     from bot import runner
     stub_price(0.70)         # 40% drift from signal 0.50

@@ -35,6 +35,9 @@ from bot.algorithm import Algorithm, CloseIntent, Intent, Mode, OpenIntent, Sett
 from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams
+from .multi_leader import MultiLeaderCopyEngine
+from .ranker import SQLiteResolvedBetSource
+from .watchlist import WatchlistRepository
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,8 @@ class CopyTradeAlgorithm(Algorithm):
         name: Optional[str] = None,
         params: Optional[CopyTradeParams] = None,
         market_data: Optional[MarketDataGateway] = None,
+        ranker_source=None,
+        watchlist: Optional[WatchlistRepository] = None,
     ) -> None:
         """Create a copy-trade worker.
 
@@ -75,6 +80,12 @@ class CopyTradeAlgorithm(Algorithm):
             self.params = CopyTradeParams()
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
+        self._watchlist = watchlist or WatchlistRepository()
+        self._multi = MultiLeaderCopyEngine(
+            self.params, self._market_data, self._watchlist,
+            ranker_source or SQLiteResolvedBetSource(),
+            self._tier_for_holding,
+        ) if self.params.watchlist_size > 0 else None
 
         self._address: str = ""
         self._tracker = None        # PositionTracker, set in setup()
@@ -90,6 +101,8 @@ class CopyTradeAlgorithm(Algorithm):
         Prefers the configured username; falls back to a shortened
         address if only the wallet was supplied.
         """
+        if self._multi is not None:
+            return f"{self.name} → ranked top {self.params.watchlist_size} wallets"
         target = self.params.target_username
         if not target:
             addr = self.params.target_address
@@ -104,6 +117,11 @@ class CopyTradeAlgorithm(Algorithm):
         # Live mode also requires a CLOB client; if there's none we fall
         # back to paper to avoid silently mis-routing real-money orders.
         self._paper = self.params.mode == Mode.PAPER or client is None
+
+        if self._multi is not None:
+            self._multi.setup(tracker, self._paper)
+            logger.info("[%s] Ranked multi-leader watcher initialized.", self.params.name)
+            return
 
         if self.params.target_address:
             self._address = self.params.target_address
@@ -139,6 +157,11 @@ class CopyTradeAlgorithm(Algorithm):
 
     def poll(self) -> Iterator[Intent]:
         self._poll_count += 1
+        if self._multi is not None:
+            yield from self._multi.poll()
+            if self._poll_count == 1 or self._poll_count % self.params.settle_check_every == 0:
+                yield from self._settle_sweep()
+            return
         trades = self._market_data.recent_trades(self._address)
         # Skip trades smaller than the configured floor (dust filter).
         if self.params.min_trade_size_usdc > 0:
