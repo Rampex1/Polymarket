@@ -347,8 +347,13 @@ def fetch_market_resolution(market_id: str) -> Optional[dict]:
                 continue
             data = resp.json()
             rows = data if isinstance(data, list) else [data]
-            if rows:
-                return rows[0]
+            # Gamma responds 200 with an unfiltered first page for an
+            # unrecognised parameter spelling.  Never treat that arbitrary
+            # market as this market's resolution — it can settle the wrong
+            # token.  Try the fallback spelling instead.
+            for row in rows:
+                if str(row.get("conditionId") or "").lower() == market_id.lower():
+                    return row
     except Exception as e:
         logger.debug("Gamma market lookup failed for %s: %s", market_id, e)
     return None

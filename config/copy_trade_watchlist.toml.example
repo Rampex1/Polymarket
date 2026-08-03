@@ -1,5 +1,8 @@
 # Copy this to a profile file, then set PROFILE to that profile name.
-# Before running, import a normalized Dune export with:
+# Before running a paper test, seed conservative history from the public
+# Polymarket APIs (use the Dune CSV path for research/live review):
+# python scripts/import_polymarket_wallet_history.py --max-wallets 25
+# Or import a normalized Dune CSV:
 # python scripts/import_wallet_history.py /path/to/resolved_bets.csv
 
 [[algorithm]]
