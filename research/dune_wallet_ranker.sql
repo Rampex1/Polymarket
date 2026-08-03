@@ -6,8 +6,8 @@
 -- The query uses Dune's curated Polymarket tables. Keep the block-time
 -- predicate: market_trades is partitioned by block_month.
 --
--- Optional: replace the candidate_wallets CTE with a short, externally
--- vetted candidate list to limit scan cost while iterating.
+-- For an inexpensive first pass, add an address predicate to each branch of
+-- buy_entries (for example, AND maker IN (...) / AND taker IN (...)).
 
 WITH buy_entries AS (
     SELECT
