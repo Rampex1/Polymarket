@@ -51,6 +51,7 @@ from typing import Iterator, Optional
 
 from bot import fetcher
 from bot.algorithm import Algorithm, Intent, Mode, OpenIntent, SettleIntent
+from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 from bot.models import GlobalTrade
 
 from .params import InsiderFlowParams
@@ -74,6 +75,7 @@ class InsiderFlowAlgorithm(Algorithm):
         self,
         name: Optional[str] = None,
         params: Optional[InsiderFlowParams] = None,
+        market_data: Optional[MarketDataGateway] = None,
     ) -> None:
         if params is not None:
             self.params = params
@@ -81,6 +83,8 @@ class InsiderFlowAlgorithm(Algorithm):
             self.params = InsiderFlowParams(name=name)
         else:
             self.params = InsiderFlowParams()
+
+        self._market_data = market_data or DEFAULT_MARKET_DATA
 
         self._tracker = None        # PositionTracker, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
@@ -110,7 +114,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
         # Seed the dedupe ring with the current firehose tail so a restart
         # never replays trades that already happened.
-        for row in fetcher.fetch_global_trades(
+        for row in self._market_data.global_trades(
             self.params.min_cash_size_usdc, self.params.firehose_limit,
         ):
             self._seen.mark(self._key(row))
@@ -127,7 +131,7 @@ class InsiderFlowAlgorithm(Algorithm):
         self._poll_count += 1
         p = self.params
 
-        rows = fetcher.fetch_global_trades(
+        rows = self._market_data.global_trades(
             p.min_cash_size_usdc, p.firehose_limit,
         )
         new_rows = [r for r in rows if self._key(r) not in self._seen]
@@ -358,7 +362,7 @@ class InsiderFlowAlgorithm(Algorithm):
         if market_id in self._market_info_cache:
             return self._market_info_cache[market_id]
 
-        market = fetcher.fetch_market_resolution(market_id)
+        market = self._market_data.market(market_id)
         if market is None:
             return None
 
@@ -416,7 +420,7 @@ class InsiderFlowAlgorithm(Algorithm):
             "wallet_age_seconds": (now - oldest) if oldest else None,
             "detect_latency_seconds": max(0, int(now) - row.timestamp),
             "hour_utc": time.gmtime(now).tm_hour,
-            "portfolio_value_usdc": fetcher.fetch_wallet_value(row.wallet),
+            "portfolio_value_usdc": self._market_data.wallet_value(row.wallet),
             "market_category": cats.split(",")[0] if cats else None,
             "market_end_ts": end_ts,
         }
@@ -433,7 +437,7 @@ class InsiderFlowAlgorithm(Algorithm):
             return cached[1]
 
         p = self.params
-        stats = fetcher.fetch_wallet_stats(wallet)
+        stats = self._market_data.wallet_stats(wallet)
         if stats is None:
             logger.warning(
                 "[%s] Could not verify wallet %s — skipping (fail closed).",
@@ -473,8 +477,8 @@ class InsiderFlowAlgorithm(Algorithm):
         # market's signal rows. Undetermined markets just wait for a later
         # sweep — resolution is not time-sensitive.
         for pos in self._tracker.all_open(paper=self._paper):
-            market = fetcher.fetch_market_resolution(pos.market_id)
-            if market and fetcher.market_outcome_is_final(market):
+            market = self._market_data.market(pos.market_id)
+            if market and self._market_data.market_outcome_is_final(market):
                 logger.info(
                     "[%s] Market resolved — settling: %s",
                     self.params.name, pos.question[:55],

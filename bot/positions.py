@@ -28,38 +28,14 @@ partial sells).
 
 import logging
 import time
-from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
 from . import db
+from .domain.portfolio import Position
 from .models import Trade
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Position dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Position:
-    market_id: str
-    asset_id: str
-    question: str
-    outcome: str
-    shares: float
-    avg_price: float
-    total_cost_usdc: float       # the canonical cost basis
-    opened_at: int
-    updated_at: int
-
-    def __str__(self) -> str:
-        return (
-            f"{self.outcome} | {self.shares:.2f} shares @ avg {self.avg_price:.3f}"
-            f" | cost ${self.total_cost_usdc:.2f} | {self.question[:55]}"
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,26 @@ def _algo(params=None):
     return algo
 
 
+def test_setup_reads_through_injected_market_data():
+    """Strategies depend on an explicit market-data boundary, not HTTP globals."""
+    class FakeMarketData:
+        def __init__(self):
+            self.addresses = []
+
+        def recent_trades(self, address):
+            self.addresses.append(address)
+            return []
+
+    data = FakeMarketData()
+    algo = CopyTradeAlgorithm(
+        params=CopyTradeParams(target_address="0xtarget"), market_data=data,
+    )
+
+    algo.setup(tracker=object(), notifier_mod=None, client=None)
+
+    assert data.addresses == ["0xtarget"]
+
+
 def test_display_name_includes_username_when_set():
     """Notifications should self-identify which wallet they're mirroring."""
     a = _algo(CopyTradeParams(name="copy_trade", target_username="surfandturf"))

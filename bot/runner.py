@@ -12,11 +12,9 @@ Algorithms emit `OpenIntent` / `CloseIntent` / `SettleIntent` and never touch
 any of the above. That's the entire reuse story: write a new algorithm in
 ~20 lines and inherit all the production-hardened execution logic for free.
 
-What stays here (was in executor.py):
-  * `build_client` — CLOB client factory.
-  * `FillResult` and the `_simulate_*` / `_place_*` / `_parse_fill` helpers.
-  * `_get_current_price`, `_slippage_ok`.
-  * REDEEM resolution price logic.
+This module is the compatibility-facing dispatcher.  Pure pricing, paper
+fills, and settlement-price selection live under ``bot.execution``; live
+CLOB placement remains here because it is the only stateful exchange edge.
 
 What changed:
   * Slippage cap and order type come from `algo.params`, not module config.
@@ -24,43 +22,21 @@ What changed:
 """
 
 import logging
-from dataclasses import dataclass
 from typing import Optional
 
 from py_clob_client_v2.client import ClobClient
 from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client_v2.constants import POLYGON
 
-from . import config, fetcher, notifier, signals
+from . import config, notifier, signals
 from .algorithm import CloseIntent, Intent, OpenIntent, SettleIntent
+from .execution.fills import FillResult, simulate_buy as _simulate_buy, simulate_sell as _simulate_sell
+from .execution.pricing import current_price as _get_current_price, slippage_ok as _slippage_ok
+from .execution.settlement import gamma_outcome_price as _gamma_outcome_price, resolve_close_price as _resolve_close_price
 from .models import Trade
 from .positions import PositionTracker, RiskManager
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# FillResult — outcome of an order placement
-# ---------------------------------------------------------------------------
-
-@dataclass
-class FillResult:
-    """Outcome of an order placement.
-
-    `success=False` means nothing filled — caller MUST NOT record a position.
-    For partial fills `success=True` and `shares`/`amount_usdc` reflect what
-    actually filled.
-
-    `amount_usdc` is dual-use by side:
-      * BUY  → USDC spent acquiring shares
-      * SELL → USDC proceeds received from closing shares
-    """
-    success: bool
-    shares: float
-    amount_usdc: float
-    fill_price: float
-    fee_usdc: float = 0.0
-    reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -397,93 +373,6 @@ def _intent_to_trade(
 
 
 # ---------------------------------------------------------------------------
-# Slippage + price lookup
-# ---------------------------------------------------------------------------
-
-def _get_current_price(trade: Trade, client: Optional[ClobClient]) -> Optional[float]:
-    """Best-effort current market price for this asset.
-
-    Returns None on failure so the slippage check can refuse the trade.
-    This is the safer choice: an outage that returns trade.price would
-    silently disable slippage protection, which is when it matters most.
-    """
-    if client is not None:
-        try:
-            resp = client.get_last_trade_price(trade.asset_id)
-            return float(resp.get("price"))
-        except Exception as e:
-            logger.warning("Authenticated price fetch failed: %s", e)
-
-    return fetcher.fetch_resolution_price(trade.asset_id)
-
-
-def _slippage_ok(
-    trade: Trade,
-    current_price: Optional[float],
-    max_slippage: float,
-    algo_name: str,
-) -> bool:
-    """Fail closed when price data is unavailable."""
-    if current_price is None:
-        logger.warning(
-            "[%s] No current price for slippage check — refusing: %s",
-            algo_name, trade.question[:50],
-        )
-        return False
-    if trade.price <= 0:
-        return True
-    drift = abs(current_price - trade.price) / trade.price
-    if drift > max_slippage:
-        # Log-only: a fast-moving market spams dozens of these per match,
-        # and the skip is the gate working as intended, not an incident.
-        logger.warning(
-            "[%s] Slippage %.1f%% > max %.1f%%, skipping: %s",
-            algo_name, drift * 100, max_slippage * 100, trade.question[:50],
-        )
-        return False
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Paper-mode fill simulation
-# ---------------------------------------------------------------------------
-
-def _simulate_buy(
-    scaled_usdc: float, current_price: Optional[float], paper_fee_bps: float
-) -> FillResult:
-    """Simulate a market BUY at the current price, charging the modeled fee."""
-    if current_price is None or current_price <= 0:
-        return FillResult(False, 0, 0, 0, reason="no current price")
-    fee = scaled_usdc * (paper_fee_bps / 10_000.0)
-    if scaled_usdc - fee <= 0:
-        return FillResult(False, 0, 0, 0, reason="fee exceeds order size")
-    shares = (scaled_usdc - fee) / current_price
-    return FillResult(
-        success=True,
-        shares=shares,
-        amount_usdc=scaled_usdc,
-        fill_price=current_price,
-        fee_usdc=fee,
-    )
-
-
-def _simulate_sell(
-    shares: float, current_price: Optional[float], paper_fee_bps: float
-) -> FillResult:
-    if current_price is None or current_price <= 0:
-        return FillResult(False, 0, 0, 0, reason="no current price")
-    gross = shares * current_price
-    fee = gross * (paper_fee_bps / 10_000.0)
-    return FillResult(
-        success=True,
-        shares=shares,
-        amount_usdc=gross,             # proceeds (gross of fee)
-        fill_price=current_price,
-        fee_usdc=fee,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Live order placement
 # ---------------------------------------------------------------------------
 
@@ -680,55 +569,3 @@ def _parse_fill(resp, side: str) -> FillResult:
         fill_price=fill_price,
         fee_usdc=fee,
     )
-
-
-# ---------------------------------------------------------------------------
-# REDEEM resolution price (Gamma + CLOB fallback)
-# ---------------------------------------------------------------------------
-
-def _resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
-    """Determine the final price for a redeemed position.
-
-    Strategy (in order):
-      1. Ask Gamma for the market and *only* trust outcomePrices if the
-         outcome is actually determined (strict check — a merely-closed
-         market can still be in the UMA dispute window, where outcomePrices
-         is the last order book, not a settlement).
-      2. Fall back to CLOB last-trade-price binarized to {0, 1}.
-      3. If neither yields a confident answer, return None and leave the
-         position open.
-    """
-    market = fetcher.fetch_market_resolution(market_id)
-    if market and fetcher.market_outcome_is_final(market):
-        outcome_price = _gamma_outcome_price(market, asset_id)
-        if outcome_price is not None:
-            return outcome_price
-
-    price = fetcher.fetch_resolution_price(asset_id)
-    if price is None:
-        return None
-    if price > 0.95:
-        return 1.0
-    if price < 0.05:
-        return 0.0
-    return None
-
-
-def _gamma_outcome_price(market: dict, asset_id: str) -> Optional[float]:
-    """Extract the settlement price for a specific token from a resolved market."""
-    tokens = market.get("clobTokenIds")
-    prices = market.get("outcomePrices")
-    if not (tokens and prices):
-        return None
-    try:
-        import json
-        token_list = json.loads(tokens) if isinstance(tokens, str) else tokens
-        price_list = json.loads(prices) if isinstance(prices, str) else prices
-        for tok, pr in zip(token_list, price_list):
-            if tok == asset_id:
-                return float(pr)
-    except (ValueError, TypeError) as e:
-        logger.debug("Gamma resolution parse failed: %s", e)
-    return None
-
-

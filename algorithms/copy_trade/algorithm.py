@@ -32,6 +32,7 @@ from typing import Iterator, Optional
 
 from bot import fetcher
 from bot.algorithm import Algorithm, CloseIntent, Intent, Mode, OpenIntent, SettleIntent
+from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams
 
@@ -54,6 +55,7 @@ class CopyTradeAlgorithm(Algorithm):
         self,
         name: Optional[str] = None,
         params: Optional[CopyTradeParams] = None,
+        market_data: Optional[MarketDataGateway] = None,
     ) -> None:
         """Create a copy-trade worker.
 
@@ -71,6 +73,8 @@ class CopyTradeAlgorithm(Algorithm):
             self.params = CopyTradeParams(name=name)
         else:
             self.params = CopyTradeParams()
+
+        self._market_data = market_data or DEFAULT_MARKET_DATA
 
         self._address: str = ""
         self._tracker = None        # PositionTracker, set in setup()
@@ -108,7 +112,7 @@ class CopyTradeAlgorithm(Algorithm):
                 "[%s] Looking up wallet for '%s'...",
                 self.params.name, self.params.target_username,
             )
-            self._address = fetcher.lookup_wallet(self.params.target_username) or ""
+            self._address = self._market_data.lookup_wallet(self.params.target_username) or ""
         if not self._address:
             raise RuntimeError(
                 f"[{self.params.name}] No target wallet configured. Set "
@@ -123,7 +127,7 @@ class CopyTradeAlgorithm(Algorithm):
         # it as seen and the missed exit would never be processed. Re-running
         # a REDEEM/MERGE against a position that was already closed is a no-op
         # (runner checks shares > 0), so replaying them is safe.
-        for t in fetcher.fetch_recent_trades(self._address):
+        for t in self._market_data.recent_trades(self._address):
             if t.id and t.action not in ("REDEEM", "MERGE"):
                 self._seen_ids.mark(t.id)
         logger.info(
@@ -135,7 +139,7 @@ class CopyTradeAlgorithm(Algorithm):
 
     def poll(self) -> Iterator[Intent]:
         self._poll_count += 1
-        trades = fetcher.fetch_recent_trades(self._address)
+        trades = self._market_data.recent_trades(self._address)
         # Skip trades smaller than the configured floor (dust filter).
         if self.params.min_trade_size_usdc > 0:
             trades = [t for t in trades if t.size_usdc >= self.params.min_trade_size_usdc]
@@ -184,7 +188,7 @@ class CopyTradeAlgorithm(Algorithm):
         if self._address.lower() == _SMOKE_TEST_WALLET:
             return
 
-        target_positions = fetcher.fetch_user_positions(self._address)
+        target_positions = self._market_data.user_positions(self._address)
         # Group by market_id — a wallet can hold both sides; take the largest.
         by_market: dict[str, dict] = {}
         for row in target_positions:
@@ -239,11 +243,11 @@ class CopyTradeAlgorithm(Algorithm):
         Gamma's REST API is lagging behind.
         """
         for pos in self._tracker.all_open(paper=self._paper):
-            market = fetcher.fetch_market_resolution(pos.market_id)
-            is_final = bool(market and fetcher.market_outcome_is_final(market))
+            market = self._market_data.market(pos.market_id)
+            is_final = bool(market and self._market_data.market_outcome_is_final(market))
             if not is_final:
                 # Gamma may be lagging — check CLOB as fallback.
-                clob = fetcher.fetch_resolution_price(pos.asset_id)
+                clob = self._market_data.price(pos.asset_id)
                 is_final = clob is not None and (clob > 0.95 or clob < 0.05)
             if is_final:
                 logger.info(
@@ -310,7 +314,7 @@ class CopyTradeAlgorithm(Algorithm):
         # Look up the target's total holding to pick a tier. `expected_min`
         # defeats the Data API's eventual-consistency window — the BUY we
         # just observed must be reflected.
-        holding = fetcher.fetch_target_position_value(
+        holding = self._market_data.target_position_value(
             self._address, t.market_id, expected_min=t.size_usdc,
         )
         self.holding_cache.set(t.market_id, holding)
