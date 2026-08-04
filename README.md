@@ -13,6 +13,64 @@ risk limits, Discord notifications, and signal logging for later modeling.
 4. **Execute** — paper simulation, or market (FAK) / limit (GTC) orders via the CLOB API
 5. **Track + notify** — positions, P&L, and signal features in SQLite; Discord alerts and a daily summary
 
+## Architecture
+
+```mermaid
+flowchart LR
+    Profile["Profile TOML"] --> Main["main.py"]
+    Secrets["Environment secrets"] --> Main
+    Main --> Copy["copy_trade worker"]
+    Main --> Insider["insider_flow worker"]
+
+    Copy --> DataAPI["Polymarket Data API"]
+    Insider --> DataAPI
+    Copy --> Intents["Open / Close / Settle intents"]
+    Insider --> Intents
+    Intents --> Runner["Shared runner"]
+
+    Runner --> Risk["Risk manager"]
+    Risk --> Execution["Paper fills or CLOB orders"]
+    Execution --> DB["SQLite: positions, trades, signals, runs"]
+    Runner --> Discord["Discord alerts and summaries"]
+    Copy --> Gamma["Gamma market resolution"]
+    Insider --> Gamma
+```
+
+Each configured algorithm has its own worker, risk limits, polling cadence,
+and paper bankroll. The shared runner is the only layer that turns an intent
+into a simulated or live order.
+
+## Ranked multi-leader copy algorithm
+
+```mermaid
+flowchart TD
+    Leaderboard["Public Polymarket leaderboards"] --> Import["Offline history importer"]
+    ClosedPositions["Old binary closed positions"] --> Import
+    Dune["Optional normalized Dune CSV"] --> Import
+    Import --> History["SQLite resolved-bet history"]
+
+    History --> Rank["Confidence-adjusted wallet ranker"]
+    Rank --> Persist{"Early and late\nperiods agree?"}
+    Persist -- "yes" --> Watchlist["Active top-X watchlist"]
+    Persist -- "no" --> Hold["Keep prior watchlist inactive"]
+
+    Watchlist --> Poll["Poll each active leader"]
+    Poll --> Deduplicate["Deduplicate and classify events"]
+    Deduplicate --> Consensus{"Enough leaders buy\nthe same outcome in window?"}
+    Consensus -- "yes" --> Open["Attributed OpenIntent"]
+    Consensus -- "no" --> Skip["Skip signal"]
+
+    Open --> Runner["Shared runner: size, risk, execution"]
+    Runner --> Lots["Per-leader copy lots"]
+    Lots --> Exit["Leader sell / merge / settlement"]
+    Exit --> Runner
+```
+
+The public importer is deliberately a paper-testing seed: it only uses old,
+binary closed-position prices and does not prove the original execution was
+copyable. Dune-normalized fill history remains the stronger source for
+research and any future live review.
+
 ## Setup
 
 ```bash
