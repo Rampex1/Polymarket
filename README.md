@@ -137,10 +137,6 @@ crash-visible panes — `remain-on-exit` is set, so attaching after a death
 shows the traceback instead of an empty screen. Idempotent. It exits
 non-zero if a session dies at boot and prints that session's last output.
 
-Deploys are manual, on purpose — CI runs the tests and stops there. Green
-tests aren't enough to justify restarting a process that holds real
-positions. An admin can also trigger a deploy from Discord with `/restart`.
-
 | Session | Command |
 |---|---|
 | `paper` | `PROFILE=experimental python main.py` |
@@ -152,17 +148,6 @@ positions. An admin can also trigger a deploy from Discord with `/restart`.
 
 `data/positions.db` and `.env` live only on the host — both are gitignored
 and must survive redeploys.
-
-Two things that bite:
-
-- **`setup_vm.sh` pulls partway through running itself**, so a version
-  already executing is not the version that just landed. After changing the
-  script, run it twice — once to pull, once to execute the new logic.
-- **prod is currently paused.** `config/prod.toml` sets `allow_live = true`
-  but declares no algorithms, so the `prod` session isn't started — that's
-  intentional, not a failure; the script reports it and continues. To
-  resume, copy a proven block from `experimental.toml`, flip
-  `mode = "live"`, and keep `name` stable.
 
 After a deploy, check: one startup line per algorithm in
 `tmux attach -t paper` and in Discord, a first-pass summary in `archive`

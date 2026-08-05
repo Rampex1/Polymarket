@@ -14,10 +14,20 @@
 #   discord — python scripts/run_discord_bot.py  (slash commands, all profiles)
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# Absolute path to this script, resolved before any cd so the re-exec below
+# works no matter which directory it was invoked from.
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$SCRIPT")/.."
 
-echo "==> Code"
-git pull --ff-only
+# Pull, then hand off to the version that just landed. Bash reads a script
+# incrementally, so without this re-exec a deploy that changes this file
+# would finish running the old copy — half-old, half-new. The env var stops
+# the second pass from pulling again (and from looping).
+if [ -z "${SETUP_VM_REEXEC:-}" ]; then
+    echo "==> Code"
+    git pull --ff-only
+    SETUP_VM_REEXEC=1 exec bash "$SCRIPT" "$@"
+fi
 
 echo "==> Python env"
 [ -d .venv ] || python3 -m venv .venv
