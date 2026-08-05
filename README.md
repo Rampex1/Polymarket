@@ -101,38 +101,18 @@ pip install -r requirements.txt        # runtime deps + pytest
 cp .env.example .env                   # secrets only — see below
 ```
 
-## Configuration
+Configuration lives in three files, split by kind:
 
-Three files, split by kind:
-
-| File | Holds | Committed |
-|---|---|---|
-| `config/<profile>.toml` | *Behavior* — which algorithms run, mode, targets, tiers, risk caps | yes |
-| `config/webhooks.toml` | *Discord routing* — which channel each profile's summaries go to | yes (repo is private — rotate before it isn't) |
-| `.env` / `.env.<profile>` | *Secrets only* — the five `POLY_*` creds, Discord bot token | no |
+| File | Holds |
+|---|---|
+| `config/<profile>.toml` | *Behavior* — which algorithms run, mode, targets, tiers, risk caps |
+| `config/webhooks.toml` | *Discord routing* — which channel each profile's summaries go to |
+| `.env` | *Secrets only* — the five `POLY_*` creds, Discord bot token |
 
 There is **no global paper/live switch.** Mode is declared per `[[algorithm]]`
 block, so one process can run live and paper algorithms side by side. A
 profile must set top-level `allow_live = true` before any `mode = "live"`
 block is accepted, and only `prod.toml` sets it.
-
-Each block sets `type` (registry key), `name` (**DB partition key — keep it
-stable; renaming orphans that algorithm's bankroll and history**), `mode`,
-and an optional `[algorithm.params]` table. Omitted knobs use schema
-defaults from `algorithms/<type>/params.py`; discover them rather than
-hunting through docs:
-
-```bash
-python -m bot.params                  # what algorithm types exist
-python -m bot.params copy_trade       # every knob: default + description
-python -m bot.params --effective      # exactly what $PROFILE resolves to (* = non-default)
-python -m bot.report                  # performance per algorithm
-```
-
-Tuning and prod promotion are TOML edits, never code edits. The loader
-validates at boot — unknown keys, duplicate names, bad modes, and
-`validate()` violations all crash with a pointed error instead of silently
-doing nothing.
 
 ## Running
 
