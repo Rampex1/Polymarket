@@ -114,25 +114,6 @@ block, so one process can run live and paper algorithms side by side. A
 profile must set top-level `allow_live = true` before any `mode = "live"`
 block is accepted, and only `prod.toml` sets it.
 
-## Running
-
-```bash
-PROFILE=experimental python main.py     # paper A/B variants
-PROFILE=prod python main.py             # live — needs POLY_* creds
-```
-
-`PROFILE` is required; there is no default, by design. A bare
-`python main.py` exits with an error naming the available profiles instead
-of guessing which config (and which mode) to trade with.
-
-The discovery price archiver should run alongside — the public API drops
-price history once markets resolve, so it's the raw material for backtests:
-
-```bash
-python -m discovery.archive --once              # one pass (cron-friendly)
-python -m discovery.archive --loop --every 3600
-```
-
 ## Testing
 
 ```bash
@@ -156,9 +137,9 @@ crash-visible panes — `remain-on-exit` is set, so attaching after a death
 shows the traceback instead of an empty screen. Idempotent. It exits
 non-zero if a session dies at boot and prints that session's last output.
 
-Pushes to `main` run it automatically (`.github/workflows/ci.yml`, gated on
-the test job). Running it by hand is for redeploying without a push; an
-admin can also trigger it from Discord with `/restart`.
+Deploys are manual, on purpose — CI runs the tests and stops there. Green
+tests aren't enough to justify restarting a process that holds real
+positions. An admin can also trigger a deploy from Discord with `/restart`.
 
 | Session | Command |
 |---|---|

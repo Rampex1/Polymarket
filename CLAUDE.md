@@ -76,7 +76,7 @@ algorithms/
     params.py             # InsiderFlowParams — pure schema
 discovery/archive.py      # Price-history archiver (CLOB drops history at resolution — hoard it)
 scripts/
-  setup_vm.sh             # Zero-to-running VPS deploy; also what /restart and CI invoke
+  setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual
   ssh_vm.sh               # SSH into the VPS
   run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
   import_wallet_history.py            # Dune CSV → normalized resolved-bet history

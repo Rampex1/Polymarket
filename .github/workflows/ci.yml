@@ -22,18 +22,6 @@ jobs:
       - name: Run tests
         run: pytest
 
-  deploy:
-    name: Deploy to VPS
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH and run setup_vm.sh
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 148.116.94.154 >> ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=30 opc@148.116.94.154 \
-            'bash ~/Polymarket/scripts/setup_vm.sh'
-        timeout-minutes: 5
+# No deploy job, deliberately. A green test run is not enough evidence to
+# restart a process trading real money — deploys are triggered by hand
+# (scripts/setup_vm.sh, or /restart from Discord).
