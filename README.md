@@ -76,7 +76,7 @@ research and any future live review.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt        # -r requirements-dev.txt for tests
+pip install -r requirements.txt        # runtime deps + pytest
 cp .env.example .env                   # secrets + webhook only — see below
 ```
 
