@@ -171,69 +171,16 @@ warning.
 
 ## Monitoring
 
-Discord carries trade alerts, a daily summary, a liveness heartbeat, and a
-weekly signal digest. `/status`, `/positions`, `/pnl`, `/summary`, and
-`/restart` are available as slash commands.
+Discord is the interface. Trade alerts post to a per-market thread as they
+happen; the profile's summary channel gets a daily summary at midnight, a
+liveness heartbeat every 6 hours, and a signal digest on Sundays.
 
-```bash
-python -m bot.report    # per-algo P&L, signal counts, skip reasons, win rate vs entry odds
-```
+Slash commands — one bot, serving every profile:
 
-That covers most questions; drop to SQL (`sqlite3 data/positions.db`) for
-anything deeper:
-
-```sql
--- Signal rate per day. A handful is healthy; dozens = filters too loose,
--- zero for a week = too tight.
-SELECT date(ts,'unixepoch') d, COUNT(*) FROM signals
-WHERE algo='insider_flow_paper' GROUP BY d ORDER BY d;
-
--- Skip reasons: many 'slippage' → signals move fast; many 'risk:' → caps
--- binding before the strategy can express itself.
-SELECT skip_reason, COUNT(*) FROM signals WHERE executed=0 GROUP BY skip_reason;
-
--- The number the whole thesis rides on: do ~0.20-odds bets win
--- materially more than 20% of the time?
-SELECT signal_price, outcome, pnl_usdc FROM signals
-WHERE outcome IS NOT NULL ORDER BY outcome_ts;
-```
-
-Archive health (`sqlite3 data/discovery_archive.db`) — the last snapshot
-should be under 2h old:
-
-```sql
-SELECT COUNT(*) FROM tracked_markets;
-SELECT COUNT(*) FROM price_history;
-SELECT datetime(MAX(last_snapshot),'unixepoch') FROM tracked_markets;
-```
-
-**Never `scp` one `discovery_archive.db` over another** — both machines
-accumulate history the other lacks, and an overwrite destroys it. Upload
-under a temp name and merge; both tables have natural PKs, so
-`INSERT OR IGNORE` dedupes exactly:
-
-```bash
-scp -i ~/.ssh/ssh-key-2026-05-31.key data/discovery_archive.db \
-    opc@148.116.94.154:~/Polymarket/data/laptop_archive.db
-# then on the VPS:
-cd ~/Polymarket/data && cp discovery_archive.db discovery_archive.db.bak && \
-../.venv/bin/python - <<'EOF'
-import sqlite3
-db = sqlite3.connect("discovery_archive.db")
-db.execute("ATTACH 'laptop_archive.db' AS laptop")
-db.execute("INSERT OR IGNORE INTO price_history SELECT * FROM laptop.price_history")
-db.execute("INSERT OR IGNORE INTO tracked_markets SELECT * FROM laptop.tracked_markets")
-db.commit()
-EOF
-rm laptop_archive.db
-```
-
-Checkpoint: review paper results ~60–90 days after deploy before promoting
-anything to live. What to watch and why is in
-`research/branch_new_feature_uwu.md`.
-
-## More
-
-- `CLAUDE.md` — internals for AI agents: module map, DB schema, invariants
-- `algorithms/copy_trade/design.md` — tier model, signal semantics, edge cases
-- `research/` — strategy plans and paper-phase observations
+| Command | What it reports |
+|---|---|
+| `/status` | Every algorithm, grouped by profile: paper/live mode, open position count, exposure, and today's P&L |
+| `/positions [algo]` | Each open position — outcome, shares, average price, cost, market — optionally filtered to algorithms whose name contains `algo` |
+| `/pnl` | Today's realized P&L and exposure per algorithm, plus a combined total across all of them |
+| `/summary` | Sends the daily summary to every profile's summary channel now, instead of waiting for midnight |
+| `/restart` | Runs `setup_vm.sh` on the VPS — pull, deps, profile validation, session restart. **Admin only**, and every session goes briefly offline |
