@@ -1,4 +1,7 @@
 requests==2.32.3
+# Imported directly (bot/fetcher.py: urllib3.util.retry.Retry), so pin it
+# rather than relying on whatever requests happens to pull in.
+urllib3==2.7.0
 python-dotenv==1.0.1
 py_clob_client_v2==1.0.1
 discord.py>=2.3.0

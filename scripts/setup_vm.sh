@@ -11,6 +11,7 @@
 #             only started if config/prod.toml has [[algorithm]] blocks —
 #             an intentionally empty prod (paused) is not an error
 #   archive — python -m discovery.archive --loop --every 3600
+#   discord — python scripts/run_discord_bot.py  (slash commands, all profiles)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

@@ -1,20 +1,13 @@
-# Operations Manual — Deployment & Paper-Phase Monitoring
+# Operations Manual — Deploy & Monitoring
 
-Post-merge runbook for getting the discovery work (InsiderFlow + price
-archiver + signal logging) running on the VPS, and what to watch afterward.
+Standing runbook for the VPS: how to deploy, what to check after, and the
+queries that tell you whether the paper phase is working.
 
 VPS: `opc@148.116.94.154` — connect with `bash scripts/ssh_vm.sh`.
 
 ---
 
-## 1. Local cleanup (after the PR merges)
-
-```bash
-git checkout main && git pull
-git branch -d new_feature_uwu
-```
-
-## 2. Update the VPS — one command
+## 1. Deploy — one command
 
 ```bash
 bash scripts/ssh_vm.sh
@@ -22,80 +15,110 @@ bash scripts/ssh_vm.sh
 cd ~/Polymarket && bash scripts/setup_vm.sh
 ```
 
-`setup_vm.sh` does everything sections 2–5 used to describe by hand:
-git pull, venv + deps, data/ layout migration, env hygiene (removes the
-obsolete `.env.experimental`, verifies the five `POLY_*` secrets),
-profile validation, and a clean restart of all three tmux sessions
-(`paper`, `prod`, `archive`) with crash-visible panes. Idempotent —
-re-run it after every push. It exits non-zero if any session dies at
-boot and prints that session's last output.
+`setup_vm.sh` is the whole deploy: git pull, venv + deps, `data/` layout
+migration, env hygiene (removes stale non-secret keys, verifies the five
+`POLY_*` creds), profile validation, and a clean restart of the tmux
+sessions with crash-visible panes. Idempotent — re-run it after every
+push. It exits non-zero if a session dies at boot and prints that
+session's last output.
 
-## 3. Env files on the VPS
+Pushes to `main` run it automatically (`.github/workflows/ci.yml` →
+`deploy` job, gated on the test job passing). Running it by hand is for
+when you want to redeploy without a push, or to watch it happen.
 
-One `.env` holding only the five `POLY_*` creds — that's it. Webhooks
-route per-profile via the committed `config/webhooks.toml` (arrives with
-the git pull), and `.env.experimental` should NOT exist (a leftover one
-shadows `.env` and its stale webhook overrides the registry — delete it).
+> **Editing `setup_vm.sh` itself:** the script `git pull`s before it runs
+> the rest of itself, so a version already executing is not the version
+> that just landed. After changing the script, run it twice — once to
+> pull, once to actually execute the new logic.
 
-The paper-can't-touch-money guarantee is enforced in config now, not by
-env-file separation: the loader rejects any `mode="live"` block in a
-profile without top-level `allow_live = true`, and only `prod.toml` sets
-that. Sanity-check what will run with:
+### Sessions it starts
+
+| Session | Command | Notes |
+|---|---|---|
+| `paper` | `PROFILE=experimental python main.py` | always |
+| `prod` | `PROFILE=prod python main.py` | **only if `config/prod.toml` has `[[algorithm]]` blocks** — see §5 |
+| `archive` | `python -m discovery.archive --loop --every 3600` | always |
+| `discord` | `python scripts/run_discord_bot.py` | always; all profiles, one token |
+
+An intentionally-empty `prod.toml` is not an error: the script detects it,
+kills any stale `prod` session, prints `no [[algorithm]] blocks configured`,
+and continues. It only verifies the sessions it actually started.
+
+## 2. Env files on the VPS
+
+One `.env`, holding **only** the five `POLY_*` creds, plus
+`DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` for the slash-command bot.
+Webhooks route per-profile via the committed `config/webhooks.toml`.
+
+`setup_vm.sh` enforces this: it deletes `.env.experimental` (a leftover
+one shadows `.env` and its stale webhook overrides the registry) and
+strips `DISCORD_WEBHOOK_URL`, `TARGET_ADDRESS`, `COPYTRADE_TARGET_ADDRESS`,
+`TIMEZONE`, and a redundant `POLY_SIGNATURE_TYPE=3` if it finds them.
+
+The paper-can't-touch-money guarantee lives in config, not in env-file
+separation: the loader rejects any `mode = "live"` block in a profile
+without top-level `allow_live = true`, and only `prod.toml` sets it.
+Sanity-check what will run with:
 
 ```bash
 PROFILE=experimental python -m bot.params --effective
+PROFILE=prod        python -m bot.params --effective
 ```
 
-## 4. Merging archive data between machines (done 2026-06-12; keep for reference)
-
-Never `scp` one `discovery_archive.db` over another — both machines accumulate
-history the other lacks, and an overwrite destroys data. Upload under a temp
-name and merge (both tables have natural PKs, so `INSERT OR IGNORE` dedupes
-exactly):
+## 3. tmux cheat-sheet
 
 ```bash
-scp -i ~/.ssh/ssh-key-2026-05-31.key data/discovery_archive.db \
-    opc@148.116.94.154:~/Polymarket/data/laptop_archive.db
-# then on the VPS:
-cd ~/Polymarket/data && cp discovery_archive.db discovery_archive.db.bak && \
-../.venv/bin/python - <<'EOF'
-import sqlite3
-db = sqlite3.connect("discovery_archive.db")
-db.execute("ATTACH 'laptop_archive.db' AS laptop")
-db.execute("INSERT OR IGNORE INTO price_history SELECT * FROM laptop.price_history")
-db.execute("INSERT OR IGNORE INTO tracked_markets SELECT * FROM laptop.tracked_markets")
-db.commit()
-EOF
-rm laptop_archive.db
+tmux ls                        # what's running
+tmux attach -t paper           # view a session
+# Ctrl-b d                     # detach without killing
+tmux kill-session -t paper     # stop one
 ```
 
-## 5. tmux cheat-sheet (sessions are started by setup_vm.sh)
+Panes survive a process crash (`remain-on-exit`), so attaching after a
+death shows the traceback rather than an empty screen.
 
-`tmux ls` (list), `tmux attach -t paper` (view), `Ctrl-b d` (detach without
-killing), `tmux kill-session -t paper` (stop one). Panes survive a process
-crash (`remain-on-exit`), so attach shows the traceback.
+## 4. Verify after a deploy
 
-## 6. Verify within the first 10 minutes
-
-- `tmux attach -t paper` →
-  `[insider_flow_paper] Watching global flow ≥ $5000 at odds ≤ 0.35 (seeded N existing rows)`
-  plus the two copy-trade paper workers starting.
-- Discord shows three startup messages (one per algorithm).
+- `tmux attach -t paper` → the insider-flow worker announcing its filters,
+  e.g. `[insider_flow_paper] Watching global flow ≥ $5000 at odds ≤ 0.35
+  (seeded N existing rows)`. One startup line per `[[algorithm]]` block in
+  `config/experimental.toml`.
+- Discord: one startup message per algorithm, in the channel
+  `config/webhooks.toml` maps that profile to.
 - `tmux attach -t archive` → first-pass summary with `tracked_added` /
   `points_added` counts.
-- NO `Using legacy ./positions.db` warning (if the step-2 move was done).
+- `tmux attach -t discord` → bot connected, slash commands synced. Try
+  `/status`.
+- NO `Using legacy ./positions.db` warning — the DB should live at
+  `data/positions.db`.
 
-## 7. Watch cadence
+## 5. Resuming prod
+
+`config/prod.toml` currently declares `allow_live = true` and **zero**
+algorithm blocks — prod is paused, no live trading, and the `prod` tmux
+session is intentionally absent. To resume: copy a proven block from
+`experimental.toml`, flip `mode = "live"`, keep the `name` stable (it's
+the DB partition key — renaming orphans that algorithm's bankroll and
+history), commit, and run `setup_vm.sh`.
+
+Note that a running worker keeps its old code until restarted, so a
+deploy that changes `runner` / `fetcher` / an algorithm only takes effect
+on the next `setup_vm.sh`.
+
+## 6. Watch cadence
 
 | When | What |
 |---|---|
 | Day 1–2 | Glance at Discord. `SUSPICIOUS FLOW` lines in the paper log = detector firing. |
-| Week 1–2 | Run the queries below: signal rate (a handful/day is healthy; dozens = filters too loose, zero/week = too tight), `skip_reason` distribution, feature null rates. |
+| Week 1–2 | Signal rate (a handful/day is healthy; dozens = filters too loose, zero/week = too tight), `skip_reason` distribution, feature null rates. |
 | Monthly | Win rate vs. implied odds on resolved signals — the number the whole thesis rides on. |
+
+**Checkpoint:** review paper results ~60–90 days after deploy before
+promoting anything to live.
 
 ### Observability queries (`sqlite3 data/positions.db`)
 
-Most of these are canned in `python -m bot.report` (per-algo P&L, signal
+Most of this is canned in `python -m bot.report` (per-algo P&L, signal
 counts, skip reasons, win rate vs. entry odds) — run that first; drop to
 raw SQL for anything deeper.
 
@@ -128,12 +151,28 @@ SELECT COUNT(*) FROM price_history;
 SELECT datetime(MAX(last_snapshot),'unixepoch') FROM tracked_markets;  -- should be < 2h old
 ```
 
-## 8. Prod restart (no urgency)
+## 7. Merging archive data between machines
 
-The merge changed code prod uses (`runner`, `fetcher`, `copy_trade`), but the
-running prod process keeps the old code until restarted. Nothing in the merge
-fixes a prod bug, so restart whenever convenient. Bonus on restart: the live
-copy-trade algorithm starts logging signal rows too — free training data.
+Never `scp` one `discovery_archive.db` over another — both machines
+accumulate history the other lacks, and an overwrite destroys data.
+Upload under a temp name and merge (both tables have natural PKs, so
+`INSERT OR IGNORE` dedupes exactly):
+
+```bash
+scp -i ~/.ssh/ssh-key-2026-05-31.key data/discovery_archive.db \
+    opc@148.116.94.154:~/Polymarket/data/laptop_archive.db
+# then on the VPS:
+cd ~/Polymarket/data && cp discovery_archive.db discovery_archive.db.bak && \
+../.venv/bin/python - <<'EOF'
+import sqlite3
+db = sqlite3.connect("discovery_archive.db")
+db.execute("ATTACH 'laptop_archive.db' AS laptop")
+db.execute("INSERT OR IGNORE INTO price_history SELECT * FROM laptop.price_history")
+db.execute("INSERT OR IGNORE INTO tracked_markets SELECT * FROM laptop.tracked_markets")
+db.commit()
+EOF
+rm laptop_archive.db
+```
 
 ---
 
@@ -151,6 +190,3 @@ copy-trade algorithm starts logging signal rows too — free training data.
 4. **Confidence-weighted sizing** — once enough labeled rows exist, fit a
    simple model (logistic regression) on logged features and scale
    `bet_size_usdc` via `bot/sizing.stake`.
-
-**Checkpoint:** review paper results ~60–90 days after deploy before
-promoting anything to live.
