@@ -5,246 +5,221 @@
 - After implementing changes, **commit automatically** (no need to ask).
 - **Do not push** until the user explicitly says to.
 
-## Project Overview
+## Start with the README
 
-A Python bot that automatically mirrors trades from one or more target Polymarket wallets. It detects BUY/SELL/MERGE/REDEEM signals via API polling, applies tiered bet-sizing, enforces risk limits, and runs each strategy in paper (simulated) or live mode.
+`README.md` is the developer-facing doc and is **not duplicated here**:
+project overview, setup, configuration model, running, testing, deployment,
+and monitoring all live there. Read it first. This file covers what an agent
+working *inside* the code needs on top of that — invariants, module
+responsibilities, runtime wiring, and the DB schema.
 
-The core thesis baked into the default strategy: only copy *high-conviction* positions from a target — sizing keys off the **target's absolute holding** in a market (default floor $80k), not their per-trade size.
+## Invariants — don't break these
 
-## Running the Bot
+- **`PROFILE` is required.** No default profile, deliberately. Bare
+  `python main.py` exits with an error naming the available profiles.
+- **No global paper/live flag.** Mode is per-`[[algorithm]]` block. A single
+  process can run live and paper algorithms side by side.
+- **`allow_live = true` gates real money.** The loader rejects any
+  `mode = "live"` block in a profile without it; only `prod.toml` sets it.
+- **`name` is the DB partition key.** Renaming an algorithm orphans its
+  bankroll and history. Keep it stable once set.
+- **Knob schemas live in `algorithms/<type>/params.py`** — names, defaults,
+  docs, and boot-time `validate()`. Never enumerate knobs in prose docs;
+  they go stale. `python -m bot.params <type>` is the source of truth.
+- **Algorithm params are never read from env.** Env holds secrets and infra
+  only. Behavior changes are TOML edits.
+- **The loader fails fast** on unknown keys, duplicate names, bad modes, and
+  `validate()` violations. A typo in a TOML key must crash, never silently
+  no-op — preserve that property when touching `profile_loader.py`.
+- **If an algorithm declares `LIVE` but no CLOB client/creds exist**, the
+  worker falls back to paper rather than mis-routing real-money orders.
 
-```bash
-source .venv/bin/activate
-PROFILE=prod python main.py             # live profile → loads .env.prod
-PROFILE=experimental python main.py     # paper A/B profile → loads .env.experimental
-```
-
-`PROFILE` is **required** — there is deliberately no default profile, so the bot can never run under an implicitly-selected config. A bare `python main.py` exits with an error naming the available profiles.
-
-There is **no global paper/live flag**. Mode is per-algorithm (`"paper"` / `"live"`), declared per algorithm block in `config/<profile>.toml`. A single process can run prod-live and paper-experimental algorithms side by side.
-
-**Configuration lives in three places, by kind:**
-- `config/<profile>.toml` — *behavior*: which algorithms run, their mode, targets, tiers, risk caps. A profile must set top-level `allow_live = true` before any `mode = "live"` block is accepted. Committed to git; tuning and prod promotion are TOML edits, never code edits.
-- `config/webhooks.toml` — *Discord webhook registry*: routes each PROFILE to its channel via per-block `profiles` lists. Committed (repo is private — rotate webhooks before ever going public).
-- `.env` / `.env.<profile>` — *secrets only*: the five `POLY_*` creds. Never committed. Optional overrides (`DISCORD_WEBHOOK_URL`, `TIMEZONE`, `DB_PATH`, `POLY_SIGNATURE_TYPE`) exist but defaults/registry normally cover them.
-
-**Config tooling:**
-```bash
-python -m bot.params                  # list algorithm types
-python -m bot.params copy_trade       # every knob: default + doc
-python -m bot.params --effective      # fully-resolved config for $PROFILE (* = non-default)
-python -m bot.report                  # per-algo performance: P&L, signals, win rate vs odds
-```
-
-**Utility scripts:**
-```bash
-python scripts/reset_paper_trade_db.py      # Wipe and reset paper trading DB
-python scripts/trading_account_summary.py   # Print portfolio snapshot
-bash   scripts/ssh_vm.sh                     # SSH into the deployment VPS
-bash   scripts/setup_vm.sh                   # On the VPS: zero-to-running deploy (pull, deps, env checks, restart all tmux sessions)
-```
-
-## Architecture
-
-The bot is split into **shared infrastructure** (`bot/`), **pluggable strategies** (`algorithms/`), and **declarative deployment config** (`config/`). Each strategy is an `Algorithm` that yields `Intent`s; a shared, stateless `runner` turns intents into orders. Writing a new strategy means subclassing `Algorithm`, registering it in `algorithms/__init__.py:REGISTRY`, and referencing it by type in a profile TOML.
+## Module map
 
 ```
-main.py                   # Entry point — one worker thread per enabled algorithm
-config/
-  prod.toml               # Profile: live algorithms — real money, keep conservative
-  experimental.toml       # Profile: paper variants for tuning / A/B testing
-  webhooks.toml           # Discord webhook registry — PROFILE → channel routing
+main.py                   # Entry point — worker thread per algorithm, signal handling, shared threads
 bot/
-  config.py               # Bot-wide infra only: API URLs, creds, DB path, Discord, timezone
+  config.py               # Infra only: API URLs, creds, DB path, webhook resolution, timezone, heartbeat interval
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
   params.py               # CLI: knob discovery (`python -m bot.params [type] [--effective]`)
   report.py               # CLI: per-algo performance report (`python -m bot.report`)
   runs.py                 # Run provenance — stamps resolved params + git sha per boot
   algorithm.py            # Algorithm ABC + Intent types (Open/Close/Settle) + Mode + AlgoParams protocol
-  runner.py               # Shared dispatch: slippage gate, CLOB orders, paper fills, DB writes, notify
+  runner.py               # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
   models.py               # Trade dataclass (legacy interface the runner adapts intents into)
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
-  fetcher.py              # Poll Data API for a wallet's trades; wallet lookup; resolution-price helpers
+  fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
   positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
+  copy_lots.py            # Leader-attributed lots — one leader's exit unwinds only its share
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
-  notifier.py             # Discord alerts + midnight daily summary thread
+  notifier.py             # Discord alerts, daily summary, heartbeat, weekly signal digest
+  threads.py              # Discord thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
+  discord_bot.py          # Slash-command bot (standalone daemon, its own process)
   signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
   sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
 algorithms/
-  __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader
-  copy_trade/             # Mirror a known target wallet
-    algorithm.py          # CopyTradeAlgorithm: poll target → tier sizing → emit intents
-    params.py             # CopyTradeParams — pure schema: knobs, defaults, docs, validate()
+  __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
+  copy_trade/             # Mirror one target wallet, or a ranked cohort
+    algorithm.py          # CopyTradeAlgorithm: poll → tier sizing → emit intents
+    params.py             # CopyTradeParams — pure schema
+    design.md             # Tier model, signal semantics, edge cases (predates multi-leader mode)
+    multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
+    ranker.py             # Offline-testable confidence-adjusted wallet ranking
+    watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
+    public_history.py     # Public-API ingestion for the ranked-copy history store (offline job)
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
-    params.py             # InsiderFlowParams — pure schema: knobs, defaults, docs, validate()
-discovery/
-  archive.py              # Price-history archiver (CLOB drops history at resolution — hoard it)
-data/                     # All SQLite files (positions.db, discovery_archive.db) — gitignored
-research/                 # Strategy research notes + plans (discovery_plan.md, implementation_plan.md)
+    params.py             # InsiderFlowParams — pure schema
+discovery/archive.py      # Price-history archiver (CLOB drops history at resolution — hoard it)
 scripts/
-  reset_paper_trade_db.py
-  trading_account_summary.py
-  ssh_vm.sh
-tests/                    # pytest suite (copy_trade, insider_flow, archive, db, fetcher, ...)
+  setup_vm.sh             # Zero-to-running VPS deploy; also what /restart and CI invoke
+  ssh_vm.sh               # SSH into the VPS
+  run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
+  import_wallet_history.py            # Dune CSV → normalized resolved-bet history
+  import_polymarket_wallet_history.py # Public-API seed for the same store (weaker, paper only)
+  reset_paper_trade_db.py             # Wipe and reset paper trading state
+  trading_account_summary.py          # Portfolio snapshot
 ```
 
-### Per-algorithm worker model
+## Runtime wiring
 
-Each algorithm in the selected profile runs as a fully independent worker thread (`main.py:_run_worker`):
-  * Own `PositionTracker(algo=...)` — DB rows partitioned by the `algo` column.
-  * Own `RiskManager(tracker, params)` — caps come from the algorithm's params.
-  * Own poll cadence (`params.poll_interval_seconds`).
-  * Own paper bankroll (per-algo row in `paper_account`).
-  * Own daily-summary thread tagged with the algo name.
-  * A crash in one algorithm does not affect the others.
+### Per-algorithm worker (`main.py:_run_worker`)
 
-The shared CLOB client is built **once**, and only if at least one enabled algorithm is `Mode.LIVE`. If an algorithm declares `LIVE` but no client/creds exist, the worker falls back to paper to avoid silently mis-routing real-money orders.
+Each enabled algorithm gets a daemon thread with its own `PositionTracker`
+(rows partitioned by `algo`), `RiskManager` built from that algorithm's
+params, poll cadence, and paper bankroll (a per-algo row in
+`paper_account`). Exceptions inside poll/dispatch are caught and logged so
+one algorithm can't kill another; after `CRASH_ALERT_AFTER_N_ERRORS`
+consecutive failures the worker posts a Discord instability alert.
 
-### Trade lifecycle (copy_trade)
+The CLOB client is built **once** in `main`, and only if at least one
+enabled algorithm is `Mode.LIVE`.
 
-1. `CopyTradeAlgorithm.poll()` fetches the target's recent activity (Data API), dedupes by tx hash, and classifies each new row.
-2. It translates each into an `Intent` and yields it:
-   * **BUY** → `OpenIntent`. Looks up the target's *total* holding in the market, maps it to a tier, and tops our position up so its total cost equals the tier target. Skips if below tier-1 floor or if the top-up is under the min order.
-   * **SELL** → `CloseIntent`. Resizes our position down to the target's post-sell tier (uses a cached pre-sell holding to compute the fraction; cache miss → full close).
-   * **MERGE** → `CloseIntent(fraction=1.0)`. Target exited via complementary YES+NO redemption → full close, no slippage gate.
-   * **REDEEM** → `SettleIntent`. Market resolved → settle at the canonical close price.
-3. `runner.dispatch()` executes the intent: risk check → slippage gate → place order (or simulate in paper) → record position → Discord notify.
-4. Periodically (live only) `reconciliation.reconcile_positions()` diffs the DB against on-chain holdings and warns on ghost/stale/divergent positions.
+Live-only reconciliation runs at startup and then every
+`RECONCILE_EVERY_N_POLLS` (30) polls — ~10 min at the default 20s cadence.
+Failures only log; they never abort the worker.
 
-## Key Configuration
+### Profile-level threads (not per-worker)
 
-### Bot-wide infrastructure (`.env` / `.env.<profile>`, read by `bot/config.py`)
+Started once by `main`, aggregating all algorithms in the profile:
+daily summary at midnight (profile summary webhook), liveness heartbeat
+(`HEARTBEAT_INTERVAL_HOURS`, default 6, `0` disables), and a weekly signal
+digest on Sundays.
+
+### Trade lifecycle
+
+`algorithms/copy_trade/design.md` is the detailed spec — tier model, the
+four signal types, state, edge cases. In short: `poll()` classifies target
+activity into BUY → `OpenIntent` (top up to the tier implied by the
+target's *total* holding), SELL → `CloseIntent` (resize to the post-sell
+tier), MERGE → `CloseIntent(fraction=1.0)` (no slippage gate), REDEEM →
+`SettleIntent`. `runner.dispatch()` then does risk check → slippage gate →
+order or paper fill → DB write → notify.
+
+Note `design.md` was written before ranked multi-leader mode and doesn't
+cover watchlists, consensus, or copy lots.
+
+### insider_flow
+
+Detects the documented insider fingerprint: **fresh wallets making large
+first bets at long odds.** Polls the platform-wide Data-API `/trades`
+firehose (cash-filtered server-side), screens markets against Gamma
+category/tags (sports = gambling, not signal) and a time-value gate (must
+resolve soon and out-earn an index fund for the wait — unknown end date
+fails closed), then vets each candidate wallet's age/history via one
+`/activity` page (unverifiable wallets are *not* copied — fail closed).
+Survivors are buffered for a window, ranked by conviction score, and only
+the top N are copied. Exits at market resolution via a periodic Gamma
+sweep. Its `max_slippage` default (0.10) is deliberately wider than
+copy_trade's — these signals move fast. Defaults are sized for a **~$20
+prod bankroll**; scale via the profile TOML when capital grows.
+
+## Environment variables (`bot/config.py`)
 
 | Variable | Notes |
 |---|---|
-| `PROFILE` | Selects `config/<name>.toml` and prefers `.env.<profile>`. **Required** — no default; the bot refuses to boot without it. |
-| `DB_PATH` | SQLite file path (default `data/positions.db`; an existing legacy `./positions.db` keeps working with a warning) |
-| `DISCORD_WEBHOOK_URL` | Optional override — webhooks normally resolve from `config/webhooks.toml` by PROFILE |
-| `TIMEZONE` | Daily-summary rollover tz (default `America/Los_Angeles`) |
-| `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is your Polymarket **proxy wallet** (from the profile URL) and is required for live — without it orders sign correctly but debit the wrong account. |
+| `PROFILE` | Selects `config/<name>.toml`, prefers `.env.<profile>`. Required. |
+| `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is the Polymarket **proxy wallet** (from the profile URL) — without it orders sign correctly but debit the wrong account. |
+| `DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` | Slash-command bot. Unset → bot silently disabled, webhooks unaffected. Guild ID gives instant command registration vs. ~1h global. |
+| `DB_PATH` | Default `data/positions.db`; a legacy `./positions.db` still works with a warning. |
+| `HEARTBEAT_INTERVAL_HOURS` | Default 6; `0` disables the liveness ping. |
+| `TIMEZONE` | Daily-summary rollover (default `America/Los_Angeles`). |
+| `DISCORD_WEBHOOK_URL` | Escape hatch that beats the registry for every profile — normally unset. |
+| `POLY_SIGNATURE_TYPE` | Default 3 (smart-wallet EIP-1271). |
 
-### Per-algorithm settings (`config/<profile>.toml`)
+### Webhook routing (`config/webhooks.toml`)
 
-All algorithm behavior is declared in the profile TOML — env vars are **not** read for algorithm params. Each `[[algorithm]]` block sets `type` (registry key), `name` (DB partition key — keep stable once set; renaming orphans its bankroll/history), `mode` (`"paper"`/`"live"`, always explicit), and an optional `[algorithm.params]` table; omitted knobs use schema defaults.
+Two resolvers with **different matching rules** — a common source of
+confusion:
 
-The knob schemas (names, defaults, docs, boot-time `validate()`) live in `algorithms/<type>/params.py`. Don't enumerate them here — discover them with:
+- `resolve_summary_webhook(profile)` matches a block with
+  `type = "summary"` and `profile = "<name>"` (singular). Both committed
+  blocks are this kind.
+- `resolve_webhook(profile)` (→ `config.DISCORD_WEBHOOK_URL`) matches a
+  block whose `profiles` **list** contains the profile. No committed block
+  has that key, so this currently resolves to `""` unless
+  `DISCORD_WEBHOOK_URL` is set in env.
 
-```bash
-python -m bot.params copy_trade       # or insider_flow
-python -m bot.params --effective      # what $PROFILE actually resolves to
-```
+Per-trade alerts therefore come from each algorithm's `webhook_url` param
+in the profile TOML, not from the registry. Don't "fix" an empty
+`DISCORD_WEBHOOK_URL` by assuming the registry is broken.
 
-The loader fails fast at boot on unknown keys, duplicate names, bad modes, and `validate()` violations — a typo in a TOML key is a crash, never a silent no-op.
+## Database schema (SQLite)
 
-**insider_flow** detects the documented insider fingerprint: **fresh wallets making large first bets at long odds**. Polls the platform-wide Data-API `/trades` firehose (cash-filtered server-side), screens markets against Gamma category/tags (sports = gambling, not signal) and a time-value gate (must resolve soon and out-earn an index fund for the wait — unknown end date fails closed), then vets each candidate wallet's age/history via one `/activity` page (unverifiable wallets are *not* copied — fail closed). Survivors are buffered for a window, ranked by conviction score, and only the top N are copied. Exits at market resolution via a periodic Gamma sweep. Its `max_slippage` default (0.10) is deliberately wider than copy_trade's — these signals move fast. Defaults are sized for a **~$20 prod bankroll** — scale via the profile TOML when capital grows.
-
-### Discovery price archiver
-
-```bash
-python -m discovery.archive --once             # one pass (cron-friendly)
-python -m discovery.archive --loop --every 3600
-```
-
-Snapshots CLOB `/prices-history` for active top-volume, recently-closed, and whale-touched markets into `discovery_archive.db` (own SQLite file, gitignored). **The public API drops price history once markets resolve**, so this should run continuously — it's the raw material for copy-execution backtests and insider lead-lag analysis. Research context lives in `research/discovery_plan.md` and `research/implementation_plan.md`.
-
-## External APIs
-
-| API | Base URL | Used For |
-|---|---|---|
-| Gamma | `https://gamma-api.polymarket.com` | Username → proxy wallet (`/profiles`); market resolution (`/markets`) |
-| Data | `https://data-api.polymarket.com` | Trade history (`/activity`), current positions (`/positions`) |
-| CLOB | `https://clob.polymarket.com` | Order placement, last-trade price |
-
-## Database Schema (SQLite)
-
-Thread-local connections, WAL mode. All rows are partitioned by an `algo` column so multiple algorithms share one DB without collisions.
+Thread-local connections, WAL mode. Rows are partitioned by an `algo`
+column so multiple algorithms share one DB without collisions.
 
 - `positions` — open positions, PK `(market_id, paper, algo)`
 - `trade_log` — all executed trades (BUY/SELL/REDEEM), tagged with `algo`
-- `daily_stats` — per-(date, algo) realized P&L
+- `daily_stats` — per-`(date, algo)` realized P&L
 - `paper_account` — virtual cash balance, PK `algo`
-- `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON captured at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data for confidence models — log raw observables, never derived scores.
-- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Lets `bot.report` attribute results to the exact config version that produced them.
+- `copy_lots` — leader-attributed fills behind an aggregated position
+- `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
+- `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
+- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Lets `bot.report` attribute results to the config version that produced them.
 
-`db._migrate()` upgrades older v0/v1 databases in place (adds `paper`/`algo` columns, repartitions PKs) idempotently.
+`db._migrate()` upgrades older v0/v1 databases in place (adds
+`paper`/`algo` columns, repartitions PKs) idempotently.
 
-## Discord Bot (slash commands)
+The archiver uses a **separate** DB (`data/discovery_archive.db`):
+`price_history` and `tracked_markets`, both with natural PKs.
 
-Two-way interface — runs as a daemon thread alongside workers. Each profile (prod / experimental) runs its own bot instance; Discord shows them separately in the slash-command picker by application name.
+## External APIs
 
-**Commands:**
+| API | Base URL | Used for |
+|---|---|---|
+| Gamma | `https://gamma-api.polymarket.com` | Username → proxy wallet (`/profiles`); market resolution + tags (`/markets`) |
+| Data | `https://data-api.polymarket.com` | Trade history (`/activity`), positions (`/positions`), platform firehose (`/trades`) |
+| CLOB | `https://clob.polymarket.com` | Order placement, last-trade price, `/prices-history` |
+
+## Discord bot
+
+Runs as a **standalone process** (`scripts/run_discord_bot.py`, tmux
+session `discord`) — *not* a thread inside `main.py`. It loads every
+available profile, so one bot and one token cover all of them. If a worker
+crashes the bot stays up; if the bot crashes the workers keep trading.
+
 | Command | Description |
 |---|---|
 | `/status` | All algorithms: mode, exposure, today's P&L |
-| `/positions [algo]` | Open positions, optionally filtered by algo name |
+| `/positions [algo]` | Open positions, optionally filtered by algo |
 | `/pnl` | Realized P&L + exposure per algo and combined |
-| `/summary` | Send the daily summary to the summary channel immediately |
+| `/summary` | Send the daily summary immediately |
+| `/restart` | git pull + `setup_vm.sh` on the VPS — **admin permission required** |
 
-Runs in its own tmux session (`discord`) independent of the trading workers — one bot, one token, all profiles. If a worker crashes the bot stays up; if the bot crashes the workers keep trading.
+One-time setup: [discord.com/developers](https://discord.com/developers) →
+New Application → Bot → Reset Token; OAuth2 URL Generator with scopes
+`bot` + `applications.commands` and permissions `Send Messages` +
+`Use Slash Commands`; then put `DISCORD_BOT_TOKEN` and `DISCORD_GUILD_ID`
+in the VPS `.env` and redeploy.
 
-**One-time setup:**
-1. [discord.com/developers](https://discord.com/developers) → **New Application** (one bot total, e.g. "Polymarket Bot") → **Bot** → Reset Token → copy it
-2. **OAuth2** → URL Generator → scopes: `bot` + `applications.commands` → bot permissions: `Send Messages`, `Use Slash Commands` → open invite URL → add to server
-3. Add to the shared `.env` on the VPS:
-   ```
-   DISCORD_BOT_TOKEN=<token>
-   DISCORD_GUILD_ID=<server-id>   # right-click server → Copy Server ID (needs Developer Mode on)
-   ```
-4. Deploy via `setup_vm.sh` — the `discord` session starts automatically.
+## Test conventions (`tests/conftest.py`)
 
-Without `DISCORD_BOT_TOKEN` the bot is silently disabled; webhooks for trade alerts and daily summaries still work normally.
-
-## Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in values (or create .env.<profile> per profile)
-```
-
-## Testing
-
-```bash
-source .venv/bin/activate
-pytest                  # full suite
-pytest tests/test_copy_trade.py
-```
-
-## Deployment
-
-Runs on a VPS (plain Python process under a virtualenv; Docker has been removed).
-
-**Host:** `opc@148.116.94.154`  
-**SSH key:** `~/.ssh/ssh-key-2026-05-31.key`  
-**Repo path on VPS:** `~/Polymarket/`
-
-```bash
-# Interactive shell
-ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154
-
-# Run a command remotely without opening a shell
-ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154 '<command>'
-
-# Full redeploy (pull, deps, env hygiene, validate, restart all tmux sessions)
-ssh -i ~/.ssh/ssh-key-2026-05-31.key opc@148.116.94.154 'bash ~/Polymarket/scripts/setup_vm.sh'
-```
-
-The three tmux sessions on the VPS:
-
-| Session | Profile | What runs |
-|---|---|---|
-| `prod` | `PROFILE=prod` | copy_trade (live) |
-| `paper` | `PROFILE=experimental` | insider_flow (paper) |
-| `archive` | — | discovery price archiver |
-| `discord` | — | Discord bot (all profiles, slash commands) |
-
-```bash
-# Attach to a session (Ctrl-b d to detach)
-tmux attach -t prod
-tmux attach -t paper
-tmux attach -t archive
-```
-
-Persist `data/positions.db` and `.env` (5 `POLY_*` secrets) on the host — both are gitignored and must not be wiped between deploys.
+- Use a **real** SQLite DB via tempfile — no DB mocking. The real engine
+  catches PRAGMA/index/migration bugs a mock would hide.
+- Use real `RiskManager`, `PositionTracker`, `Trade`. **The only thing
+  stubbed is the HTTP boundary** (Polymarket API).
+- Each test gets a fresh DB; tracker fixtures are bound to the
+  `copy_trade` algo namespace.
+- `conftest.py` puts the repo root on `sys.path`, which depends on
+  `pytest.ini` staying at the repo root (it sets rootdir).
