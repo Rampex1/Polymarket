@@ -1,50 +1,81 @@
 # Polymarket Copy-Trading Bot
 
-Runs pluggable trading strategies against Polymarket: mirroring profitable
-wallets (`copy_trade`) and copying suspicious fresh-wallet whale bets
-(`insider_flow`). Per-algorithm paper/live modes, tiered bet sizing, risk
-limits, Discord notifications, and signal logging for later modeling.
+An automated trading bot for Polymarket. The goal is to make money on
+prediction markets — and to know, from the record it keeps, whether it
+actually is.
 
-The thesis behind `copy_trade`: only copy *high-conviction* positions —
-sizing keys off the target's **absolute holding** in a market (default floor
-$80k), not their per-trade size.
-
-## How it works
-
-1. **Profile** — `PROFILE` selects `config/<profile>.toml`, which declares the algorithms to run; each runs in its own worker thread with its own risk pool and (paper) bankroll
-2. **Detect** — each algorithm polls a Polymarket API (a target's activity, or the platform-wide trade firehose) and yields intents
-3. **Size + risk check** — tier sizing off the target's *total holding*; per-position, total-exposure, and daily-loss caps enforced before every order
-4. **Execute** — paper simulation, or market (FAK) / limit (GTC) orders via the CLOB API
-5. **Track + notify** — positions, P&L, and signal features in SQLite; Discord alerts, daily summary, and a weekly signal digest
+Strategies are pluggable and each one runs as an independent worker with
+its own risk limits, bankroll, and paper-or-live mode, so a new idea can be
+validated on paper alongside real trading in the same process. Every
+position, fill, and signal lands in SQLite for later review.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    Profile["Profile TOML"] --> Main["main.py"]
-    Secrets["Environment secrets"] --> Main
-    Main --> Copy["copy_trade worker"]
-    Main --> Insider["insider_flow worker"]
+flowchart TB
+    subgraph cfg["Config"]
+        TOML["config/{profile}.toml"]
+        WH["config/webhooks.toml"]
+        ENV[".env — POLY_* secrets"]
+    end
 
-    Copy --> DataAPI["Polymarket Data API"]
-    Insider --> DataAPI
-    Copy --> Intents["Open / Close / Settle intents"]
-    Insider --> Intents
-    Intents --> Runner["Shared runner"]
+    subgraph trader["main.py — one process per PROFILE"]
+        Loader["profile_loader<br/>fail-fast validation"]
+        WA["worker: copy_trade"]
+        WB["worker: insider_flow"]
+        Runner["runner.dispatch<br/>risk caps · slippage gate"]
+        Exec["live: CLOB order<br/>paper: simulated fill"]
+        Recon["reconciliation<br/>live only, every 30 polls"]
+        Sched["daily summary · heartbeat<br/>weekly signal digest"]
+    end
 
-    Runner --> Risk["Risk manager"]
-    Risk --> Execution["Paper fills or CLOB orders"]
-    Execution --> DB["SQLite: positions, trades, signals, runs"]
-    Runner --> Discord["Discord alerts and summaries"]
-    Copy --> Gamma["Gamma market resolution"]
-    Insider --> Gamma
+    subgraph archiver["discovery.archive — separate process"]
+        Snap["price-history snapshots"]
+    end
+
+    subgraph dbot["run_discord_bot.py — separate process"]
+        Slash["slash commands<br/>/status /positions /pnl /summary /restart"]
+    end
+
+    Data["Data API<br/>activity · trades · positions"]
+    Gamma["Gamma API<br/>markets · profiles"]
+    CLOB["CLOB API<br/>orders · prices-history"]
+    PDB[("data/positions.db")]
+    ADB[("data/discovery_archive.db")]
+    Discord["Discord"]
+
+    TOML --> Loader
+    ENV --> Loader
+    Loader --> WA
+    Loader --> WB
+
+    Data --> WA
+    Data --> WB
+    Gamma --> WA
+    Gamma --> WB
+
+    WA -- "Intents: Open / Close / Settle" --> Runner
+    WB -- "Intents: Open / Close / Settle" --> Runner
+    Runner --> Exec
+    Runner -- "every signal, executed or skipped" --> PDB
+    Exec --> CLOB
+    Exec --> PDB
+    Exec --> Discord
+
+    Recon <--> Data
+    Recon --> PDB
+    Sched --> PDB
+    Sched --> Discord
+    WH --> Discord
+
+    Snap --> CLOB
+    Snap --> ADB
+
+    Slash --> PDB
+    Slash --> Discord
 ```
 
-Each configured algorithm gets its own worker thread, risk limits, polling
-cadence, and paper bankroll; a crash in one doesn't affect the others. The
-shared runner is the only layer that turns an intent into a simulated or
-live order. Adding a strategy means subclassing `Algorithm`, registering it
-in `algorithms/__init__.py:REGISTRY`, and naming it in a profile TOML.
+## Repo map
 
 ```
 main.py        entry point — one worker thread per enabled algorithm
@@ -58,44 +89,8 @@ research/      strategy plans and paper-phase notes
 data/          SQLite files — gitignored
 ```
 
-## Ranked multi-leader copy
-
-`copy_trade` can follow a scored cohort of wallets instead of one target.
-`watchlist_size = 0` (the default) keeps legacy single-target mode.
-
-```mermaid
-flowchart TD
-    Leaderboard["Public Polymarket leaderboards"] --> Import["Offline history importer"]
-    ClosedPositions["Old binary closed positions"] --> Import
-    Dune["Optional normalized Dune CSV"] --> Import
-    Import --> History["SQLite resolved-bet history"]
-
-    History --> Rank["Confidence-adjusted wallet ranker"]
-    Rank --> Persist{"Early and late\nperiods agree?"}
-    Persist -- "yes" --> Watchlist["Active top-X watchlist"]
-    Persist -- "no" --> Hold["Keep prior watchlist inactive"]
-
-    Watchlist --> Poll["Poll each active leader"]
-    Poll --> Deduplicate["Deduplicate and classify events"]
-    Deduplicate --> Consensus{"Enough leaders buy\nthe same outcome in window?"}
-    Consensus -- "yes" --> Open["Attributed OpenIntent"]
-    Consensus -- "no" --> Skip["Skip signal"]
-
-    Open --> Runner["Shared runner: size, risk, execution"]
-    Runner --> Lots["Per-leader copy lots"]
-    Lots --> Exit["Leader sell / merge / settlement"]
-    Exit --> Runner
-```
-
-Copied fills are tracked as per-leader *lots*, so one leader's exit only
-unwinds that leader's share while the aggregate position stays intact for
-accounting and execution.
-
-The public importer (`scripts/import_polymarket_wallet_history.py`) is
-deliberately a paper-testing seed: it only uses old, binary closed-position
-prices and does not prove the original execution was copyable.
-Dune-normalized fill history (`scripts/import_wallet_history.py`) remains
-the stronger source for research and any future live review.
+Adding a strategy means subclassing `Algorithm`, registering it in
+`algorithms/__init__.py:REGISTRY`, and naming it in a profile TOML.
 
 ## Setup
 
