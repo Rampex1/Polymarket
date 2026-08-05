@@ -28,6 +28,10 @@ responsibilities, runtime wiring, and the DB schema.
   they go stale. `python -m bot.params <type>` is the source of truth.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only. Behavior changes are TOML edits.
+- **One `.env`, shared by every profile.** Per-profile env files are not
+  read and `setup_vm.sh` deletes any it finds. Don't reintroduce a
+  `.env.<profile>` fallback: paper's safety comes from the `allow_live`
+  gate, and a second env file only adds a way to shadow the real one.
 - **The loader fails fast** on unknown keys, duplicate names, bad modes, and
   `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
@@ -138,7 +142,7 @@ prod bankroll**; scale via the profile TOML when capital grows.
 
 | Variable | Notes |
 |---|---|
-| `PROFILE` | Selects `config/<name>.toml`, prefers `.env.<profile>`. Required. |
+| `PROFILE` | Selects `config/<name>.toml`. Required. |
 | `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is the Polymarket **proxy wallet** (from the profile URL) — without it orders sign correctly but debit the wrong account. |
 | `DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` | Slash-command bot. Unset → bot silently disabled, webhooks unaffected. Guild ID gives instant command registration vs. ~1h global. |
 | `DB_PATH` | Default `data/positions.db`; a legacy `./positions.db` still works with a warning. |

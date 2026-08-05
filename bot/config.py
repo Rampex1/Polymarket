@@ -23,12 +23,15 @@ Profiles
 A "profile" is the bundle of algorithms a given process runs. Pick one at
 startup via the `PROFILE` env var — there is deliberately no default: the
 bot refuses to boot without an explicit profile, so paper config can never
-be confused with live. This file looks for `.env.<profile>` first and
-falls back to `.env`, so each profile can have its own credentials, DB
-path, Discord channel, etc.
+be confused with live.
 
-    PROFILE=prod          python main.py     # loads .env.prod
-    PROFILE=experimental  python main.py     # loads .env.experimental
+    PROFILE=prod          python main.py
+    PROFILE=experimental  python main.py
+
+Secrets come from a single `.env` regardless of profile. Per-profile env
+files are deliberately unsupported: paper's inability to touch real money
+is enforced by the `allow_live` gate in the profile TOML, not by which
+credentials happen to be on disk.
 """
 
 import os
@@ -45,13 +48,10 @@ from dotenv import load_dotenv
 # like `python -m bot.params copy_trade` still works without a profile.
 PROFILE: str = os.getenv("PROFILE", "")
 
-# Load .env.<profile> if it exists, otherwise fall back to plain .env.
-# `override=True` so a stale shell env doesn't shadow file values.
-_candidates = ([f".env.{PROFILE}"] if PROFILE else []) + [".env"]
-for _candidate in _candidates:
-    if os.path.exists(_candidate):
-        load_dotenv(_candidate, override=True)
-        break
+# One .env for every profile. `override=True` so a stale shell env doesn't
+# shadow file values.
+if os.path.exists(".env"):
+    load_dotenv(".env", override=True)
 
 
 # ── Polymarket API base URLs ─────────────────────────────────────────────────

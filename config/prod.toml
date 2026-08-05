@@ -1,5 +1,5 @@
 # Prod profile — REAL MONEY. Loaded with PROFILE=prod (POLY_* creds come
-# from .env / .env.prod; this file holds behavior only — never secrets).
+# from the single shared .env; this file holds behavior only — never secrets).
 #
 # Keep this list short and conservative. Mode must be explicit on every
 # block; promote a paper variant by copying its block from

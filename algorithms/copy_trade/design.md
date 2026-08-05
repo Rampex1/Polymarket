@@ -162,8 +162,9 @@ Two instances of `CopyTradeAlgorithm` in the same process — say, one in
 `Mode.LIVE` for prod and another in `Mode.PAPER` for an experiment — write
 to different `algo` namespaces in the same SQLite file. They never touch
 each other's positions, trade log, or paper bankroll. For full process
-separation, give each profile its own `DB_PATH` in `.env.<profile>` (see
-the top-level README and the profile bundle in `algorithms/profiles/`).
+separation, set `DB_PATH` in the environment of the process you want
+isolated — there is one shared `.env`, so per-profile DB paths have to come
+from the launching shell rather than a `.env.<profile>` file.
 
 ---
 

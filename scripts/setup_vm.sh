@@ -31,9 +31,16 @@ if [ -f positions.db ] && [ ! -f data/positions.db ]; then
 fi
 
 echo "==> Env hygiene"
-# Obsolete since webhooks moved to config/webhooks.toml — a leftover
-# .env.experimental shadows .env and its stale webhook overrides the registry.
-rm -f .env.experimental
+# All secrets live in a single .env. Per-profile env files are no longer
+# read by bot/config.py, so a leftover one is dead weight that looks live —
+# delete it rather than let someone edit it and wonder why nothing changed.
+for stale in .env.*; do
+    case "$stale" in
+        '.env.*'|.env.example|*.bak) continue ;;
+    esac
+    echo "    removing unsupported ${stale} (all secrets belong in .env)"
+    rm -f "$stale"
+done
 if [ ! -f .env ]; then
     echo "ERROR: .env missing — create it with the five POLY_* secrets (see .env.example)." >&2
     exit 1
@@ -42,8 +49,8 @@ for key in POLY_PRIVATE_KEY POLY_FUNDER_ADDRESS POLY_API_KEY POLY_API_SECRET POL
     grep -q "^${key}=" .env || { echo "ERROR: ${key} missing from .env." >&2; exit 1; }
 done
 # .env is secrets-only. A DISCORD_WEBHOOK_URL here would override the
-# registry for EVERY profile (paper falls back to .env too, so paper
-# alerts would land in the prod channel). Other keys below are dead
+# registry for EVERY profile (there is one shared .env, so paper alerts
+# would land in the prod channel). Other keys below are dead
 # since the TOML refactor; POLY_SIGNATURE_TYPE only goes if it restates
 # the default (3).
 for key in DISCORD_WEBHOOK_URL TARGET_ADDRESS COPYTRADE_TARGET_ADDRESS TIMEZONE; do
