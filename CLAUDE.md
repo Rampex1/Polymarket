@@ -4,14 +4,28 @@
 
 - After implementing changes, **commit automatically** (no need to ask).
 - **Do not push** until the user explicitly says to.
+- **Keep comments short.** Write one only when the code can't say it itself —
+  a non-obvious constraint, a why, a gotcha that would otherwise be
+  rediscovered the hard way. Never restate the line below it.
 
 ## Start with the README
 
 `README.md` is the developer-facing doc and is **not duplicated here**:
-project overview, setup, configuration model, running, testing, deployment,
-and monitoring all live there. Read it first. This file covers what an agent
+architecture, repo map, setup + configuration, testing, deployment, and what
+each Discord command reports. Read it first. This file covers what an agent
 working *inside* the code needs on top of that — invariants, module
 responsibilities, runtime wiring, and the DB schema.
+
+The README was deliberately trimmed, so a few operational commands now live
+only here:
+
+```bash
+PROFILE=<name> python main.py                   # run one profile's workers
+python -m discovery.archive --once              # archiver: one pass (cron-friendly)
+python -m discovery.archive --loop --every 3600 # archiver: long-running
+python -m bot.params <type> | --effective       # knob schemas / resolved config
+python -m bot.report                            # per-algo P&L, skip reasons, win rate vs odds
+```
 
 ## Invariants — don't break these
 
@@ -76,7 +90,7 @@ algorithms/
     params.py             # InsiderFlowParams — pure schema
 discovery/archive.py      # Price-history archiver (CLOB drops history at resolution — hoard it)
 scripts/
-  setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual
+  setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   ssh_vm.sh               # SSH into the VPS
   run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
   import_wallet_history.py            # Dune CSV → normalized resolved-bet history
