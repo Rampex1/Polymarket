@@ -95,3 +95,8 @@ class CopyTradeParams:
             raise ValueError("consensus requires at least two leaders and a multiplier of at least one.")
         if self.max_concurrent_positions <= 0:
             raise ValueError("max_concurrent_positions must be positive.")
+        if not self.webhook_url:
+            raise ValueError(
+                "webhook_url is required — there is no global fallback, so an "
+                "algorithm without one would trade without ever notifying."
+            )

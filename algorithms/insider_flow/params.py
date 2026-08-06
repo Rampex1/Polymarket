@@ -101,3 +101,8 @@ class InsiderFlowParams:
             raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
         if self.min_cash_size_usdc <= 0:
             raise ValueError("min_cash_size_usdc must be positive.")
+        if not self.webhook_url:
+            raise ValueError(
+                "webhook_url is required — there is no global fallback, so an "
+                "algorithm without one would trade without ever notifying."
+            )

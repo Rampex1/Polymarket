@@ -1,15 +1,3 @@
-# Discord webhook registry — summary channels (one per profile).
-#
-# These are profile-level daily summary webhooks, distinct from the
-# per-algorithm trade-alert webhooks (set via `webhook_url` in each
-# [[algorithm]] block in the profile TOMLs).
-#
-# Routing: `bot/config.resolve_summary_webhook(profile)` iterates blocks
-# looking for type = "summary" + profile = <name>.
-#
-# Webhook URLs are write-access secrets. Committed only because repo is
-# PRIVATE — rotate before ever making it public; URLs live in git history.
-
 [experimental_summary]
 url = "https://discord.com/api/webhooks/1515201934989201529/vHLKKcHC9XPWzxc7Ldefwivf37EuuVLOz3LV_gxCBipFd4QzjMXixozGDoYmjRd7G9zR"
 type = "summary"

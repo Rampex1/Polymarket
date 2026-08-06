@@ -76,6 +76,7 @@ name = "ct"
 mode = "paper"
 [algorithm.params]
 target_address = "0xabc"
+webhook_url = "http://hook"
 """
 
 
@@ -86,6 +87,7 @@ name = "ct_live"
 mode = "live"
 [algorithm.params]
 target_address = "0xabc"
+webhook_url = "http://hook"
 """
 
 
@@ -178,6 +180,7 @@ name = "if"
 mode = "paper"
 [algorithm.params]
 exclude_title_patterns = ["foo", "bar"]
+webhook_url = "http://hook"
 """
     name, d = _write_profile(tmp_path, body)
     (algo,) = load_profile(name, REGISTRY, config_dir=d)

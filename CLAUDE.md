@@ -178,8 +178,8 @@ prod bankroll**; scale via the profile TOML when capital grows.
 Two independent paths, no global fallback between them:
 
 - **Trade alerts** come from each algorithm's own `webhook_url` param in
-  the profile TOML. An algorithm without one does not notify — silently.
-  `notifier.send()` returns early on an empty URL.
+  the profile TOML, which `validate()` requires — a block without one is a
+  boot-time `ProfileError`, not a silently muted algorithm.
 - **Profile summaries** (daily, heartbeat, weekly digest) come from
   `config/webhooks.toml` via `resolve_summary_webhook(profile)`, matching a
   block with `type = "summary"` and `profile = "<name>"`.

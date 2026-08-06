@@ -49,28 +49,25 @@ def _run_worker(
 ) -> None:
     """One algorithm's lifecycle: setup → poll loop → shutdown."""
     name = algo.params.name
-    # A live algorithm without a client can't reach here — main() exits first.
     paper = algo.params.mode == Mode.PAPER
 
     try:
         tracker = PositionTracker(algo=name)
         if paper:
             tracker.init_paper_balance(algo.params.paper_starting_balance)
-        # Provenance: stamp this boot's resolved params + git sha into the
-        # runs table so analytics can attribute results to config versions.
         runs.record_run(algo.params, config.PROFILE)
         risk = RiskManager(tracker, algo.params)
         algo.setup(tracker)
 
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url
+
         notifier.on_startup(
             "PAPER" if paper else "LIVE",
             tracker.total_exposure_usdc(paper=paper),
             algo_name=display_name,
             webhook_url=webhook_url,
         )
-
         logger.info(
             "[%s] Started (%s) — poll every %ds | risk: per-position $%.2f, "
             "total $%.2f, daily loss $%.2f | slippage %.0f%% | order=%s",
@@ -159,9 +156,7 @@ def _start_profile_summary(
         )
         return
 
-    algo_infos = [
-        (a.params.name, a.params.mode == Mode.PAPER) for a in algos
-    ]
+    algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in algos]
 
     def _loop() -> None:
         while True:
@@ -219,9 +214,7 @@ def main() -> None:
     # Declaring live and quietly trading paper is the worst outcome: the
     # operator believes real money is at work. Refuse to start instead.
     if any_live and client is None:
-        live = ", ".join(
-            a.params.name for a in ENABLED if a.params.mode == Mode.LIVE
-        )
+        live = ", ".join(a.params.name for a in ENABLED if a.params.mode == Mode.LIVE)
         raise SystemExit(
             f'error: {live} declared mode="live" but no CLOB client could be '
             "built — see the error above (POLY_PRIVATE_KEY and "
@@ -266,10 +259,7 @@ def main() -> None:
     # Heartbeat — periodic liveness ping to the summary channel.
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
-        algo_infos = [
-            (a.params.name, a.params.mode == Mode.PAPER)
-            for a in ENABLED
-        ]
+        algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
         notifier.start_heartbeat(
             algo_infos,
             summary_webhook,
@@ -281,10 +271,7 @@ def main() -> None:
     # Weekly signal performance digest — posts every Sunday to the same channel.
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook:
-        algo_infos = [
-            (a.params.name, a.params.mode == Mode.PAPER)
-            for a in ENABLED
-        ]
+        algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
         notifier.start_weekly_digest(
             algo_infos, summary_webhook, stop_event, profile=config.PROFILE
         )
