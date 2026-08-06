@@ -171,25 +171,18 @@ prod bankroll**; scale via the profile TOML when capital grows.
 | `DB_PATH` | Default `data/positions.db`. |
 | `HEARTBEAT_INTERVAL_HOURS` | Default 6; `0` disables the liveness ping. |
 | `TIMEZONE` | Daily-summary rollover (default `America/Los_Angeles`). |
-| `DISCORD_WEBHOOK_URL` | Escape hatch that beats the registry for every profile — normally unset. |
 | `POLY_SIGNATURE_TYPE` | Default 3 (smart-wallet EIP-1271). |
 
-### Webhook routing (`config/webhooks.toml`)
+### Webhook routing
 
-Two resolvers with **different matching rules** — a common source of
-confusion:
+Two independent paths, no global fallback between them:
 
-- `resolve_summary_webhook(profile)` matches a block with
-  `type = "summary"` and `profile = "<name>"` (singular). Both committed
-  blocks are this kind.
-- `resolve_webhook(profile)` (→ `config.DISCORD_WEBHOOK_URL`) matches a
-  block whose `profiles` **list** contains the profile. No committed block
-  has that key, so this currently resolves to `""` unless
-  `DISCORD_WEBHOOK_URL` is set in env.
-
-Per-trade alerts therefore come from each algorithm's `webhook_url` param
-in the profile TOML, not from the registry. Don't "fix" an empty
-`DISCORD_WEBHOOK_URL` by assuming the registry is broken.
+- **Trade alerts** come from each algorithm's own `webhook_url` param in
+  the profile TOML. An algorithm without one does not notify — silently.
+  `notifier.send()` returns early on an empty URL.
+- **Profile summaries** (daily, heartbeat, weekly digest) come from
+  `config/webhooks.toml` via `resolve_summary_webhook(profile)`, matching a
+  block with `type = "summary"` and `profile = "<name>"`.
 
 ## Database schema (SQLite)
 

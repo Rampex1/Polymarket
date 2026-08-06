@@ -12,18 +12,17 @@ import pytest
 from tests.conftest import make_trade
 
 
+HOOK = "https://discord.com/api/webhooks/123/abc"
+
+
 @pytest.fixture
 def capture_send(monkeypatch):
     """Capture every Discord webhook POST body so we can assert on it."""
     from bot import notifier
 
-    sent = []
+    monkeypatch.setattr(notifier.config, "DISCORD_BOT_TOKEN", "")
 
-    monkeypatch.setattr(
-        notifier.config,
-        "DISCORD_WEBHOOK_URL",
-        "https://discord.com/api/webhooks/123/abc",
-    )
+    sent = []
 
     def fake_post(url, json=None, timeout=None):
         sent.append(json or {})
@@ -44,7 +43,7 @@ def test_markdown_escape_question_with_special_chars(capture_send):
     from bot import notifier
 
     t = make_trade(question="A*B _foo_ wins?")
-    notifier.on_trade_detected(t)
+    notifier.on_trade_detected(t, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     # Escaped versions present, raw markdown chars absent in title section.
     assert r"\*" in body
@@ -55,7 +54,7 @@ def test_markdown_escape_in_reason_and_question(capture_send):
     from bot import notifier
 
     t = make_trade(question="*Yes_* wins?")
-    notifier.on_risk_blocked("max | limit", t)
+    notifier.on_risk_blocked("max | limit", t, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     # Both user-supplied strings (reason, question) get escaped.
     assert r"\*Yes\_\* wins?" in body
@@ -67,7 +66,7 @@ def test_markdown_escape_in_outcome(capture_send):
     from bot import notifier
 
     t = make_trade(outcome="*Yes_*", question="q")
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5)
+    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert r"\*Yes\_\*" in body
 
@@ -75,7 +74,7 @@ def test_markdown_escape_in_outcome(capture_send):
 def test_buy_executed_format(capture_send):
     from bot import notifier
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
+    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "📄 **PAPER BUY**" in body
     assert "$1.00" in body
@@ -88,7 +87,7 @@ def test_buy_executed_shows_shares_and_drift(capture_send):
     from bot import notifier
 
     t = make_trade(action="BUY", price=0.50, outcome="Yes")
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55)
+    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "1.82 shares" in body                  # 1.0 / 0.55
     assert "+10.0% slip" in body
@@ -115,7 +114,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
             "market_end_ts": time.time() + 7 * 86_400,
         },
     )
-    notifier.on_signal(intent, "insider_flow_paper")
+    notifier.on_signal(intent, "insider_flow_paper", webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "fresh wallet" in body
     assert "0.1d old" in body                     # 7200s ≈ 0.083d → 0.1
@@ -134,7 +133,7 @@ def test_signal_message_without_features_stays_compact(capture_send):
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         question="Q?", outcome="Yes", signal_id="s1",
     )
-    notifier.on_signal(intent, "copy_trade")
+    notifier.on_signal(intent, "copy_trade", webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "↳" not in body
 
@@ -142,15 +141,13 @@ def test_signal_message_without_features_stays_compact(capture_send):
 def test_skip_when_webhook_missing(monkeypatch):
     from bot import notifier
 
-    monkeypatch.setattr(notifier.config, "DISCORD_WEBHOOK_URL", "")
-
     posted = []
 
     def fake_post(*a, **kw):
         posted.append(1)
 
     monkeypatch.setattr(notifier.http, "post", fake_post)
-    notifier.send("hello")
+    notifier.send("hello")          # no webhook → no global fallback → no post
     assert not posted
 
 

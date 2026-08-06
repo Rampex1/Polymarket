@@ -34,14 +34,14 @@ _DISCORD_MAX_LEN = 2000
 
 
 def send(text: str, webhook_url: str = "") -> None:
-    """Fire-and-forget Discord webhook message. Silently skips if not configured.
+    """Fire-and-forget Discord webhook message.
 
-    `webhook_url` overrides the global config URL — pass the algorithm's
-    per-algo webhook so each algorithm posts to its own channel.
+    Each algorithm carries its own `webhook_url`; there is no global
+    fallback, so an algorithm without one simply doesn't notify.
     """
-    url = webhook_url or config.DISCORD_WEBHOOK_URL
-    if not url:
+    if not webhook_url:
         return
+    url = webhook_url
     try:
         http.post(url, json={"content": text[:_DISCORD_MAX_LEN]}, timeout=5)
     except Exception as e:
