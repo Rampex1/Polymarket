@@ -59,7 +59,7 @@ def send(text: str, webhook_url: str = "") -> None:
 def on_signal(intent, algo_name: str = "", webhook_url: str = "",
               paper: bool = False) -> None:
     """Generic detection notification — intent-based, works for any algorithm."""
-    from .algorithm import OpenIntent, CloseIntent, SettleIntent
+    from .domain.intents import OpenIntent, CloseIntent, SettleIntent
     if isinstance(intent, OpenIntent):
         action_line = (
             f"OPEN `{_esc(intent.outcome) or '—'}`  "

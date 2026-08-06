@@ -8,7 +8,7 @@ Pure schema — names, types, defaults, docs. Deployment values live in
 
 from dataclasses import dataclass, field
 
-from bot.algorithm import Mode
+from bot.domain.intents import Mode
 
 
 def _doc(default, doc: str):

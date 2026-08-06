@@ -32,7 +32,7 @@ import os
 import tomllib
 from dataclasses import fields
 
-from bot.algorithm import Mode
+from bot.domain.intents import Mode
 
 
 CONFIG_DIR = "config"

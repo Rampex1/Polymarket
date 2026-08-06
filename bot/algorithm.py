@@ -1,21 +1,14 @@
-"""Strategy base class and compatibility exports.
+"""Strategy base class.
 
-The domain command types moved to :mod:`bot.domain.intents`.  They remain
-available here so third-party strategies and existing profile code do not
-need a flag-day migration.
+The domain types — intents, `Mode`, `AlgoParams` — live in
+:mod:`bot.domain.intents` and are imported from there. This module only
+defines the class a strategy subclasses.
 """
 
 from abc import ABC, abstractmethod
 from typing import Iterator
 
-from .domain.intents import (
-    AlgoParams,
-    CloseIntent,
-    Intent,
-    Mode,
-    OpenIntent,
-    SettleIntent,
-)
+from .domain.intents import AlgoParams, Intent
 
 
 class Algorithm(ABC):
@@ -39,7 +32,4 @@ class Algorithm(ABC):
         return self.name
 
 
-__all__ = [
-    "Algorithm", "AlgoParams", "CloseIntent", "Intent", "Mode",
-    "OpenIntent", "SettleIntent",
-]
+__all__ = ["Algorithm"]

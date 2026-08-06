@@ -100,7 +100,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
     import time
 
     from bot import notifier
-    from bot.algorithm import OpenIntent
+    from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=2.0, signal_price=0.20,
@@ -128,7 +128,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
 def test_signal_message_without_features_stays_compact(capture_send):
     """Copy-trade intents carry no features — no empty detail lines."""
     from bot import notifier
-    from bot.algorithm import OpenIntent
+    from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,

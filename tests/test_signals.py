@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from bot.algorithm import OpenIntent
+from bot.domain.intents import OpenIntent
 
 
 def _intent(**overrides):

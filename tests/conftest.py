@@ -96,7 +96,7 @@ class _TestParams:
 @pytest.fixture
 def default_params():
     """A fully-initialised _TestParams instance defaulting to PAPER mode."""
-    from bot.algorithm import Mode
+    from bot.domain.intents import Mode
     return _TestParams(mode=Mode.PAPER)
 
 

@@ -11,7 +11,7 @@ import pytest
 
 from tests.conftest import make_trade
 
-from bot.algorithm import CloseIntent, OpenIntent, SettleIntent
+from bot.domain.intents import CloseIntent, OpenIntent, SettleIntent
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,14 @@ import logging
 from typing import Iterator, Optional
 
 from bot import fetcher
-from bot.algorithm import Algorithm, CloseIntent, Intent, Mode, OpenIntent, SettleIntent
+from bot.algorithm import Algorithm
+from bot.domain.intents import (
+    CloseIntent,
+    Intent,
+    Mode,
+    OpenIntent,
+    SettleIntent,
+)
 from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams

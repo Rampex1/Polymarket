@@ -4,7 +4,7 @@ import time
 from typing import Callable, Iterator
 
 from bot import copy_lots, fetcher
-from bot.algorithm import CloseIntent, Intent, OpenIntent, SettleIntent
+from bot.domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 
 
 class MultiLeaderCopyEngine:

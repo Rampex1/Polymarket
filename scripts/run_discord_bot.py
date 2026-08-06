@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 from algorithms import REGISTRY
 from bot import discord_bot
-from bot.algorithm import Mode
+from bot.domain.intents import Mode
 from bot.profile_loader import ProfileError, available_profiles, load_profile
 
 algo_infos = []

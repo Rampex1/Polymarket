@@ -11,7 +11,7 @@ from tests.conftest import make_trade
 
 from algorithms.copy_trade.algorithm import CopyTradeAlgorithm
 from algorithms.copy_trade.params import CopyTradeParams
-from bot.algorithm import CloseIntent, OpenIntent, SettleIntent
+from bot.domain.intents import CloseIntent, OpenIntent, SettleIntent
 
 
 # ---------------------------------------------------------------------------

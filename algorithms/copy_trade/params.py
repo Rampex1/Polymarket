@@ -9,7 +9,7 @@ copy_trade` prints the full knob list from this schema.
 
 from dataclasses import dataclass, field
 
-from bot.algorithm import Mode
+from bot.domain.intents import Mode
 
 
 def _doc(default, doc: str):

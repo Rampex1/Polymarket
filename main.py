@@ -20,7 +20,8 @@ import sys
 import threading
 
 from bot import config, db, notifier, reconciliation, runner, runs
-from bot.algorithm import Algorithm, Mode
+from bot.algorithm import Algorithm
+from bot.domain.intents import Mode
 from bot.logging_setup import setup_logging
 from bot.positions import PositionTracker, RiskManager
 from bot.profile_loader import ProfileError
