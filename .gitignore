@@ -16,3 +16,4 @@ positions.db
 # Discovery price-history archive (regenerable, can grow large)
 discovery_archive.db*
 data/
+logs/

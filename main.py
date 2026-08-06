@@ -21,33 +21,20 @@ import threading
 
 from bot import config, db, notifier, reconciliation, runner, runs
 from bot.algorithm import Algorithm, Mode
+from bot.logging_setup import setup_logging
 from bot.positions import PositionTracker, RiskManager
 from bot.profile_loader import ProfileError
 
-# Importing ENABLED loads and validates the profile TOML, so a bad config
-# exits with one line instead of a traceback.
 try:
     from algorithms import ENABLED
 except ProfileError as e:
     raise SystemExit(f"error: {e}") from None
 
 
-# Run a reconciliation every N poll cycles. With the default 20s poll
-# interval, 30 cycles ≈ 10 minutes — frequent enough to catch drift
-# quickly without hammering the Data API.
 RECONCILE_EVERY_N_POLLS = 30
-
-# Alert on Discord after this many consecutive poll-loop exceptions.
-# At the default 20s interval, 5 failures ≈ 100 s of continuous errors.
-# Subsequent alerts fire every CRASH_ALERT_AFTER_N_ERRORS failures so
-# the channel isn't spammed if the problem persists.
 CRASH_ALERT_AFTER_N_ERRORS = 5
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+setup_logging(config.PROFILE)
 logger = logging.getLogger(__name__)
 
 
