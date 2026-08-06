@@ -31,9 +31,12 @@ except ProfileError as e:
     raise SystemExit(f"error: {e}") from None
 
 
+# Reconcilier
 RECONCILE_EVERY_N_POLLS = 30
 CRASH_ALERT_AFTER_N_ERRORS = 5
 
+
+# Logging
 setup_logging(config.PROFILE)
 logger = logging.getLogger(__name__)
 
@@ -45,14 +48,8 @@ def _run_worker(
 ) -> None:
     """One algorithm's lifecycle: setup → poll loop → shutdown."""
     name = algo.params.name
-    # Mode comes from THIS algorithm's params. If params say LIVE but no
-    # CLOB client exists (no creds), force paper to avoid silent misroutes.
-    paper = algo.params.mode == Mode.PAPER or client is None
-    if algo.params.mode == Mode.LIVE and client is None:
-        logger.warning(
-            "[%s] declared LIVE but no CLOB client available — falling back to PAPER.",
-            name,
-        )
+    # A live algorithm without a client can't reach here — main() exits first.
+    paper = algo.params.mode == Mode.PAPER
 
     try:
         tracker = PositionTracker(algo=name)
@@ -163,7 +160,7 @@ def _start_profile_summary(
         return
 
     algo_infos = [
-        (a.params.name, a.params.mode == Mode.PAPER or client is None) for a in algos
+        (a.params.name, a.params.mode == Mode.PAPER) for a in algos
     ]
 
     def _loop() -> None:
@@ -219,6 +216,19 @@ def main() -> None:
     any_live = any(a.params.mode == Mode.LIVE for a in ENABLED)
     client = runner.build_client() if any_live else None
 
+    # Declaring live and quietly trading paper is the worst outcome: the
+    # operator believes real money is at work. Refuse to start instead.
+    if any_live and client is None:
+        live = ", ".join(
+            a.params.name for a in ENABLED if a.params.mode == Mode.LIVE
+        )
+        raise SystemExit(
+            f'error: {live} declared mode="live" but no CLOB client could be '
+            "built — see the error above (POLY_PRIVATE_KEY and "
+            "POLY_FUNDER_ADDRESS are both required). Fix the creds, or set "
+            'mode = "paper" if that was the intent.'
+        )
+
     logger.info(
         "Profile: %s | algorithms: %s",
         config.PROFILE,
@@ -257,7 +267,7 @@ def main() -> None:
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
         algo_infos = [
-            (a.params.name, a.params.mode == Mode.PAPER or client is None)
+            (a.params.name, a.params.mode == Mode.PAPER)
             for a in ENABLED
         ]
         notifier.start_heartbeat(
@@ -272,7 +282,7 @@ def main() -> None:
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook:
         algo_infos = [
-            (a.params.name, a.params.mode == Mode.PAPER or client is None)
+            (a.params.name, a.params.mode == Mode.PAPER)
             for a in ENABLED
         ]
         notifier.start_weekly_digest(

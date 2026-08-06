@@ -49,8 +49,10 @@ python -m bot.report                            # per-algo P&L, skip reasons, wi
 - **The loader fails fast** on unknown keys, duplicate names, bad modes, and
   `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
-- **If an algorithm declares `LIVE` but no CLOB client/creds exist**, the
-  worker falls back to paper rather than mis-routing real-money orders.
+- **If an algorithm declares `LIVE` but no CLOB client can be built**, `main()`
+  exits — it does **not** fall back to paper. Silently papering a live
+  algorithm is worse than not starting: the operator believes real money is
+  at work. Keep that guard; workers assume a live algo always has a client.
 
 ## Module map
 

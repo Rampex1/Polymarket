@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 def build_client() -> Optional[ClobClient]:
     if not config.POLY_PRIVATE_KEY:
-        logger.warning("POLY_PRIVATE_KEY not set — running in paper-trade mode only.")
+        logger.error("POLY_PRIVATE_KEY not set — cannot build a CLOB client.")
         return None
 
     # Both signature_type 1 (email/Magic) and 2 (browser wallet) route
@@ -56,8 +56,8 @@ def build_client() -> Optional[ClobClient]:
     if not config.POLY_FUNDER_ADDRESS:
         logger.error(
             "POLY_FUNDER_ADDRESS is required for live trading (your Polymarket "
-            "proxy wallet, visible in the profile URL). Falling back to paper "
-            "mode to prevent fund-routing errors."
+            "proxy wallet, visible in the profile URL). Refusing to build a "
+            "client — orders would debit the wrong account."
         )
         return None
 
