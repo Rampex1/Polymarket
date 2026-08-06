@@ -1,8 +1,8 @@
 """
-DB layer tests — schema, migration, pragmas, indexes.
+DB layer tests — schema, pragmas, indexes.
 
 We hit the real SQLite engine via a tempfile to catch issues that a mock
-would hide (e.g. WAL mode pragma syntax, column migration idempotence).
+would hide (e.g. WAL mode pragma syntax, index re-creation).
 """
 
 import sqlite3
@@ -35,8 +35,9 @@ def test_wal_mode_enabled(fresh_db):
     assert mode.lower() == "wal"
 
 
-def test_migration_is_idempotent(fresh_db, tmp_db_path):
-    """Re-initializing against an existing DB shouldn't blow up."""
+def test_reinit_against_existing_db_is_safe(fresh_db, tmp_db_path):
+    """Opening an existing DB again must not blow up — CREATE TABLE IF NOT
+    EXISTS and the index creation both have to stay re-runnable."""
     fresh_db.get()
     # Force a re-init by closing the cached connection.
     fresh_db.reset_for_tests()
@@ -44,41 +45,6 @@ def test_migration_is_idempotent(fresh_db, tmp_db_path):
     cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
     assert "fee_usdc" in cols
     assert "realized_pnl" in cols
-
-
-def test_migration_adds_fee_usdc_on_legacy_schema(tmp_db_path, monkeypatch):
-    """A DB created with the older schema should get fee_usdc added in place."""
-    from bot import config
-    import bot.db as dbmod
-
-    # Hand-build a legacy trade_log without fee_usdc, outcome, question.
-    conn = sqlite3.connect(tmp_db_path)
-    conn.executescript(
-        """
-        CREATE TABLE trade_log (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            market_id    TEXT,
-            asset_id     TEXT,
-            action       TEXT,
-            shares       REAL,
-            price        REAL,
-            usdc_amount  REAL,
-            realized_pnl REAL DEFAULT 0,
-            paper        INTEGER DEFAULT 0,
-            ts           INTEGER
-        );
-        """
-    )
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(config, "DB_PATH", tmp_db_path)
-    dbmod.reset_for_tests()
-    conn = dbmod.get()
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_log)")}
-    assert "fee_usdc" in cols
-    assert "outcome" in cols
-    assert "question" in cols
 
 
 def test_threadlocal_connection_isolation(fresh_db):

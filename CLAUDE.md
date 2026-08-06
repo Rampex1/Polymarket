@@ -200,8 +200,9 @@ column so multiple algorithms share one DB without collisions.
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
 - `runs` — one row per worker boot: resolved params JSON, profile, git sha. Lets `bot.report` attribute results to the config version that produced them.
 
-`db._migrate()` upgrades older v0/v1 databases in place (adds
-`paper`/`algo` columns, repartitions PKs) idempotently.
+Schema is created by `CREATE TABLE IF NOT EXISTS` on every connect. There
+is no migration path — a database predating the multi-algorithm layout
+(`algo` columns, `(market_id, paper, algo)` PKs) will not work.
 
 The archiver uses a **separate** DB (`data/discovery_archive.db`):
 `price_history` and `tracked_markets`, both with natural PKs.
