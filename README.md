@@ -150,9 +150,8 @@ non-zero if a session dies at boot and prints that session's last output.
 and must survive redeploys.
 
 After a deploy, check: one startup line per algorithm in
-`tmux attach -t paper` and in Discord, a first-pass summary in `archive`
-(`tracked_added` / `points_added`), and no `Using legacy ./positions.db`
-warning.
+`tmux attach -t paper` and in Discord, and a first-pass summary in `archive`
+(`tracked_added` / `points_added`).
 
 ## Monitoring
 

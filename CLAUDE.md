@@ -168,7 +168,7 @@ prod bankroll**; scale via the profile TOML when capital grows.
 | `PROFILE` | Selects `config/<name>.toml`. Required. |
 | `POLY_PRIVATE_KEY` / `POLY_FUNDER_ADDRESS` / `POLY_API_KEY` / `POLY_API_SECRET` / `POLY_API_PASSPHRASE` | Live trading only. `POLY_FUNDER_ADDRESS` is the Polymarket **proxy wallet** (from the profile URL) — without it orders sign correctly but debit the wrong account. |
 | `DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` | Slash-command bot. Unset → bot silently disabled, webhooks unaffected. Guild ID gives instant command registration vs. ~1h global. |
-| `DB_PATH` | Default `data/positions.db`; a legacy `./positions.db` still works with a warning. |
+| `DB_PATH` | Default `data/positions.db`. |
 | `HEARTBEAT_INTERVAL_HOURS` | Default 6; `0` disables the liveness ping. |
 | `TIMEZONE` | Daily-summary rollover (default `America/Los_Angeles`). |
 | `DISCORD_WEBHOOK_URL` | Escape hatch that beats the registry for every profile — normally unset. |

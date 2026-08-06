@@ -137,13 +137,3 @@ def test_default_db_path_env_override_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", "/elsewhere/x.db")
     assert config._default_db_path() == "/elsewhere/x.db"
 
-
-def test_default_db_path_legacy_fallback(tmp_path, monkeypatch):
-    """A pre-existing ./positions.db with no data/ copy must keep being used —
-    a deploy that git-pulls this change must not silently start a fresh DB."""
-    from bot import config
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("DB_PATH", raising=False)
-    (tmp_path / "positions.db").touch()
-    assert config._default_db_path() == "positions.db"
