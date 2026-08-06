@@ -10,7 +10,7 @@ class Algorithm(ABC):
     params: AlgoParams
 
     def setup(self, tracker) -> None:
-        """Receive worker-scoped dependencies once before polling begins."""
+        """One-time startup before the first poll"""
 
     @abstractmethod
     def poll(self) -> Iterator[Intent]:
