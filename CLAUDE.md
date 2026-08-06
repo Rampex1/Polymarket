@@ -70,7 +70,9 @@ bot/
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
   fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
   positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
-  copy_lots.py            # Leader-attributed lots — one leader's exit unwinds only its share
+  execution/              # Called by runner: fills.py (paper fills), pricing.py (price +
+                          # slippage), settlement.py (resolution price), lots.py
+                          # (leader-attributed lots — one leader's exit unwinds only its share)
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
   notifier.py             # Discord alerts, daily summary, heartbeat, weekly signal digest
   threads.py              # Discord thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest

@@ -74,10 +74,10 @@ def resolve_summary_webhook(
     return ""
 
 
-# How often the heartbeat ping fires. Set HEARTBEAT_INTERVAL_HOURS=0 to disable.
+# How often the heartbeat ping fires
 HEARTBEAT_INTERVAL_HOURS: float = float(os.getenv("HEARTBEAT_INTERVAL_HOURS", "6"))
 
-# Day boundary for summaries and daily P&L — Eastern, matching US market hours.
+# Day boundary for summaries and daily P&L
 _TZ_NAME = os.getenv("TIMEZONE", "America/New_York")
 try:
     TIMEZONE = ZoneInfo(_TZ_NAME)

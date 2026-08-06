@@ -2,7 +2,7 @@
 
 from algorithms.copy_trade.ranker import ResolvedBet, rank_wallets
 from algorithms.copy_trade.watchlist import WatchlistRepository
-from bot import copy_lots
+from bot.execution import lots as copy_lots
 from tests.conftest import make_trade
 
 

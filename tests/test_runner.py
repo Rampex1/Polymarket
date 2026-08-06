@@ -220,7 +220,8 @@ def test_dispatch_open_records_leader_attributed_lot(
     tracker, risk, algo, default_params, stub_price,
 ):
     """A multi-leader fill creates an exit-attributable lot after it fills."""
-    from bot import copy_lots, runner
+    from bot import runner
+    from bot.execution import lots as copy_lots
 
     stub_price(0.50)
     intent = OpenIntent(

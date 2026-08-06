@@ -3,7 +3,8 @@
 import time
 from typing import Callable, Iterator
 
-from bot import copy_lots, fetcher
+from bot import fetcher
+from bot.execution import lots as copy_lots
 from bot.domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 
 
