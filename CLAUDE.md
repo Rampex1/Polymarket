@@ -170,7 +170,7 @@ prod bankroll**; scale via the profile TOML when capital grows.
 | `DISCORD_BOT_TOKEN` / `DISCORD_GUILD_ID` | Slash-command bot. Unset → bot silently disabled, webhooks unaffected. Guild ID gives instant command registration vs. ~1h global. |
 | `DB_PATH` | Default `data/positions.db`. |
 | `HEARTBEAT_INTERVAL_HOURS` | Default 6; `0` disables the liveness ping. |
-| `TIMEZONE` | Daily-summary rollover (default `America/Los_Angeles`). |
+| `TIMEZONE` | Daily-summary rollover (default `America/New_York`). |
 | `POLY_SIGNATURE_TYPE` | Default 3 (smart-wallet EIP-1271). |
 
 ### Webhook routing
