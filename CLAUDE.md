@@ -80,7 +80,6 @@ algorithms/
   copy_trade/             # Mirror one target wallet, or a ranked cohort
     algorithm.py          # CopyTradeAlgorithm: poll → tier sizing → emit intents
     params.py             # CopyTradeParams — pure schema
-    design.md             # Tier model, signal semantics, edge cases (predates multi-leader mode)
     multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
@@ -126,16 +125,23 @@ digest on Sundays.
 
 ### Trade lifecycle
 
-`algorithms/copy_trade/design.md` is the detailed spec — tier model, the
-four signal types, state, edge cases. In short: `poll()` classifies target
-activity into BUY → `OpenIntent` (top up to the tier implied by the
-target's *total* holding), SELL → `CloseIntent` (resize to the post-sell
-tier), MERGE → `CloseIntent(fraction=1.0)` (no slippage gate), REDEEM →
-`SettleIntent`. `runner.dispatch()` then does risk check → slippage gate →
-order or paper fill → DB write → notify.
+`poll()` classifies target activity into BUY → `OpenIntent` (top up to the
+tier implied by the target's *total* holding), SELL → `CloseIntent` (resize
+to the post-sell tier), MERGE → `CloseIntent(fraction=1.0)` (no slippage
+gate), REDEEM → `SettleIntent`. `runner.dispatch()` then does risk check →
+slippage gate → order or paper fill → DB write → notify.
 
-Note `design.md` was written before ranked multi-leader mode and doesn't
-cover watchlists, consensus, or copy lots.
+Non-obvious behavior, easy to "fix" by mistake:
+
+- `fetch_target_position_value` retries until the API reflects the BUY it
+  just saw. Without it a stale read under-sizes our top-up.
+- SELL carries the target's fill price, so the slippage gate is live on
+  partial closes — a drifted market skips the resize this tick and re-tiers
+  on the next SELL.
+- Positions are keyed by `market_id`, not outcome, so YES and NO in one
+  market would collide. Safe only because we buy the side the target bought.
+- Target holding both sides: position value sums all rows, and a SELL
+  decrements the cache whichever side it was. MERGE covers the usual exit.
 
 ### insider_flow
 
@@ -201,6 +207,19 @@ column so multiple algorithms share one DB without collisions.
 
 The archiver uses a **separate** DB (`data/discovery_archive.db`):
 `price_history` and `tracked_markets`, both with natural PKs.
+
+**Never copy one `discovery_archive.db` over another** — laptop and VPS each
+hold history the other lacks, the public API won't re-serve it once markets
+resolve, and an overwrite is silent. Merge instead; the natural PKs make
+`INSERT OR IGNORE` exact:
+
+```bash
+# upload under a temp name, then on the target machine:
+sqlite3 discovery_archive.db "
+  ATTACH 'other_archive.db' AS other;
+  INSERT OR IGNORE INTO price_history   SELECT * FROM other.price_history;
+  INSERT OR IGNORE INTO tracked_markets SELECT * FROM other.tracked_markets;"
+```
 
 ## External APIs
 
