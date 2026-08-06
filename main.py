@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
 """
-Entry point — boots one worker thread per enabled algorithm.
-
-Mode resolution
----------------
-There is no global paper/live flag anymore. Each algorithm declares its
-mode in its params (`Mode.PAPER` / `Mode.LIVE`). The runner threads pick
-up that mode independently, so a single process can run prod-live and
-paper-experimental algorithms side by side.
-
-The shared CLOB client is built once, and only if at least one algorithm
-is `Mode.LIVE`. If every algorithm is paper, no creds are needed.
-
 Architecture
 ------------
 Each algorithm in `algorithms.ENABLED` (selected by the `PROFILE` env var)
@@ -31,16 +19,17 @@ import signal
 import sys
 import threading
 
+from bot import config, db, notifier, reconciliation, runner, runs
+from bot.algorithm import Algorithm, Mode
+from bot.positions import PositionTracker, RiskManager
 from bot.profile_loader import ProfileError
 
+# Importing ENABLED loads and validates the profile TOML, so a bad config
+# exits with one line instead of a traceback.
 try:
     from algorithms import ENABLED
 except ProfileError as e:
     raise SystemExit(f"error: {e}") from None
-
-from bot import config, db, notifier, reconciliation, runner, runs
-from bot.algorithm import Algorithm, Mode
-from bot.positions import PositionTracker, RiskManager
 
 
 # Run a reconciliation every N poll cycles. With the default 20s poll
@@ -100,7 +89,8 @@ def _run_worker(
         logger.info(
             "[%s] Started (%s) — poll every %ds | risk: per-position $%.2f, "
             "total $%.2f, daily loss $%.2f | slippage %.0f%% | order=%s",
-            name, "PAPER" if paper else "LIVE",
+            name,
+            "PAPER" if paper else "LIVE",
             algo.params.poll_interval_seconds,
             algo.params.max_position_size_usdc,
             algo.params.max_total_exposure_usdc,
@@ -113,7 +103,10 @@ def _run_worker(
         # Startup reconciliation — surfaces ghost positions or stale DB rows
         # before we start acting. Live-only; paper has nothing to reconcile.
         reconciliation.reconcile_positions(
-            tracker, config.POLY_FUNDER_ADDRESS, algo.display_name, paper,
+            tracker,
+            config.POLY_FUNDER_ADDRESS,
+            algo.display_name,
+            paper,
         )
 
         poll_count = 0
@@ -130,7 +123,9 @@ def _run_worker(
                 logger.exception("[%s] poll/dispatch raised, continuing", name)
                 if consecutive_errors % CRASH_ALERT_AFTER_N_ERRORS == 0:
                     notifier.on_worker_unstable(
-                        display_name, consecutive_errors, exc,
+                        display_name,
+                        consecutive_errors,
+                        exc,
                         webhook_url=webhook_url,
                     )
 
@@ -140,7 +135,10 @@ def _run_worker(
             if not paper and poll_count % RECONCILE_EVERY_N_POLLS == 0:
                 try:
                     reconciliation.reconcile_positions(
-                        tracker, config.POLY_FUNDER_ADDRESS, algo.display_name, paper,
+                        tracker,
+                        config.POLY_FUNDER_ADDRESS,
+                        algo.display_name,
+                        paper,
                     )
                 except Exception:
                     logger.exception("[%s] reconciliation raised, continuing", name)
@@ -152,7 +150,9 @@ def _run_worker(
             tracker.print_summary(paper=paper)
         except Exception:
             pass
-        notifier.on_shutdown(algo_name=algo.display_name, webhook_url=algo.params.webhook_url)
+        notifier.on_shutdown(
+            algo_name=algo.display_name, webhook_url=algo.params.webhook_url
+        )
         logger.info("[%s] Stopped.", name)
 
 
@@ -169,12 +169,14 @@ def _start_profile_summary(
     """
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if not summary_webhook:
-        logger.info("No summary webhook configured for profile '%s' — skipping daily summary.", config.PROFILE)
+        logger.info(
+            "No summary webhook configured for profile '%s' — skipping daily summary.",
+            config.PROFILE,
+        )
         return
 
     algo_infos = [
-        (a.params.name, a.params.mode == Mode.PAPER or client is None)
-        for a in algos
+        (a.params.name, a.params.mode == Mode.PAPER or client is None) for a in algos
     ]
 
     def _loop() -> None:
@@ -183,7 +185,9 @@ def _start_profile_summary(
             if stop_event.wait(wait_s):
                 return
             try:
-                notifier.send_profile_summary(algo_infos, summary_webhook, config.PROFILE)
+                notifier.send_profile_summary(
+                    algo_infos, summary_webhook, config.PROFILE
+                )
             except Exception:
                 logger.exception("Profile daily summary raised, continuing")
 
@@ -198,16 +202,19 @@ def _warn_orphaned_algos() -> None:
     would silently orphan a paper bankroll and its position history."""
     try:
         enabled_names = {a.params.name for a in ENABLED}
-        rows = db.get().execute(
-            "SELECT DISTINCT algo FROM positions WHERE shares > 0"
-        ).fetchall()
+        rows = (
+            db.get()
+            .execute("SELECT DISTINCT algo FROM positions WHERE shares > 0")
+            .fetchall()
+        )
         for (orphan,) in rows:
             if orphan not in enabled_names:
                 logger.warning(
                     "DB has open positions under algo '%s', which is not in "
                     "profile '%s' — renamed or removed in config? Its "
                     "positions and paper bankroll are now unmanaged.",
-                    orphan, config.PROFILE,
+                    orphan,
+                    config.PROFILE,
                 )
     except Exception:
         logger.exception("orphan-name check failed (continuing)")
@@ -228,9 +235,7 @@ def main() -> None:
     logger.info(
         "Profile: %s | algorithms: %s",
         config.PROFILE,
-        ", ".join(
-            f"{a.params.name}({a.params.mode.value})" for a in ENABLED
-        ),
+        ", ".join(f"{a.params.name}({a.params.mode.value})" for a in ENABLED),
     )
 
     # Single Event coordinates shutdown for every worker + daily summary.
@@ -238,7 +243,7 @@ def main() -> None:
 
     def _shutdown(signum, frame):
         if stop_event.is_set():
-            return   # second Ctrl-C: let default handler kill us
+            return  # second Ctrl-C: let default handler kill us
         logger.info("Shutdown signal received, finishing current cycles...")
         stop_event.set()
 
@@ -247,8 +252,10 @@ def main() -> None:
 
     workers = [
         threading.Thread(
-            target=_run_worker, args=(algo, client, stop_event),
-            daemon=True, name=f"worker-{algo.params.name}",
+            target=_run_worker,
+            args=(algo, client, stop_event),
+            daemon=True,
+            name=f"worker-{algo.params.name}",
         )
         for algo in ENABLED
     ]
@@ -267,7 +274,9 @@ def main() -> None:
             for a in ENABLED
         ]
         notifier.start_heartbeat(
-            algo_infos, summary_webhook, stop_event,
+            algo_infos,
+            summary_webhook,
+            stop_event,
             profile=config.PROFILE,
             interval_hours=config.HEARTBEAT_INTERVAL_HOURS,
         )
@@ -282,7 +291,6 @@ def main() -> None:
         notifier.start_weekly_digest(
             algo_infos, summary_webhook, stop_event, profile=config.PROFILE
         )
-
 
     # Block the main thread until shutdown is signaled.
     try:
