@@ -7,7 +7,7 @@ persistence, and notifications.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterator, Protocol
+from typing import Protocol
 
 
 class Mode(str, Enum):
@@ -80,11 +80,3 @@ class AlgoParams(Protocol):
     order_type: str
     paper_fee_bps: float
     webhook_url: str
-
-
-class IntentSource(Protocol):
-    """Minimal strategy protocol, kept separate from worker concerns."""
-
-    params: AlgoParams
-
-    def poll(self) -> Iterator[Intent]: ...
