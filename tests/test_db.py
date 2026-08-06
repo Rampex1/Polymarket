@@ -120,14 +120,17 @@ def test_get_creates_missing_parent_dirs(tmp_path, monkeypatch):
         dbmod.reset_for_tests()
 
 
-def test_default_db_path_prefers_data_dir(tmp_path, monkeypatch):
+def test_default_db_path_is_repo_anchored(tmp_path, monkeypatch):
+    """cwd must not change which DB the bot opens."""
     import os
 
     from bot import config
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DB_PATH", raising=False)
-    assert config._default_db_path() == os.path.join("data", "positions.db")
+    resolved = config._default_db_path()
+    assert resolved == os.path.join(config.REPO_ROOT, "data", "positions.db")
+    assert os.path.isabs(resolved)
 
 
 def test_default_db_path_env_override_wins(tmp_path, monkeypatch):

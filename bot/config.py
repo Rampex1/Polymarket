@@ -84,9 +84,14 @@ POLY_SIGNATURE_TYPE: int = int(os.getenv("POLY_SIGNATURE_TYPE", "3"))
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 
+# Anchor file paths to the repo, not the working directory — the bot must
+# open the same DB whether it was launched from here, a tmux session, or cron.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _default_db_path() -> str:
-    """Positions DB path — DB_PATH if set, else data/positions.db."""
-    return os.getenv("DB_PATH") or os.path.join("data", "positions.db")
+    """Positions DB path — DB_PATH if set, else <repo>/data/positions.db."""
+    return os.getenv("DB_PATH") or os.path.join(REPO_ROOT, "data", "positions.db")
 
 
 DB_PATH: str = _default_db_path()
