@@ -75,6 +75,7 @@ bot/
   discord_bot.py          # Slash-command bot (standalone daemon, its own process)
   signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
   sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
+  logging_setup.py        # Console at INFO + cumulative logs/<profile>/{debug,info,error}.log, rotated daily, 14 kept
 algorithms/
   __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
   copy_trade/             # Mirror one target wallet, or a ranked cohort
