@@ -45,7 +45,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS positions (
             market_id        TEXT,
             paper            INTEGER NOT NULL DEFAULT 0,
-            algo             TEXT NOT NULL DEFAULT 'copy_trade',
+            algo             TEXT NOT NULL,
             asset_id         TEXT NOT NULL,
             question         TEXT,
             outcome          TEXT,
@@ -70,13 +70,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             fee_usdc     REAL DEFAULT 0,
             realized_pnl REAL DEFAULT 0,
             paper        INTEGER DEFAULT 0,
-            algo         TEXT NOT NULL DEFAULT 'copy_trade',
+            algo         TEXT NOT NULL,
             ts           INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS daily_stats (
             date              TEXT,
-            algo              TEXT NOT NULL DEFAULT 'copy_trade',
+            algo              TEXT NOT NULL,
             realized_pnl_usdc REAL DEFAULT 0,
             PRIMARY KEY (date, algo)
         );
