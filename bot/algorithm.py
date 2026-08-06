@@ -1,10 +1,3 @@
-"""Strategy base class.
-
-The domain types — intents, `Mode`, `AlgoParams` — live in
-:mod:`bot.domain.intents` and are imported from there. This module only
-defines the class a strategy subclasses.
-"""
-
 from abc import ABC, abstractmethod
 from typing import Iterator
 
@@ -12,7 +5,13 @@ from .domain.intents import AlgoParams, Intent
 
 
 class Algorithm(ABC):
-    """A stateful strategy that emits side-effect-free execution intents."""
+    """Base class for a trading strategy.
+
+    A strategy decides *what* should happen and says so by yielding intents.
+    It never places an order, writes to the DB, or posts to Discord — that is
+    `bot/runner.py`'s job. Anything the strategy needs to remember between
+    polls (seen trade ids, caches) lives on the subclass.
+    """
 
     params: AlgoParams
 
@@ -30,6 +29,3 @@ class Algorithm(ABC):
     @property
     def display_name(self) -> str:
         return self.name
-
-
-__all__ = ["Algorithm"]
