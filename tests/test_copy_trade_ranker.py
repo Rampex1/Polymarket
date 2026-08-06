@@ -94,7 +94,7 @@ def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, tracker):
             watchlist_min_resolved_bets=2, tier1_size=1.0, max_position_size_usdc=3.0,
         ), market_data=data, watchlist=repo, ranker_source=FakeHistory(),
     )
-    algo.setup(tracker, client=None)
+    algo.setup(tracker)
     assert repo.active_wallets("multi") == ["0xa"]
     data.rows = [make_trade(action="BUY", trade_id="leader-buy", price=0.5)]
 

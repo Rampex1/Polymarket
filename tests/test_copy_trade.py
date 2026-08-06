@@ -41,7 +41,7 @@ def test_setup_reads_through_injected_market_data():
         params=CopyTradeParams(target_address="0xtarget"), market_data=data,
     )
 
-    algo.setup(tracker=object(), client=None)
+    algo.setup(tracker=object())
 
     assert data.addresses == ["0xtarget"]
 

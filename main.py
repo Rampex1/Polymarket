@@ -60,7 +60,7 @@ def _run_worker(
         # runs table so analytics can attribute results to config versions.
         runs.record_run(algo.params, config.PROFILE)
         risk = RiskManager(tracker, algo.params)
-        algo.setup(tracker, client)
+        algo.setup(tracker)
 
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url
@@ -143,7 +143,6 @@ def _run_worker(
 
 def _start_profile_summary(
     algos,
-    client,
     stop_event: threading.Event,
 ) -> None:
     """Start a single daily summary thread for the whole profile.
@@ -262,7 +261,7 @@ def main() -> None:
 
     # One profile-level daily summary thread — aggregates all algorithms
     # into a single message sent to the profile's summary channel.
-    _start_profile_summary(ENABLED, client, stop_event)
+    _start_profile_summary(ENABLED, stop_event)
 
     # Heartbeat — periodic liveness ping to the summary channel.
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)

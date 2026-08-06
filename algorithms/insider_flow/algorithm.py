@@ -107,11 +107,9 @@ class InsiderFlowAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker, client) -> None:
+    def setup(self, tracker) -> None:
         self._tracker = tracker
-        # Live requires a CLOB client; fall back to paper rather than
-        # silently mis-routing real-money orders (same rule as copy_trade).
-        self._paper = self.params.mode == Mode.PAPER or client is None
+        self._paper = self.params.mode == Mode.PAPER
 
         # Seed the dedupe ring with the current firehose tail so a restart
         # never replays trades that already happened.

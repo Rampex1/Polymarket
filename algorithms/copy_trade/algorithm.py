@@ -118,12 +118,10 @@ class CopyTradeAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker, client) -> None:
+    def setup(self, tracker) -> None:
         self._tracker = tracker
         # Mode comes from this algorithm's own params — no global toggle.
-        # Live mode also requires a CLOB client; if there's none we fall
-        # back to paper to avoid silently mis-routing real-money orders.
-        self._paper = self.params.mode == Mode.PAPER or client is None
+        self._paper = self.params.mode == Mode.PAPER
 
         if self._multi is not None:
             self._multi.setup(tracker, self._paper)

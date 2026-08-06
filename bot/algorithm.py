@@ -9,7 +9,7 @@ class Algorithm(ABC):
 
     params: AlgoParams
 
-    def setup(self, tracker, client) -> None:
+    def setup(self, tracker) -> None:
         """Receive worker-scoped dependencies once before polling begins."""
 
     @abstractmethod
