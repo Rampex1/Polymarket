@@ -118,7 +118,7 @@ class CopyTradeAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker, notifier_mod, client) -> None:
+    def setup(self, tracker, client) -> None:
         self._tracker = tracker
         # Mode comes from this algorithm's own params — no global toggle.
         # Live mode also requires a CLOB client; if there's none we fall

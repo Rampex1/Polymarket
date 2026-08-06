@@ -107,7 +107,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker, notifier_mod, client) -> None:
+    def setup(self, tracker, client) -> None:
         self._tracker = tracker
         # Live requires a CLOB client; fall back to paper rather than
         # silently mis-routing real-money orders (same rule as copy_trade).

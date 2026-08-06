@@ -5,17 +5,11 @@ from .domain.intents import AlgoParams, Intent
 
 
 class Algorithm(ABC):
-    """Base class for a trading strategy.
-
-    A strategy decides *what* should happen and says so by yielding intents.
-    It never places an order, writes to the DB, or posts to Discord — that is
-    `bot/runner.py`'s job. Anything the strategy needs to remember between
-    polls (seen trade ids, caches) lives on the subclass.
-    """
+    """Base class for a trading strategy"""
 
     params: AlgoParams
 
-    def setup(self, tracker, notifier_mod, client) -> None:
+    def setup(self, tracker, client) -> None:
         """Receive worker-scoped dependencies once before polling begins."""
 
     @abstractmethod

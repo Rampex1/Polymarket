@@ -60,7 +60,7 @@ def _run_worker(
         # runs table so analytics can attribute results to config versions.
         runs.record_run(algo.params, config.PROFILE)
         risk = RiskManager(tracker, algo.params)
-        algo.setup(tracker, notifier, client)
+        algo.setup(tracker, client)
 
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url

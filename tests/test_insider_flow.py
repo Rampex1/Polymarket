@@ -598,7 +598,7 @@ def test_setup_seeds_dedupe_ring(tracker, stub_firehose, stub_stats):
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
 
-    a.setup(tracker, None, None)
+    a.setup(tracker, None)
     assert list(a.poll()) == []
 
 
