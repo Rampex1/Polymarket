@@ -9,7 +9,6 @@ poll loop) runs the real code paths.
 
 import threading
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

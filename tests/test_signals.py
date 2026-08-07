@@ -9,7 +9,6 @@ into the dispatch path.
 
 import json
 
-import pytest
 
 from bot.domain.intents import OpenIntent
 

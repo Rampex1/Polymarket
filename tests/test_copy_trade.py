@@ -5,7 +5,6 @@ runs the real code paths.
 """
 
 import pytest
-from dataclasses import replace
 
 from tests.conftest import make_trade
 

@@ -12,7 +12,7 @@ using the final outcome prices.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Any
 

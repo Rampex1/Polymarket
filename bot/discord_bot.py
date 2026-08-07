@@ -24,7 +24,6 @@ Setup (one-time):
 
 import asyncio
 import logging
-import os
 import subprocess
 import threading
 from datetime import datetime
@@ -38,14 +37,13 @@ from .positions import PositionTracker
 
 logger = logging.getLogger(__name__)
 
-# Set by start_standalone() before the bot thread launches.
-# Each entry: (algo_name, paper, profile)
 _algo_infos: list = []
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _by_profile() -> dict:
     """Group _algo_infos by profile, preserving insertion order."""
@@ -58,6 +56,7 @@ def _by_profile() -> dict:
 # ---------------------------------------------------------------------------
 # Response builders — pure functions, no async, safe from any thread
 # ---------------------------------------------------------------------------
+
 
 def _status_text() -> str:
     today = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d %H:%M")
@@ -87,7 +86,9 @@ def _positions_text(algo_filter: str = "") -> str:
         tracker = PositionTracker(algo=name)
         positions = tracker.all_open(paper=paper)
         mode = "PAPER" if paper else "LIVE"
-        lines.append(f"📋 **{notifier._esc(name)}** · {mode} · {notifier._esc(profile)}")
+        lines.append(
+            f"📋 **{notifier._esc(name)}** · {mode} · {notifier._esc(profile)}"
+        )
         if not positions:
             lines.append("> _No open positions_")
         else:
@@ -131,6 +132,7 @@ def _pnl_text() -> str:
 # Discord client + slash commands
 # ---------------------------------------------------------------------------
 
+
 class _TradingClient(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -146,7 +148,9 @@ class _TradingClient(discord.Client):
             logger.info("Discord slash commands registered to guild %s.", guild_id_str)
         else:
             await self.tree.sync()
-            logger.info("Discord slash commands synced globally (may take up to 1h to appear).")
+            logger.info(
+                "Discord slash commands synced globally (may take up to 1h to appear)."
+            )
 
     async def on_ready(self) -> None:
         logger.info("Discord bot ready: %s (id=%s)", self.user, self.user.id)
@@ -226,6 +230,7 @@ def _register_commands(client: _TradingClient) -> None:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def start_standalone(algo_infos: list) -> None:
     """Launch the bot in a daemon thread.

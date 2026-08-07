@@ -5,7 +5,6 @@ Stubs the HTTP boundary (`fetcher.fetch_user_positions`). Everything else
 runs the real PositionTracker + DB.
 """
 
-import pytest
 
 from tests.conftest import make_trade
 

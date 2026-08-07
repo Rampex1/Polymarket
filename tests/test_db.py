@@ -5,7 +5,6 @@ We hit the real SQLite engine via a tempfile to catch issues that a mock
 would hide (e.g. WAL mode pragma syntax, index re-creation).
 """
 
-import sqlite3
 
 
 def test_schema_creates_all_tables(fresh_db):

@@ -30,9 +30,8 @@ Paper mode is a no-op (paper positions live in the bot DB by definition).
 """
 
 import logging
-from typing import Optional
 
-from . import fetcher, notifier
+from . import fetcher
 from .positions import PositionTracker
 
 logger = logging.getLogger(__name__)

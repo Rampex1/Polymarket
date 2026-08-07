@@ -7,7 +7,6 @@ boundary (`bot.fetcher` functions) is stubbed; tracker/params run real code.
 """
 
 import time
-from dataclasses import replace
 
 import pytest
 

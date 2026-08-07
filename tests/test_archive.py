@@ -7,7 +7,6 @@ HTTP stubbed at the bot.fetcher boundary (the archiver's only network path).
 """
 
 import json
-import time
 
 import pytest
 
