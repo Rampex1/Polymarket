@@ -87,9 +87,6 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             updated_at INTEGER
         );
 
-        -- Training-data store: one row per signal the runner dispatched,
-        -- raw features captured at signal time, outcome backfilled at
-        -- settlement. See bot/signals.py.
         CREATE TABLE IF NOT EXISTS signals (
             signal_id    TEXT NOT NULL,
             algo         TEXT NOT NULL,
@@ -111,7 +108,6 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_signals_market
             ON signals(algo, market_id);
 
-        -- Leader attribution for the multi-wallet copy-trade strategy.
         CREATE TABLE IF NOT EXISTS copy_lots (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             algo             TEXT NOT NULL,
@@ -129,9 +125,6 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_copy_lots_open
             ON copy_lots(algo, market_id, leader_wallet, remaining_shares);
 
-        -- One row per worker boot: the exact resolved params (JSON) plus
-        -- git sha, so analytics can attribute every position/signal to the
-        -- config version that produced it. See bot/runs.py.
         CREATE TABLE IF NOT EXISTS runs (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             algo        TEXT NOT NULL,
@@ -143,9 +136,6 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_runs_algo ON runs(algo, started_at);
 
-        -- Discord thread registry: maps (market_id, algo, paper) → thread_id
-        -- so position-lifecycle notifications route into the thread instead of
-        -- flooding the main channel. See bot/threads.py.
         CREATE TABLE IF NOT EXISTS discord_threads (
             market_id  TEXT    NOT NULL,
             algo       TEXT    NOT NULL,
