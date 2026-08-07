@@ -21,6 +21,7 @@ _FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _FILES = (
     (logging.DEBUG, "debug.log"),
     (logging.INFO, "info.log"),
+    (logging.WARNING, "warn.log"),
     (logging.ERROR, "error.log"),
 )
 
