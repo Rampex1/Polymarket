@@ -1,4 +1,7 @@
-"""Pure Discord formatting helpers.
+"""
+messages.py
+
+Pure Discord formatting helpers.
 
 Keeping escaping and presentation rules separate from webhook delivery makes
 notification text easy to test and reuse from the interactive Discord bot.

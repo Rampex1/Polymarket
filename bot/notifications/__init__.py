@@ -1,1 +1,0 @@
-"""Notification rendering components."""

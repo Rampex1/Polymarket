@@ -14,7 +14,7 @@ import requests as http
 
 from .. import config, threads
 from ..domain.models import Trade
-from ..notifications.messages import (
+from .messages import (
     escape as _esc,
     feature_line as _feature_line,
     market_url as _market_url,
