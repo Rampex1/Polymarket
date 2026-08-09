@@ -1,3 +1,9 @@
+"""
+db.py
+
+Thread-local SQLite connections and the schema, created on every connect.
+"""
+
 import os
 import sqlite3
 import threading

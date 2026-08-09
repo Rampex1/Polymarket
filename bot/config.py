@@ -1,7 +1,7 @@
 """
-Infra config — env vars, API base URLs, credentials, DB path, timezone.
+config.py
 
-Algorithm knobs live in the profile TOML, never here.
+Env vars, API base URLs, credentials, DB path, timezone.
 """
 
 import os
