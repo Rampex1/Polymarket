@@ -1,3 +1,9 @@
+"""
+Infra config — env vars, API base URLs, credentials, DB path, timezone.
+
+Algorithm knobs live in the profile TOML, never here.
+"""
+
 import os
 import tomllib
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
