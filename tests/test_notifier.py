@@ -18,7 +18,7 @@ HOOK = "https://discord.com/api/webhooks/123/abc"
 @pytest.fixture
 def capture_send(monkeypatch):
     """Capture every Discord webhook POST body so we can assert on it."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     monkeypatch.setattr(notifier.config, "DISCORD_BOT_TOKEN", "")
 
@@ -40,7 +40,7 @@ def test_markdown_escape_question_with_special_chars(capture_send):
     """Market titles can contain Discord markdown chars (`*`, `_`, etc.)
     — they must be escaped so formatting can't be broken by a hostile
     or unlucky title."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     t = make_trade(question="A*B _foo_ wins?")
     notifier.on_trade_detected(t, webhook_url=HOOK)
@@ -51,7 +51,7 @@ def test_markdown_escape_question_with_special_chars(capture_send):
 
 
 def test_markdown_escape_in_reason_and_question(capture_send):
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     t = make_trade(question="*Yes_* wins?")
     notifier.on_risk_blocked("max | limit", t, webhook_url=HOOK)
@@ -63,7 +63,7 @@ def test_markdown_escape_in_reason_and_question(capture_send):
 
 def test_markdown_escape_in_outcome(capture_send):
     """outcome is rendered in buy/sell messages — must be escaped too."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     t = make_trade(outcome="*Yes_*", question="q")
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5, webhook_url=HOOK)
@@ -72,7 +72,7 @@ def test_markdown_escape_in_outcome(capture_send):
 
 
 def test_buy_executed_format(capture_send):
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
@@ -84,7 +84,7 @@ def test_buy_executed_format(capture_send):
 def test_buy_executed_shows_shares_and_drift(capture_send):
     """Fill detail: how many shares the spend bought and how far the fill
     drifted from the signal price."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     t = make_trade(action="BUY", price=0.50, outcome="Yes")
     notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
@@ -98,7 +98,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
     point of the alert."""
     import time
 
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
@@ -126,7 +126,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
 
 def test_signal_message_without_features_stays_compact(capture_send):
     """Copy-trade intents carry no features — no empty detail lines."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
@@ -139,7 +139,7 @@ def test_signal_message_without_features_stays_compact(capture_send):
 
 
 def test_skip_when_webhook_missing(monkeypatch):
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     posted = []
 
@@ -153,7 +153,7 @@ def test_skip_when_webhook_missing(monkeypatch):
 
 def test_send_profile_summary_format(fresh_db, monkeypatch):
     """Profile summary includes per-algo blocks and a combined total."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     from bot.positions import PositionTracker
     from tests.conftest import make_trade
 
@@ -179,7 +179,7 @@ def test_send_profile_summary_format(fresh_db, monkeypatch):
 
 
 def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     sent = []
     monkeypatch.setattr(notifier.http, "post", lambda *a, **kw: sent.append(1))
     notifier.send_profile_summary([("a1", True)], webhook_url="")
@@ -188,7 +188,7 @@ def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
 
 def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
     """Combined P&L/exposure sums across all algos."""
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
     from bot.positions import PositionTracker
     from tests.conftest import make_trade
 
@@ -218,7 +218,7 @@ def test_seconds_until_midnight_differs_between_timezones(monkeypatch):
     margin. A bug where TIMEZONE is silently dropped would return the same
     value for both."""
     from bot import config
-    from bot.observability.discord_notif import notifier
+    from bot.discord import notifier
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("America/New_York"))
     ny_secs = notifier._seconds_until_midnight()

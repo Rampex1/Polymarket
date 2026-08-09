@@ -80,14 +80,13 @@ bot/
                           # slippage), settlement.py (resolution price), lots.py
                           # (leader-attributed lots — one leader's exit unwinds only its share)
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
-  observability/          # Write-only operator-facing output; never read back by the trading path
-    discord_notif/        # Outbound Discord
-      notifier.py         # Discord alerts, daily summary, heartbeat, weekly signal digest
-      messages.py         # Message rendering — markdown escaping, market URLs, feature lines
-    logs/                 # Local log sinks
-      setup.py            # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
-  threads.py              # Discord thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
-  discord_bot.py          # Slash-command bot (standalone daemon, its own process)
+  discord/                # Everything that talks to Discord
+    notifier.py           # Discord alerts, daily summary, heartbeat, weekly signal digest
+    messages.py           # Message rendering — markdown escaping, market URLs, feature lines
+    threads.py            # Thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
+    discord_bot.py        # Slash-command bot (standalone daemon, its own process)
+  logs/                   # Local log sinks
+    setup.py              # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
   signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
   sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
 algorithms/

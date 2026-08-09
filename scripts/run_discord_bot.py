@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from algorithms import REGISTRY
-from bot import discord_bot
+from bot.discord import discord_bot
 from bot.domain.intents import Mode
 from bot.profile_loader import ProfileError, available_profiles, load_profile
 

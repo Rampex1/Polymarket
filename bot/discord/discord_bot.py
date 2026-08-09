@@ -20,9 +20,9 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
-from . import config
-from .observability.discord_notif import notifier
-from .positions import PositionTracker
+from .. import config
+from . import notifier
+from ..positions import PositionTracker
 
 logger = logging.getLogger(__name__)
 

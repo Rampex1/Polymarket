@@ -19,7 +19,7 @@ import time
 
 import requests as http
 
-from . import config, db
+from .. import config, db
 
 logger = logging.getLogger(__name__)
 
