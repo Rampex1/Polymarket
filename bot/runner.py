@@ -28,7 +28,8 @@ from py_clob_client_v2.client import ClobClient
 from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
 from py_clob_client_v2.constants import POLYGON
 
-from . import config, notifier, signals
+from . import config, signals
+from .observability import notifier
 from .execution import lots as copy_lots
 from .domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 from .execution.fills import FillResult, simulate_buy as _simulate_buy, simulate_sell as _simulate_sell

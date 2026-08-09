@@ -19,10 +19,11 @@ import signal
 import sys
 import threading
 
-from bot import config, db, notifier, reconciliation, runner, runs
+from bot import config, db, reconciliation, runner, runs
 from bot.algorithm import Algorithm
 from bot.domain.intents import Mode
-from bot.logging_setup import setup_logging
+from bot.observability import notifier
+from bot.observability.logging_setup import setup_logging
 from bot.positions import PositionTracker, RiskManager
 from bot.profile_loader import ProfileError
 

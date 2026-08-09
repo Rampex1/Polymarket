@@ -12,9 +12,9 @@ from datetime import datetime, timedelta
 
 import requests as http
 
-from . import config, threads
-from .domain.models import Trade
-from .notifications.messages import (
+from .. import config, threads
+from ..domain.models import Trade
+from ..notifications.messages import (
     escape as _esc,
     feature_line as _feature_line,
     market_url as _market_url,
@@ -54,7 +54,7 @@ def send(text: str, webhook_url: str = "") -> None:
 def on_signal(intent, algo_name: str = "", webhook_url: str = "",
               paper: bool = False) -> None:
     """Generic detection notification — intent-based, works for any algorithm."""
-    from .domain.intents import OpenIntent, CloseIntent, SettleIntent
+    from ..domain.intents import OpenIntent, CloseIntent, SettleIntent
     if isinstance(intent, OpenIntent):
         action_line = (
             f"OPEN `{_esc(intent.outcome) or '—'}`  "

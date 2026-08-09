@@ -29,7 +29,8 @@ def _no_discord(monkeypatch):
     """Block the Discord transports outright so the suite can never post to a
     real channel — the committed profile TOMLs carry live webhook URLs. Tests
     that assert on message bodies patch these themselves."""
-    from bot import notifier, threads
+    from bot import threads
+    from bot.observability import notifier
 
     monkeypatch.setattr(notifier.http, "post", lambda *a, **kw: None)
     monkeypatch.setattr(threads._session, "post", lambda *a, **kw: None)
