@@ -22,8 +22,8 @@ import threading
 from bot import config, db, reconciliation, runner, runs
 from bot.algorithm import Algorithm
 from bot.domain.intents import Mode
-from bot.observability import notifier
-from bot.observability.logging_setup import setup_logging
+from bot.observability.discord_notif import notifier
+from bot.observability.logging.logging_setup import setup_logging
 from bot.positions import PositionTracker, RiskManager
 from bot.profile_loader import ProfileError
 

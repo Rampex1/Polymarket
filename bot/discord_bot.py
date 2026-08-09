@@ -21,7 +21,7 @@ import discord
 from discord import app_commands
 
 from . import config
-from .observability import notifier
+from .observability.discord_notif import notifier
 from .positions import PositionTracker
 
 logger = logging.getLogger(__name__)
