@@ -6,7 +6,7 @@
 # python scripts/import_wallet_history.py /path/to/resolved_bets.csv
 #
 # Every knob must be stated explicitly; the loader rejects a block that
-# omits any. Run `python -m bot.params copy_trade` for what each one means.
+# omits any. See algorithms/copy_trade/params.py for what each one means.
 
 [[algorithm]]
 type = "copy_trade"

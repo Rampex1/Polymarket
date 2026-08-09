@@ -3,7 +3,7 @@ Copy-trade parameter schema.
 
 This file defines *what knobs exist* — names, types, and docs. No defaults:
 every profile block states every knob, and this module reads no environment
-variables. `python -m bot.params copy_trade` prints the full list.
+variables.
 """
 
 from dataclasses import dataclass, field

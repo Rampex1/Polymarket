@@ -139,18 +139,18 @@ def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> 
         if unknown:
             raise ProfileError(
                 f"{where}: unknown param(s) {sorted(unknown)} for type "
-                f"'{algo_type}'. Run `python -m bot.params {algo_type}` "
-                f"to list valid knobs."
+                f"'{algo_type}'. See algorithms/{algo_type}/params.py "
+                f"for the valid knobs."
             )
 
-        # Schema defaults are a test/dev convenience only — a profile must
-        # state every knob, so what an algorithm runs is readable in one file.
+        # The schemas carry no defaults — a block states every knob, so what
+        # an algorithm runs is readable in one file.
         missing = valid_keys - set(param_kwargs)
         if missing:
             raise ProfileError(
                 f"{where}: '{name}' is missing {len(missing)} required "
-                f"param(s): {', '.join(sorted(missing))}. Run "
-                f"`python -m bot.params {algo_type}` for the full list."
+                f"param(s): {', '.join(sorted(missing))}. See "
+                f"algorithms/{algo_type}/params.py for the full list."
             )
 
         params = params_cls(

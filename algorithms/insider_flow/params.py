@@ -2,7 +2,7 @@
 Insider-flow parameter schema.
 
 Pure schema — names, types, docs. No defaults: every profile block states
-every knob. `python -m bot.params insider_flow` prints the full list.
+every knob.
 """
 
 from dataclasses import dataclass, field

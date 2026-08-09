@@ -19,7 +19,7 @@ To add a new strategy:
   3. Reference it by type in whichever config/<profile>.toml should run it.
 
 `ENABLED` is resolved lazily (PEP 562 module __getattr__) so tooling that
-only needs REGISTRY — e.g. `python -m bot.params` — can import this package
+only needs REGISTRY can import this package
 without requiring a valid profile file.
 """
 

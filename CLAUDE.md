@@ -23,7 +23,6 @@ only here:
 PROFILE=<name> python main.py                   # run one profile's workers
 python -m discovery.archive --once              # archiver: one pass (cron-friendly)
 python -m discovery.archive --loop --every 3600 # archiver: long-running
-python -m bot.params <type> | --effective       # knob schemas / resolved config
 python -m bot.report                            # per-algo P&L, skip reasons, win rate vs odds
 ```
 
@@ -39,7 +38,7 @@ python -m bot.report                            # per-algo P&L, skip reasons, wi
   bankroll and history. Keep it stable once set.
 - **Knob schemas live in `algorithms/<type>/params.py`** — names, types,
   docs, and boot-time `validate()`. Never enumerate knobs in prose docs;
-  they go stale. `python -m bot.params <type>` is the source of truth.
+  they go stale. The dataclass is the source of truth.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only. Behavior changes are TOML edits.
 - **The params schemas carry no defaults.** Every field is required, so a
@@ -68,7 +67,6 @@ main.py                   # Entry point — worker thread per algorithm, signal 
 bot/
   config.py               # Infra only: API URLs, creds, DB path, webhook resolution, timezone, heartbeat interval
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
-  params.py               # CLI: knob discovery (`python -m bot.params [type] [--effective]`)
   report.py               # CLI: per-algo performance report (`python -m bot.report`)
   runs.py                 # Run provenance — stamps resolved params + git sha per boot
   algorithm.py            # Algorithm ABC + Intent types (Open/Close/Settle) + Mode + AlgoParams protocol

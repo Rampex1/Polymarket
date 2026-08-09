@@ -1,5 +1,5 @@
 """
-Run-provenance + report/params CLI smoke tests.
+Run-provenance + report CLI smoke tests.
 """
 
 import json
@@ -47,48 +47,6 @@ def _run_module(mod, *args, env_extra=None):
         [sys.executable, "-m", mod, *args],
         capture_output=True, text=True, timeout=60, env=env,
     )
-
-
-def test_params_cli_lists_types():
-    out = _run_module("bot.params")
-    assert out.returncode == 0, out.stderr
-    assert "copy_trade" in out.stdout
-    assert "insider_flow" in out.stdout
-
-
-def test_params_cli_shows_schema_with_docs():
-    out = _run_module("bot.params", "copy_trade")
-    assert out.returncode == 0, out.stderr
-    assert "tier1_min" in out.stdout
-    assert "high-conviction" in out.stdout       # doc text surfaced
-    assert "name" not in out.stdout.splitlines()[0]  # block-level keys hidden
-
-
-def test_params_cli_effective_marks_overrides():
-    out = _run_module("bot.params", "--effective",
-                      env_extra={"PROFILE": "experimental"})
-    assert out.returncode == 0, out.stderr
-    assert "insider_flow" in out.stdout
-    assert "webhook_url" in out.stdout
-
-
-def test_params_cli_effective_prod_paused():
-    """Prod has no [[algorithm]] blocks right now — --effective fails fast."""
-    out = _run_module("bot.params", "--effective",
-                      env_extra={"PROFILE": "prod"})
-    assert out.returncode != 0
-    assert "no [[algorithm]] blocks" in out.stdout + out.stderr
-
-
-def test_params_cli_effective_requires_profile():
-    """No implicit profile — --effective without PROFILE must fail clearly."""
-    env = {k: v for k, v in os.environ.items() if k != "PROFILE"}
-    out = subprocess.run(
-        [sys.executable, "-m", "bot.params", "--effective"],
-        capture_output=True, text=True, timeout=60, env=env,
-    )
-    assert out.returncode != 0
-    assert "PROFILE is not set" in out.stderr
 
 
 def test_report_cli_runs_on_fresh_db(tmp_path, monkeypatch):

@@ -74,12 +74,19 @@ fi
 rm -f .env.bak
 
 echo "==> Validating profiles (fail fast before touching tmux)"
-PROFILE=experimental python -m bot.params --effective > /dev/null
+# Loading ENABLED runs the whole loader — same fail-fast path main.py takes.
+validate_profile() {
+    if ! err=$(PROFILE="$1" python -c "import algorithms; algorithms.ENABLED" 2>&1); then
+        echo "$err" | tail -2
+        return 1
+    fi
+}
+validate_profile experimental
 # prod may intentionally have zero [[algorithm]] blocks (paused, no live
 # trading) — the loader fails fast on that by design, so don't validate
 # it as a hard prerequisite for the rest of the deploy.
 prod_has_algorithms=true
-PROFILE=prod python -m bot.params --effective > /dev/null || prod_has_algorithms=false
+validate_profile prod > /dev/null 2>&1 || prod_has_algorithms=false
 
 echo "==> Restarting tmux sessions"
 start_session() {
