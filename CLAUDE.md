@@ -215,7 +215,7 @@ column so multiple algorithms share one DB without collisions.
 - `copy_lots` — leader-attributed fills behind an aggregated position
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
-- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Lets `bot.report` attribute results to the config version that produced them.
+- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Written on every boot but not yet joined against; `bot.report` reads only the latest row, for a `last boot:` line. Attributing results to the run that produced them is unimplemented.
 
 Schema is created by `CREATE TABLE IF NOT EXISTS` on every connect. There
 is no migration path — a database predating the multi-algorithm layout

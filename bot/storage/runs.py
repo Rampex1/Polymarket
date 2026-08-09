@@ -1,11 +1,13 @@
 """
 Run provenance — one `runs` row per worker boot.
 
-Records the fully-resolved params (JSON), profile, and git sha so that
-analytics (`python -m bot.report`) can attribute every position, trade,
-and signal to the exact config version that produced it. Without this,
-comparing two paper variants is only valid if you can prove neither
-changed mid-experiment.
+Records the fully-resolved params (JSON), profile, and git sha, so the
+config that produced a stretch of results is recoverable after the fact —
+comparing two paper variants is only valid if neither changed mid-experiment.
+
+The rows are written but not yet joined against: `bot.report` reads only
+the latest run, to print one `last boot:` line. Attributing trades and
+signals to the run that produced them is unimplemented.
 """
 
 import dataclasses
