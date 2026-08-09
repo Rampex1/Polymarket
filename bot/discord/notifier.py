@@ -253,7 +253,7 @@ def on_heartbeat(
     if not webhook_url:
         return
 
-    from bot.ledger import Ledger
+    from bot.storage.ledger import Ledger
 
     now_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
     profile_label = _esc(profile) if profile else "all"
@@ -392,7 +392,7 @@ def send_profile_summary(
     if not webhook_url:
         return
 
-    from bot.ledger import Ledger
+    from bot.storage.ledger import Ledger
 
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
     profile_label = _esc(profile) if profile else "all"
@@ -482,7 +482,7 @@ def send_weekly_signal_digest(
     if not webhook_url:
         return
 
-    from bot import db
+    from bot.storage import db
 
     week_start_ts = int(time.time()) - 7 * 86_400
     now = datetime.now(tz=config.TIMEZONE)

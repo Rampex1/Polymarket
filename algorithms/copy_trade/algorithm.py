@@ -30,7 +30,7 @@ Close strategy:
 import logging
 from typing import Iterator, Optional
 
-from bot import fetcher
+from bot.polymarket import api
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import (
     CloseIntent,
@@ -39,7 +39,7 @@ from bot.domain.intents import (
     SettleIntent,
 )
 from bot.domain.params import Mode
-from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
+from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams
 from .multi_leader import MultiLeaderCopyEngine
@@ -90,8 +90,8 @@ class CopyTradeAlgorithm(Algorithm):
         self._address: str = ""
         self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
-        self._seen_ids = fetcher.SeenRing(SEEN_IDS_MAX)
-        self.holding_cache = fetcher.TargetHoldingCache()
+        self._seen_ids = api.SeenRing(SEEN_IDS_MAX)
+        self.holding_cache = api.TargetHoldingCache()
         self._poll_count = 0
 
     @property

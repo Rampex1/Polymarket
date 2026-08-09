@@ -17,7 +17,7 @@ import threading
 
 
 def test_parse_trade_buy():
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     raw = {
         "type": "TRADE",
@@ -40,7 +40,7 @@ def test_parse_trade_buy():
 
 
 def test_parse_trade_redeem_passes_through_without_asset():
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     t = _parse_trade({
         "type": "REDEEM",
@@ -59,7 +59,7 @@ def test_parse_trade_merge_emits_signal():
     """MERGE rows must be emitted as a MERGE signal so the executor can
     mirror-close our matching position. Pre-fix, _parse_trade silently
     dropped them and our position would sit open indefinitely."""
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     t = _parse_trade({
         "type": "MERGE",
@@ -80,7 +80,7 @@ def test_parse_trade_merge_emits_signal():
 def test_parse_trade_merge_requires_tx_and_market():
     """A MERGE row missing tx_hash or conditionId can't be deduped or
     routed — drop it rather than emit a malformed signal."""
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     assert _parse_trade({"type": "MERGE", "conditionId": "m1"}) is None
     assert _parse_trade({"type": "MERGE", "transactionHash": "0x"}) is None
@@ -88,8 +88,8 @@ def test_parse_trade_merge_requires_tx_and_market():
 
 def test_parse_trade_emits_all_sizes_now_that_filter_moved():
     """The min-trade-size filter is now algorithm-level (see test_copy_trade.py).
-    The fetcher emits every parseable row above $0 — small ones included."""
-    from bot.fetcher import _parse_trade
+    The client emits every parseable row above $0 — small ones included."""
+    from bot.polymarket.api import _parse_trade
 
     t = _parse_trade({
         "type": "TRADE", "side": "BUY", "usdcSize": "50",
@@ -101,7 +101,7 @@ def test_parse_trade_emits_all_sizes_now_that_filter_moved():
 
 
 def test_parse_trade_ignores_unknown_action():
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     assert _parse_trade({
         "type": "TRADE", "side": "TRANSFER", "usdcSize": "50",
@@ -111,7 +111,7 @@ def test_parse_trade_ignores_unknown_action():
 
 
 def test_parse_trade_malformed_returns_none():
-    from bot.fetcher import _parse_trade
+    from bot.polymarket.api import _parse_trade
 
     # usdcSize=None is the realistic malformed shape; just ensure no crash.
     assert _parse_trade({"type": "TRADE", "side": "BUY"}) is None
@@ -124,7 +124,7 @@ def test_parse_trade_malformed_returns_none():
 
 def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
     """Re-fetching the same trades must not double-process."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     next_id = [0]
 
@@ -133,7 +133,7 @@ def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
         next_id[0] += 1
         return [_fake_trade(f"id{i}") for i in range(max(0, new - 3), new + 1)]
 
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
+    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
 
     stop = threading.Event()
     seen_handled = []
@@ -143,7 +143,7 @@ def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
         if len(seen_handled) >= 8:
             stop.set()
 
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
                  poll_interval_seconds=0)
 
     assert len(seen_handled) == len(set(seen_handled))
@@ -155,10 +155,10 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
     new IDs every cycle and verifies that an *old* ID re-appearing AFTER the
     set has rolled past it triggers re-execution (proving the oldest entries
     are actually being evicted, not just held forever)."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     # Tight cap so we can prove eviction in a few iterations.
-    monkeypatch.setattr(fetcher, "SEEN_IDS_MAX", 3)
+    monkeypatch.setattr(api, "SEEN_IDS_MAX", 3)
 
     # Seed phase: poll 1 returns id0; then we'll force-evict id0 by feeding
     # 3 distinct new IDs (so the ring is full of ids 1,2,3) and re-present id0.
@@ -173,7 +173,7 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
     def fake_fetch(address, limit=100):
         return timeline.pop(0) if timeline else []
 
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
+    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
 
     stop = threading.Event()
     handled = []
@@ -183,7 +183,7 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
         if not timeline:
             stop.set()
 
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
                  poll_interval_seconds=0)
 
     # id0 was seeded (not handled), then evicted, then handled on re-appearance.
@@ -206,7 +206,7 @@ def _fake_trade(tx_id):
 
 def test_poll_loop_swallows_handler_exceptions(monkeypatch):
     """One bad on_trade call must not kill the loop."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     counter = {"n": 0}
 
@@ -215,7 +215,7 @@ def test_poll_loop_swallows_handler_exceptions(monkeypatch):
         # Always returns ONE new trade per cycle.
         return [_fake_trade(f"id{counter['n']}")]
 
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
+    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
 
     stop = threading.Event()
     invocations = []
@@ -228,7 +228,7 @@ def test_poll_loop_swallows_handler_exceptions(monkeypatch):
             stop.set()
 
     # Should not raise.
-    fetcher.poll("0xtarget", on_trade=on_trade, stop_event=stop,
+    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
                  poll_interval_seconds=0)
     assert len(invocations) >= 3
 
@@ -241,7 +241,7 @@ def test_poll_loop_swallows_handler_exceptions(monkeypatch):
 def test_fetch_target_position_retries_until_expected_min(monkeypatch):
     """When expected_min is set, the function should re-query if the API
     hasn't caught up yet (eventual consistency)."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     state = {"calls": 0}
 
@@ -262,11 +262,11 @@ def test_fetch_target_position_retries_until_expected_min(monkeypatch):
         # First two calls return stale 0, third returns the correct value.
         return FakeResp(0.0 if state["calls"] < 3 else 100_000.0)
 
-    monkeypatch.setattr(fetcher.SESSION, "get", fake_get)
+    monkeypatch.setattr(api.SESSION, "get", fake_get)
     # Skip the inter-attempt sleep to keep the test fast.
-    monkeypatch.setattr(fetcher.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(api.time, "sleep", lambda _s: None)
 
-    val = fetcher.fetch_target_position_value(
+    val = api.fetch_target_position_value(
         "0xtarget", "m1", expected_min=50_000.0, retries=5, retry_wait=0.0,
     )
     assert val == 100_000.0
@@ -275,7 +275,7 @@ def test_fetch_target_position_retries_until_expected_min(monkeypatch):
 
 def test_fetch_target_position_returns_last_value_after_retries(monkeypatch):
     """If the API never catches up, return the most recent value (don't loop forever)."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     class FakeResp:
         status_code = 200
@@ -286,10 +286,10 @@ def test_fetch_target_position_returns_last_value_after_retries(monkeypatch):
         def json(self):
             return [{"value": 0.0}]
 
-    monkeypatch.setattr(fetcher.SESSION, "get", lambda *a, **kw: FakeResp())
-    monkeypatch.setattr(fetcher.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(api.SESSION, "get", lambda *a, **kw: FakeResp())
+    monkeypatch.setattr(api.time, "sleep", lambda _s: None)
 
-    val = fetcher.fetch_target_position_value(
+    val = api.fetch_target_position_value(
         "0xtarget", "m1", expected_min=100_000.0, retries=2, retry_wait=0.0,
     )
     assert val == 0.0
@@ -297,14 +297,14 @@ def test_fetch_target_position_returns_last_value_after_retries(monkeypatch):
 
 def test_fetch_recent_trades_handles_api_failure(monkeypatch):
     """Network errors must not crash — they return an empty list."""
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_recent_trades("0xtarget") == []
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_recent_trades("0xtarget") == []
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@ def _firehose_row(**overrides):
 
 
 def test_parse_global_trade_maps_fields_and_computes_cash():
-    from bot.fetcher import _parse_global_trade
+    from bot.polymarket.api import _parse_global_trade
 
     t = _parse_global_trade(_firehose_row())
     assert t is not None
@@ -350,7 +350,7 @@ def test_parse_global_trade_maps_fields_and_computes_cash():
 
 
 def test_parse_global_trade_rejects_missing_required_fields():
-    from bot.fetcher import _parse_global_trade
+    from bot.polymarket.api import _parse_global_trade
 
     for missing in ("transactionHash", "conditionId", "proxyWallet", "asset"):
         assert _parse_global_trade(_firehose_row(**{missing: None})) is None
@@ -362,7 +362,7 @@ def test_parse_global_trade_rejects_missing_required_fields():
 
 
 def test_fetch_global_trades_builds_cash_filter_params(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     captured = {}
 
@@ -380,8 +380,8 @@ def test_fetch_global_trades_builds_cash_filter_params(monkeypatch):
         captured["params"] = params
         return FakeResp()
 
-    monkeypatch.setattr(fetcher.SESSION, "get", fake_get)
-    out = fetcher.fetch_global_trades(min_cash_usdc=5000, limit=50)
+    monkeypatch.setattr(api.SESSION, "get", fake_get)
+    out = api.fetch_global_trades(min_cash_usdc=5000, limit=50)
 
     assert captured["url"].endswith("/trades")
     assert captured["params"]["filterType"] == "CASH"
@@ -392,14 +392,14 @@ def test_fetch_global_trades_builds_cash_filter_params(monkeypatch):
 
 
 def test_fetch_global_trades_handles_api_failure(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_global_trades(min_cash_usdc=5000) == []
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_global_trades(min_cash_usdc=5000) == []
 
 
 # ---------------------------------------------------------------------------
@@ -421,16 +421,16 @@ class _StatsResp:
 
 
 def test_fetch_wallet_stats_counts_trades_and_oldest(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     rows = [
         {"type": "TRADE", "timestamp": 1_700_000_300},
         {"type": "REDEEM", "timestamp": 1_700_000_200},
         {"type": "TRADE", "timestamp": 1_700_000_100},
     ]
-    monkeypatch.setattr(fetcher.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
+    monkeypatch.setattr(api.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
 
-    stats = fetcher.fetch_wallet_stats("0xw", max_rows=100)
+    stats = api.fetch_wallet_stats("0xw", max_rows=100)
     assert stats == {
         "trade_count": 2,
         "activity_count": 3,
@@ -442,21 +442,21 @@ def test_fetch_wallet_stats_counts_trades_and_oldest(monkeypatch):
 def test_fetch_wallet_stats_full_page_is_capped(monkeypatch):
     """A full page means the wallet has ≥ max_rows activities — definitely
     not a fresh wallet; callers short-circuit on `capped`."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     rows = [{"type": "TRADE", "timestamp": 1_700_000_000 + i} for i in range(5)]
-    monkeypatch.setattr(fetcher.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
+    monkeypatch.setattr(api.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
 
-    stats = fetcher.fetch_wallet_stats("0xw", max_rows=5)
+    stats = api.fetch_wallet_stats("0xw", max_rows=5)
     assert stats["capped"] is True
 
 
 def test_fetch_wallet_stats_empty_history_is_fresh(monkeypatch):
     """Zero activities (API lag on a brand-new wallet) → fresh, not an error."""
-    from bot import fetcher
+    from bot.polymarket import api
 
-    monkeypatch.setattr(fetcher.SESSION, "get", lambda *a, **kw: _StatsResp([]))
-    stats = fetcher.fetch_wallet_stats("0xw")
+    monkeypatch.setattr(api.SESSION, "get", lambda *a, **kw: _StatsResp([]))
+    stats = api.fetch_wallet_stats("0xw")
     assert stats == {
         "trade_count": 0, "activity_count": 0, "oldest_ts": None, "capped": False,
     }
@@ -466,70 +466,70 @@ def test_fetch_wallet_stats_ignores_null_timestamps(monkeypatch):
     """A row whose timestamp hasn't propagated must not register as
     epoch-zero — that would make a brand-new wallet look decades old and
     silently fail every freshness check."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     rows = [
         {"type": "TRADE", "timestamp": None},
         {"type": "TRADE", "timestamp": 1_700_000_100},
     ]
-    monkeypatch.setattr(fetcher.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
-    assert fetcher.fetch_wallet_stats("0xw")["oldest_ts"] == 1_700_000_100
+    monkeypatch.setattr(api.SESSION, "get", lambda *a, **kw: _StatsResp(rows))
+    assert api.fetch_wallet_stats("0xw")["oldest_ts"] == 1_700_000_100
 
     rows_all_null = [{"type": "TRADE", "timestamp": None}]
     monkeypatch.setattr(
-        fetcher.SESSION, "get", lambda *a, **kw: _StatsResp(rows_all_null))
-    assert fetcher.fetch_wallet_stats("0xw")["oldest_ts"] is None
+        api.SESSION, "get", lambda *a, **kw: _StatsResp(rows_all_null))
+    assert api.fetch_wallet_stats("0xw")["oldest_ts"] is None
 
 
 def test_fetch_wallet_stats_failure_returns_none(monkeypatch):
     """None (not a dict) so callers can fail CLOSED on unverifiable wallets."""
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_wallet_stats("0xw") is None
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_wallet_stats("0xw") is None
 
 
 def test_fetch_wallet_value_parses_list_shape(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher.SESSION, "get",
+        api.SESSION, "get",
         lambda *a, **kw: _StatsResp([{"user": "0xw", "value": 2500.5}]),
     )
-    assert fetcher.fetch_wallet_value("0xw") == 2500.5
+    assert api.fetch_wallet_value("0xw") == 2500.5
 
 
 def test_fetch_wallet_value_parses_dict_shape(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher.SESSION, "get", lambda *a, **kw: _StatsResp({"value": "99.5"}),
+        api.SESSION, "get", lambda *a, **kw: _StatsResp({"value": "99.5"}),
     )
-    assert fetcher.fetch_wallet_value("0xw") == 99.5
+    assert api.fetch_wallet_value("0xw") == 99.5
 
 
 def test_fetch_wallet_value_failure_returns_none(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_wallet_value("0xw") is None
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_wallet_value("0xw") is None
 
 
 def test_fetch_wallet_value_unparseable_returns_none(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher.SESSION, "get", lambda *a, **kw: _StatsResp([{"user": "0xw"}]),
+        api.SESSION, "get", lambda *a, **kw: _StatsResp([{"user": "0xw"}]),
     )
-    assert fetcher.fetch_wallet_value("0xw") is None
+    assert api.fetch_wallet_value("0xw") is None
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +538,7 @@ def test_fetch_wallet_value_unparseable_returns_none(monkeypatch):
 
 
 def test_fetch_price_history_parses_points(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     captured = {}
 
@@ -556,8 +556,8 @@ def test_fetch_price_history_parses_points(monkeypatch):
         captured["params"] = params
         return FakeResp()
 
-    monkeypatch.setattr(fetcher.SESSION, "get", fake_get)
-    pts = fetcher.fetch_price_history("tok1", fidelity=60)
+    monkeypatch.setattr(api.SESSION, "get", fake_get)
+    pts = api.fetch_price_history("tok1", fidelity=60)
 
     assert captured["url"].endswith("/prices-history")
     assert captured["params"]["market"] == "tok1"
@@ -568,7 +568,7 @@ def test_fetch_price_history_parses_points(monkeypatch):
 
 def test_fetch_price_history_ts_range_replaces_interval(monkeypatch):
     """startTs/endTs and interval are mutually exclusive on the CLOB API."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     captured = {}
 
@@ -585,8 +585,8 @@ def test_fetch_price_history_ts_range_replaces_interval(monkeypatch):
         captured["params"] = params
         return FakeResp()
 
-    monkeypatch.setattr(fetcher.SESSION, "get", fake_get)
-    pts = fetcher.fetch_price_history("tok1", fidelity=1, start_ts=100, end_ts=200)
+    monkeypatch.setattr(api.SESSION, "get", fake_get)
+    pts = api.fetch_price_history("tok1", fidelity=1, start_ts=100, end_ts=200)
 
     assert captured["params"]["startTs"] == 100
     assert captured["params"]["endTs"] == 200
@@ -596,14 +596,14 @@ def test_fetch_price_history_ts_range_replaces_interval(monkeypatch):
 
 def test_fetch_price_history_failure_returns_none(monkeypatch):
     """…whereas None means the HTTP call itself failed (caller may retry)."""
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_price_history("tok1") is None
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_price_history("tok1") is None
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +612,7 @@ def test_fetch_price_history_failure_returns_none(monkeypatch):
 
 
 def test_fetch_top_markets_builds_params(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     captured = {}
 
@@ -630,8 +630,8 @@ def test_fetch_top_markets_builds_params(monkeypatch):
         captured["params"] = params
         return FakeResp()
 
-    monkeypatch.setattr(fetcher.SESSION, "get", fake_get)
-    out = fetcher.fetch_top_markets(closed=True, limit=25, end_date_min="2026-06-01")
+    monkeypatch.setattr(api.SESSION, "get", fake_get)
+    out = api.fetch_top_markets(closed=True, limit=25, end_date_min="2026-06-01")
 
     assert captured["url"].endswith("/markets")
     # Gamma is case-sensitive about booleans — must be lowercase strings.
@@ -644,11 +644,11 @@ def test_fetch_top_markets_builds_params(monkeypatch):
 
 
 def test_fetch_top_markets_failure_returns_empty(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     import requests
 
     def bad_get(*a, **kw):
         raise requests.ConnectionError("offline")
 
-    monkeypatch.setattr(fetcher.SESSION, "get", bad_get)
-    assert fetcher.fetch_top_markets(closed=False) == []
+    monkeypatch.setattr(api.SESSION, "get", bad_get)
+    assert api.fetch_top_markets(closed=False) == []

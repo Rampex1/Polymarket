@@ -3,7 +3,7 @@ InsiderFlow algorithm tests — fresh-wallet suspicious-flow detection.
 
 Filter chain, freshness gate (fail-closed), dedupe, top-up sizing, and the
 resolution settle-sweep. As everywhere else in the suite, only the HTTP
-boundary (`bot.fetcher` functions) is stubbed; ledger/params run real code.
+boundary (`bot.polymarket.api` functions) is stubbed; ledger/params run real code.
 """
 
 import time
@@ -87,10 +87,10 @@ def algo(ledger):
 def _no_value_lookup(monkeypatch):
     """Default: portfolio-value enrichment returns None so no test ever makes
     a real HTTP call. Feature-capture tests override explicitly."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_value", lambda *a, **kw: None, raising=False,
+        api, "fetch_wallet_value", lambda *a, **kw: None, raising=False,
     )
 
 
@@ -98,10 +98,10 @@ def _no_value_lookup(monkeypatch):
 def _non_sports_market(monkeypatch):
     """Default: Gamma category lookup returns a non-sports market so no test
     makes a real HTTP call. Category-gate tests override explicitly."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {
             "conditionId": mid,
             "category": "Politics",
@@ -113,22 +113,22 @@ def _non_sports_market(monkeypatch):
 
 @pytest.fixture
 def stub_firehose(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     def _set(rows):
         monkeypatch.setattr(
-            fetcher, "fetch_global_trades", lambda *a, **kw: list(rows),
+            api, "fetch_global_trades", lambda *a, **kw: list(rows),
         )
     return _set
 
 
 @pytest.fixture
 def stub_stats(monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
 
     def _set(stats):
         monkeypatch.setattr(
-            fetcher, "fetch_wallet_stats", lambda *a, **kw: stats,
+            api, "fetch_wallet_stats", lambda *a, **kw: stats,
         )
     return _set
 
@@ -200,13 +200,13 @@ def test_skips_sports_title_patterns(algo, stub_firehose, stub_stats):
 def test_skips_sports_category_market(algo, stub_firehose, stub_stats, monkeypatch):
     """'Will Bosnia and Herzegovina win on 2026-06-12?' matches no title
     pattern — the category gate must catch what title heuristics can't."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade(
         title="Will Bosnia and Herzegovina win on 2026-06-12?")])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"conditionId": mid, "category": "Sports", "events": []},
     )
     assert list(algo.poll()) == []
@@ -215,12 +215,12 @@ def test_skips_sports_category_market(algo, stub_firehose, stub_stats, monkeypat
 def test_skips_sports_tagged_market(algo, stub_firehose, stub_stats, monkeypatch):
     """Some markets carry no top-level category but are tagged Sports on
     their event."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade(title="Will FC Basel win on 2026-06-14?")])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {
             "conditionId": mid,
             "events": [{"tags": [
@@ -237,11 +237,11 @@ def test_market_lookup_failure_fails_closed(algo, stub_firehose, stub_stats,
     """The category gate alone used to fail open on a Gamma failure; the
     time-value gate supersedes that — without the market row the resolution
     horizon is unknowable, and an unknowable wait is not bet on."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda mid: None)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda mid: None)
     assert list(algo.poll()) == []
 
 
@@ -249,7 +249,7 @@ def test_market_lookup_failure_is_not_cached(algo, stub_firehose, stub_stats,
                                              monkeypatch):
     """A transient Gamma failure fails closed for THAT row only — the
     market's next trade must retry the lookup, not inherit the failure."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     results = iter([
         None,
@@ -257,7 +257,7 @@ def test_market_lookup_failure_is_not_cached(algo, stub_firehose, stub_stats,
          "endDate": end_iso(7), "events": []},
     ])
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution", lambda mid: next(results),
+        api, "fetch_market_resolution", lambda mid: next(results),
     )
     stub_firehose([
         make_global_trade(tx_hash="0xt1", wallet="0xw1"),
@@ -271,12 +271,12 @@ def test_uncategorized_market_fails_open(algo, stub_firehose, stub_stats,
                                          monkeypatch):
     """A fetched market with no category/tag data passes the category gate —
     it's a noise filter and the title patterns already passed."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"conditionId": mid, "endDate": end_iso(7), "events": []},
     )
     assert len(list(algo.poll())) == 1
@@ -286,11 +286,11 @@ def test_category_verdict_cached_per_market(algo, stub_firehose, stub_stats,
                                             monkeypatch):
     """The firehose repeats hot markets constantly — one Gamma lookup per
     market, not per trade."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: calls.append(mid) or {
             "conditionId": mid, "category": "Sports", "events": [],
         },
@@ -331,13 +331,13 @@ def test_skips_market_resolving_too_far_out(algo, stub_firehose, stub_stats,
     """The Hormuz case: 'true' insider info on a market resolving in six
     months still locks thin capital for the wait — and real insiders bet on
     imminent events anyway."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade(
         title="Strait of Hormuz traffic returns to normal by December 31?")])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"conditionId": mid, "category": "Geopolitics",
                      "endDate": end_iso(200), "events": []},
     )
@@ -350,10 +350,10 @@ def test_skips_when_annualized_return_below_hurdle(
     """Win-case +400% over 30 days is ~4870%/yr — a 10000%/yr hurdle
     rejects it. The same trade clears a 1000%/yr hurdle."""
     from algorithms.insider_flow import InsiderFlowAlgorithm
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"conditionId": mid, "category": "Politics",
                      "endDate": end_iso(30), "events": []},
     )
@@ -369,12 +369,12 @@ def test_skips_when_annualized_return_below_hurdle(
 def test_missing_end_date_fails_closed(algo, stub_firehose, stub_stats,
                                        monkeypatch):
     """No parseable end date → the wait can't be priced → no bet."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"conditionId": mid, "category": "Politics",
                      "endDate": "not-a-date", "events": []},
     )
@@ -439,11 +439,11 @@ def test_zero_history_wallet_is_fresh(algo, stub_firehose, stub_stats):
 def test_wallet_stats_not_fetched_for_rejected_rows(
     algo, stub_firehose, monkeypatch
 ):
-    from bot import fetcher
+    from bot.polymarket import api
 
     calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_stats",
+        api, "fetch_wallet_stats",
         lambda *a, **kw: calls.append(a) or fresh_stats(),
     )
     stub_firehose([make_global_trade(price=0.90, cash_usdc=45_000.0)])
@@ -455,11 +455,11 @@ def test_wallet_verdict_cached_across_rows(algo, stub_firehose, monkeypatch):
     """Two rows from the same wallet in one burst → one /activity lookup.
     The verdict barely changes within the TTL, so re-fetching is pure waste
     that blocks the poll loop."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_stats",
+        api, "fetch_wallet_stats",
         lambda *a, **kw: calls.append(a) or fresh_stats(),
     )
     stub_firehose([
@@ -474,12 +474,12 @@ def test_wallet_verdict_cached_across_rows(algo, stub_firehose, monkeypatch):
 def test_failed_wallet_lookup_is_not_cached(algo, stub_firehose, monkeypatch):
     """A transient stats failure fails closed for THAT row only — the
     wallet's next row must retry the lookup, not inherit the failure."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     results = iter([None, fresh_stats()])
     calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_stats",
+        api, "fetch_wallet_stats",
         lambda *a, **kw: calls.append(a) or next(results),
     )
     stub_firehose([
@@ -501,12 +501,12 @@ def test_intent_carries_raw_features(algo, stub_firehose, stub_stats, monkeypatc
     """Features are raw observables (recompute derivations offline later);
     capture must include the signal economics and the wallet vetting data
     we already fetched."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_value", lambda *a, **kw: 2500.0, raising=False,
+        api, "fetch_wallet_value", lambda *a, **kw: 2500.0, raising=False,
     )
 
     intents = list(algo.poll())
@@ -608,14 +608,14 @@ def test_position_at_bet_size_skips_without_stats_call(
 ):
     """Already at bet size in this market → skip (and don't even vet the
     wallet — position check is the cheaper gate)."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
     ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_wallet_stats",
+        api, "fetch_wallet_stats",
         lambda *a, **kw: calls.append(a) or fresh_stats(),
     )
     stub_firehose([make_global_trade()])
@@ -788,14 +788,14 @@ def algo_sweeping(ledger):
 def test_settle_sweep_emits_settle_for_resolved_market(
     algo_sweeping, stub_firehose, ledger, monkeypatch
 ):
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
     ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"closed": True, "outcomePrices": '["1", "0"]'},
     )
 
@@ -811,14 +811,14 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
     """Trading has ended but the outcome is still in the UMA window —
     outcomePrices is the last book, not a settlement. Must NOT settle:
     a wrong close price would permanently mislabel the signal rows."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
     ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"closed": True, "outcomePrices": '["0.97", "0.03"]'},
     )
     assert list(algo_sweeping.poll()) == []
@@ -827,14 +827,14 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
 def test_settle_sweep_leaves_unresolved_markets_alone(
     algo_sweeping, stub_firehose, ledger, monkeypatch
 ):
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
     ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution", lambda mid: {"closed": False},
+        api, "fetch_market_resolution", lambda mid: {"closed": False},
     )
     assert list(algo_sweeping.poll()) == []
 

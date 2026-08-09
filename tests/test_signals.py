@@ -35,7 +35,7 @@ def _intent(**overrides):
 
 
 def test_record_writes_row_with_features_json(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(), paper=True, executed=True)
 
@@ -56,7 +56,7 @@ def test_record_writes_row_with_features_json(fresh_db):
 
 
 def test_record_skip_reason_for_unexecuted(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record(
         "algo_a", _intent(), paper=True, executed=False, skip_reason="risk: capped",
@@ -67,7 +67,7 @@ def test_record_skip_reason_for_unexecuted(fresh_db):
 
 
 def test_record_upserts_on_same_signal_and_algo(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(), paper=True, executed=False,
                    skip_reason="slippage")
@@ -80,7 +80,7 @@ def test_record_upserts_on_same_signal_and_algo(fresh_db):
 
 
 def test_record_same_signal_id_different_algo_is_distinct(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(), paper=True, executed=True)
     signals.record("algo_b", _intent(), paper=True, executed=False,
@@ -91,7 +91,7 @@ def test_record_same_signal_id_different_algo_is_distinct(fresh_db):
 
 def test_record_without_signal_id_is_dropped(fresh_db):
     """No signal_id → no dedupe key → don't store junk."""
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(signal_id=""), paper=True, executed=True)
     assert db.get().execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 0
@@ -99,7 +99,7 @@ def test_record_without_signal_id_is_dropped(fresh_db):
 
 def test_record_never_raises_on_unserializable_features(fresh_db):
     """Feature capture must not be able to break dispatch — coerce or drop."""
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record(
         "algo_a", _intent(features={"weird": object()}), paper=True, executed=True,
@@ -115,7 +115,7 @@ def test_record_never_raises_on_unserializable_features(fresh_db):
 
 
 def test_label_outcomes_sets_outcome_on_unlabeled_rows(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(), paper=True, executed=True)
     n = signals.label_outcomes("algo_a", "m1", close_price=1.0,
@@ -130,7 +130,7 @@ def test_label_outcomes_sets_outcome_on_unlabeled_rows(fresh_db):
 
 def test_label_outcomes_is_idempotent(fresh_db):
     """A second settle (or a re-run) must not overwrite the first label."""
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(), paper=True, executed=True)
     signals.label_outcomes("algo_a", "m1", close_price=1.0, pnl_usdc=40.0, paper=True)
@@ -143,7 +143,7 @@ def test_label_outcomes_is_idempotent(fresh_db):
 
 
 def test_label_outcomes_scoped_to_algo_market_and_paper(fresh_db):
-    from bot import db, signals
+    from bot.storage import db, signals
 
     signals.record("algo_a", _intent(signal_id="s1"), paper=True, executed=True)
     signals.record("algo_a", _intent(signal_id="s2", market_id="m2"), paper=True,
@@ -162,7 +162,7 @@ def test_label_outcomes_scoped_to_algo_market_and_paper(fresh_db):
 
 
 def test_unlabeled_market_ids_lists_pending_markets(fresh_db):
-    from bot import signals
+    from bot.storage import signals
 
     signals.record("algo_a", _intent(signal_id="s1", market_id="m1"), paper=True,
                    executed=False, skip_reason="risk: capped")

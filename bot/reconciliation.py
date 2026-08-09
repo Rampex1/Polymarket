@@ -31,8 +31,8 @@ Paper mode is a no-op (paper positions live in the bot DB by definition).
 
 import logging
 
-from . import fetcher
-from .ledger import Ledger
+from .polymarket import api
+from .storage.ledger import Ledger
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def reconcile_positions(
         summary["skipped"] = True
         return summary
 
-    onchain = fetcher.fetch_user_positions(funder_address)
+    onchain = api.fetch_user_positions(funder_address)
     if not onchain:
         # Either there genuinely are no positions, or the API call failed.
         # Both are safe to log at debug level — if DB shows positions we

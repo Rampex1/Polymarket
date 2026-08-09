@@ -11,8 +11,8 @@ from datetime import date
 from typing import Optional
 
 from . import db
-from .domain.position import Position
-from .domain.records import Trade
+from ..domain.position import Position
+from ..domain.records import Trade
 
 logger = logging.getLogger(__name__)
 

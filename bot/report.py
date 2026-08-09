@@ -12,7 +12,7 @@ signals. Read-only.
 
 import time
 
-from . import db
+from .storage import db
 
 
 def _one(conn, sql: str, args=()) -> float:

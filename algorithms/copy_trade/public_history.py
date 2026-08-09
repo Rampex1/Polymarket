@@ -16,7 +16,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from bot import fetcher
+from bot.polymarket import api
 from bot.execution.settlement import gamma_outcome_price
 
 from .ranker import ResolvedBet
@@ -30,14 +30,14 @@ _LEADERBOARD_REQUESTS = (
 )
 
 
-def leaderboard_wallets(session: Any = fetcher.SESSION) -> list[str]:
+def leaderboard_wallets(session: Any = api.SESSION) -> list[str]:
     """Return a deduplicated, public candidate pool from three leaderboards."""
     wallets: list[str] = []
     seen: set[str] = set()
     for params in _LEADERBOARD_REQUESTS:
         try:
             response = session.get(
-                f"{fetcher.config.DATA_API}/v1/leaderboard", params=params, timeout=10,
+                f"{api.config.DATA_API}/v1/leaderboard", params=params, timeout=10,
             )
             response.raise_for_status()
             rows = response.json()
@@ -54,7 +54,7 @@ def leaderboard_wallets(session: Any = fetcher.SESSION) -> list[str]:
 
 def wallet_buys(
     wallet: str, max_pages: int, history_end: int | None = None,
-    session: Any = fetcher.SESSION,
+    session: Any = api.SESSION,
 ) -> list[dict]:
     """Fetch up to ``max_pages`` of public BUY fills for one wallet."""
     rows: list[dict] = []
@@ -73,7 +73,7 @@ def wallet_buys(
             if history_end is not None:
                 params["end"] = history_end
             response = session.get(
-                f"{fetcher.config.DATA_API}/trades",
+                f"{api.config.DATA_API}/trades",
                 params=params,
                 timeout=10,
             )
@@ -91,13 +91,13 @@ def wallet_buys(
     return rows
 
 
-def closed_positions(wallet: str, max_pages: int, session: Any = fetcher.SESSION) -> list[dict]:
+def closed_positions(wallet: str, max_pages: int, session: Any = api.SESSION) -> list[dict]:
     """Fetch closed positions for the conservative paper-history fallback."""
     rows: list[dict] = []
     for page in range(max_pages):
         try:
             response = session.get(
-                f"{fetcher.config.DATA_API}/closed-positions",
+                f"{api.config.DATA_API}/closed-positions",
                 params={"user": wallet, "limit": 50, "offset": page * 50,
                         "sortBy": "TIMESTAMP", "sortDirection": "DESC"},
                 timeout=10,
@@ -134,7 +134,7 @@ def _timestamp(value: object) -> int | None:
 
 def resolved_bet_from_trade(wallet: str, trade: dict, market: dict | None) -> ResolvedBet | None:
     """Normalize one resolved BUY fill, failing closed on ambiguity."""
-    if not market or not fetcher.market_outcome_is_final(market):
+    if not market or not api.market_outcome_is_final(market):
         return None
     asset_id = trade.get("asset")
     try:
@@ -193,7 +193,7 @@ def collect_resolved_bets(
     wallets: Iterable[str],
     max_pages_per_wallet: int,
     trades_for_wallet: Callable[[str, int, int | None], list[dict]] = wallet_buys,
-    market_for_id: Callable[[str], dict | None] = fetcher.fetch_market_resolution,
+    market_for_id: Callable[[str], dict | None] = api.fetch_market_resolution,
     history_end: int | None = None,
 ) -> list[ResolvedBet]:
     """Collect normalized, final-outcome rows for a bounded wallet list."""

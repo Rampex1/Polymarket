@@ -5,8 +5,8 @@ Pre-trade gate for BUYs, using each algorithm's own caps.
 Sells and redeems always pass — blocking one would trap us in a loser.
 """
 
-from .domain.records import Trade
-from .ledger import Ledger
+from ..domain.records import Trade
+from ..storage.ledger import Ledger
 
 
 class RiskManager:

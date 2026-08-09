@@ -79,7 +79,7 @@ flowchart TB
 
 ```
 main.py        entry point — one worker thread per enabled algorithm
-bot/           shared infra: config, DB, runner, risk, fetcher, notifier, Discord bot
+bot/           shared infra — domain/, storage/, execution/, polymarket/, discord/, logs/
 algorithms/    strategies — copy_trade/, insider_flow/
 config/        profile TOMLs (behavior) + webhooks.toml (Discord routing)
 discovery/     price-history archiver

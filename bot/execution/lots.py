@@ -7,7 +7,7 @@ leader's allocation rather than flattening every leader in the market.
 
 import time
 
-from .. import db
+from ..storage import db
 
 
 def record_open(

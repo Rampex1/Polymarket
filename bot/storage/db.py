@@ -8,7 +8,7 @@ import os
 import sqlite3
 import threading
 
-from . import config
+from .. import config
 
 _local = threading.local()
 

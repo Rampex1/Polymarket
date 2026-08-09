@@ -154,7 +154,7 @@ def test_skip_when_webhook_missing(monkeypatch):
 def test_send_profile_summary_format(fresh_db, monkeypatch):
     """Profile summary includes per-algo blocks and a combined total."""
     from bot.discord import notifier
-    from bot.ledger import Ledger
+    from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
     # Seed one position into the DB for algo "a1".
@@ -189,7 +189,7 @@ def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
 def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
     """Combined P&L/exposure sums across all algos."""
     from bot.discord import notifier
-    from bot.ledger import Ledger
+    from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
     for name, usdc in [("b1", 3.0), ("b2", 5.0)]:

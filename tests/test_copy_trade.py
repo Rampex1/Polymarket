@@ -1,6 +1,6 @@
 """
 CopyTrade algorithm tests — tier mapping, intent emission, MERGE/SELL/REDEEM
-classification. The fetcher HTTP boundary is stubbed; everything else
+classification. The Polymarket HTTP boundary is stubbed; everything else
 runs the real code paths.
 """
 
@@ -94,11 +94,11 @@ def algo_with_ledger(ledger, default_params, monkeypatch):
 @pytest.fixture
 def stub_holding(monkeypatch):
     """Pin the target-holding lookup."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     def _set(value):
         monkeypatch.setattr(
-            fetcher, "fetch_target_position_value", lambda *a, **kw: value,
+            api, "fetch_target_position_value", lambda *a, **kw: value,
         )
     return _set
 
@@ -318,7 +318,7 @@ def test_redeem_signal_yields_settle_intent(algo_with_ledger):
 
 
 def test_poll_dedupes_seen_ids(algo_with_ledger, monkeypatch, stub_holding):
-    from bot import fetcher
+    from bot.polymarket import api
 
     state = {"calls": 0}
 
@@ -326,7 +326,7 @@ def test_poll_dedupes_seen_ids(algo_with_ledger, monkeypatch, stub_holding):
         state["calls"] += 1
         return [make_trade(action="BUY", trade_id="tx1", price=0.50)]
 
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", fake_fetch)
+    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
     stub_holding(100_000)
 
     # First poll yields an intent.
@@ -340,11 +340,11 @@ def test_poll_dedupes_seen_ids(algo_with_ledger, monkeypatch, stub_holding):
 def test_poll_filters_below_min_trade_size(algo_with_ledger, monkeypatch,
                                             default_params, stub_holding):
     """Dust trades below `min_trade_size_usdc` get dropped before classification."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     monkeypatch.setattr(default_params, "min_trade_size_usdc", 100.0)
     monkeypatch.setattr(
-        fetcher, "fetch_recent_trades",
+        api, "fetch_recent_trades",
         lambda addr, limit=100: [
             make_trade(action="BUY", trade_id="dust", size_usdc=10.0, price=0.50),
         ],
@@ -373,22 +373,22 @@ def algo_sweeping(ledger):
 
 
 def _stub_poll(monkeypatch, trades=None):
-    """Stub fetcher.fetch_recent_trades to return an empty list (no new signals)."""
-    from bot import fetcher
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", lambda *a, **kw: trades or [])
+    """Stub api.fetch_recent_trades to return an empty list (no new signals)."""
+    from bot.polymarket import api
+    monkeypatch.setattr(api, "fetch_recent_trades", lambda *a, **kw: trades or [])
 
 
 def test_settle_sweep_emits_settle_for_resolved_market(
     algo_sweeping, ledger, monkeypatch
 ):
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", price=0.50)
     ledger.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
 
     _stub_poll(monkeypatch)
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"closed": True, "outcomePrices": '["1", "0"]'},
     )
 
@@ -403,14 +403,14 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
     algo_sweeping, ledger, monkeypatch
 ):
     """Closed but outcome not yet binary (UMA dispute window) — must NOT settle."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", price=0.50)
     ledger.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
 
     _stub_poll(monkeypatch)
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {"closed": True, "outcomePrices": '["0.97", "0.03"]'},
     )
     assert list(algo_sweeping.poll()) == []
@@ -419,21 +419,21 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
 def test_settle_sweep_leaves_unresolved_markets_alone(
     algo_sweeping, ledger, monkeypatch
 ):
-    from bot import fetcher
+    from bot.polymarket import api
 
     seed = make_trade(action="BUY", market_id="m1", price=0.50)
     ledger.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
 
     _stub_poll(monkeypatch)
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution", lambda mid: {"closed": False},
+        api, "fetch_market_resolution", lambda mid: {"closed": False},
     )
     assert list(algo_sweeping.poll()) == []
 
 
 def test_settle_sweep_cadence(ledger, monkeypatch):
     """Sweep fires every `settle_check_every` polls, not every poll."""
-    from bot import fetcher
+    from bot.polymarket import api
 
     a = CopyTradeAlgorithm(params=copy_trade_params(
         name="cadence_test",
@@ -448,9 +448,9 @@ def test_settle_sweep_cadence(ledger, monkeypatch):
     ledger.record_buy(seed, spent_usdc=1.0, shares=2.0, fill_price=0.50, paper=True)
 
     sweep_calls = []
-    monkeypatch.setattr(fetcher, "fetch_recent_trades", lambda *a, **kw: [])
+    monkeypatch.setattr(api, "fetch_recent_trades", lambda *a, **kw: [])
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: sweep_calls.append(mid) or {"closed": False},
     )
 

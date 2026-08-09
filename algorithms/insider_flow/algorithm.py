@@ -49,11 +49,11 @@ import time
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-from bot import fetcher
+from bot.polymarket import api
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import Intent, OpenIntent, SettleIntent
 from bot.domain.params import Mode
-from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
+from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 from bot.domain.records import GlobalTrade
 
 from .params import InsiderFlowParams
@@ -87,7 +87,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
         self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
-        self._seen = fetcher.SeenRing(SEEN_IDS_MAX)
+        self._seen = api.SeenRing(SEEN_IDS_MAX)
         self._poll_count = 0
         # wallet → (expires_at, stats-dict-if-fresh-else-None).
         # Failed lookups are never cached.

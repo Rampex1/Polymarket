@@ -67,23 +67,29 @@ main.py                   # Entry point — worker thread per algorithm, signal 
 bot/
   config.py               # Infra only: API URLs, creds, DB path, webhook resolution, timezone, heartbeat interval
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
+  reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
   report.py               # CLI: per-algo performance report (`python -m bot.report`)
-  runs.py                 # Run provenance — stamps resolved params + git sha per boot
-  runner.py               # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
   domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
     algorithm.py          # Algorithm ABC — the contract every strategy implements
     intents.py            # What we decided: Open/Close/SettleIntent
     position.py           # What we hold in a market
     records.py            # What the APIs said: Trade, GlobalTrade
     params.py             # Mode (paper/live) + AlgoParams protocol
-  db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
-  fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
-  ledger.py               # Ledger — repository for positions, trade_log, daily_stats, paper_account
-  risk.py                 # RiskManager — pre-trade caps from each algo's params; BUYs only
-  execution/              # Called by runner: fills.py (paper fills), pricing.py (price +
-                          # slippage), settlement.py (resolution price), lots.py
-                          # (leader-attributed lots — one leader's exit unwinds only its share)
-  reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
+  storage/                # Every SQLite table and the code that reads it
+    db.py                 # Thread-local connections, WAL, schema on every connect
+    ledger.py             # Ledger — positions, trade_log, daily_stats, paper_account
+    signals.py            # Signal feature logging — training-data rows, outcome-labeled at settle
+    runs.py               # Run provenance — resolved params + git sha per boot
+  execution/              # Turning intents into fills; re-exports nothing
+    runner.py             # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
+    risk.py               # RiskManager — pre-trade caps from each algo's params; BUYs only
+    fills.py              # Paper-exchange fills — no DB, notification, or strategy imports
+    pricing.py            # Current price + the slippage gate
+    settlement.py         # Canonical resolution price; stricter finality rules than order execution
+    lots.py               # Leader-attributed lots — one leader's exit unwinds only its share
+  polymarket/             # Everything that talks to Polymarket
+    api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
+    gateway.py            # The boundary strategies depend on instead of the transport
   discord/                # Everything that talks to Discord
     notifier.py           # Discord alerts, daily summary, heartbeat, weekly signal digest
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
@@ -91,8 +97,6 @@ bot/
     discord_bot.py        # Slash-command bot (standalone daemon, its own process)
   logs/                   # Local log sinks
     setup.py              # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
-  signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle
-  sizing.py               # Kelly math (pure): fraction, implied belief, fractional-Kelly stake
 algorithms/
   __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
   copy_trade/             # Mirror one target wallet, or a ranked cohort

@@ -10,7 +10,7 @@ from math import sqrt
 from statistics import stdev
 from typing import Iterable, Protocol
 
-from bot import db
+from bot.storage import db
 
 
 @dataclass(frozen=True)

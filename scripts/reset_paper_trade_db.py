@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from algorithms import ENABLED
 from bot import config
-from bot.ledger import Ledger
+from bot.storage.ledger import Ledger
 
 db_path = config.DB_PATH
 

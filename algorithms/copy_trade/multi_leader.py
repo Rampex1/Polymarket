@@ -3,7 +3,7 @@
 import time
 from typing import Callable, Iterator
 
-from bot import fetcher
+from bot.polymarket import api
 from bot.execution import lots as copy_lots
 from bot.domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 
@@ -19,8 +19,8 @@ class MultiLeaderCopyEngine:
         self._tier_for_holding = tier_for_holding
         self._ledger = None
         self._paper = True
-        self._seen: dict[str, fetcher.SeenRing] = {}
-        self._holdings: dict[str, fetcher.TargetHoldingCache] = {}
+        self._seen: dict[str, api.SeenRing] = {}
+        self._holdings: dict[str, api.TargetHoldingCache] = {}
         self._recent_entries: list[tuple[float, str, str, str, str]] = []
         self._last_rank_refresh = 0.0
 
@@ -60,8 +60,8 @@ class MultiLeaderCopyEngine:
         for wallet in self._watchlist.active_wallets(self.params.name):
             if wallet in self._seen:
                 continue
-            seen = self._seen.setdefault(wallet, fetcher.SeenRing(fetcher.SEEN_IDS_MAX))
-            self._holdings.setdefault(wallet, fetcher.TargetHoldingCache())
+            seen = self._seen.setdefault(wallet, api.SeenRing(api.SEEN_IDS_MAX))
+            self._holdings.setdefault(wallet, api.TargetHoldingCache())
             for trade in self._market_data.recent_trades(wallet):
                 if trade.id and trade.action not in ("REDEEM", "MERGE"):
                     seen.mark(trade.id)
@@ -73,7 +73,7 @@ class MultiLeaderCopyEngine:
         self._recent_entries = [e for e in self._recent_entries
                                 if now - e[0] <= self.params.consensus_window_seconds]
         for wallet in self._watchlist.active_wallets(self.params.name):
-            seen = self._seen.setdefault(wallet, fetcher.SeenRing(fetcher.SEEN_IDS_MAX))
+            seen = self._seen.setdefault(wallet, api.SeenRing(api.SEEN_IDS_MAX))
             trades = self._market_data.recent_trades(wallet)
             for trade in sorted((t for t in trades if t.id and t.id not in seen), key=lambda t: t.timestamp):
                 seen.mark(trade.id)
@@ -97,7 +97,7 @@ class MultiLeaderCopyEngine:
 
     def _open(self, wallet: str, trade) -> Iterator[OpenIntent]:
         holding = self._market_data.target_position_value(wallet, trade.market_id, trade.size_usdc) or 0.0
-        self._holdings.setdefault(wallet, fetcher.TargetHoldingCache()).set(trade.market_id, holding)
+        self._holdings.setdefault(wallet, api.TargetHoldingCache()).set(trade.market_id, holding)
         if holding < self.params.tier1_min:
             return
         self._recent_entries.append((time.time(), wallet, trade.market_id, trade.asset_id or "", trade.outcome))
@@ -126,7 +126,7 @@ class MultiLeaderCopyEngine:
         leader_shares = copy_lots.remaining_shares(self.params.name, trade.market_id, wallet)
         if position is None or position.shares <= 0 or leader_shares <= 0:
             return
-        cache = self._holdings.setdefault(wallet, fetcher.TargetHoldingCache())
+        cache = self._holdings.setdefault(wallet, api.TargetHoldingCache())
         before = cache.get(trade.market_id)
         if forced or before is None or before <= 0:
             leader_fraction = 1.0

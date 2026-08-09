@@ -44,21 +44,21 @@ def algo(default_params):
 
 
 def test_slippage_ok_within_tolerance(default_params):
-    from bot.runner import _slippage_ok
+    from bot.execution.runner import _slippage_ok
     t = make_trade(price=0.50)
     assert _slippage_ok(t, current_price=0.52, max_slippage=0.05, algo_name="x")
     assert _slippage_ok(t, current_price=0.4751, max_slippage=0.05, algo_name="x")
 
 
 def test_slippage_ok_rejects_excess_drift(default_params):
-    from bot.runner import _slippage_ok
+    from bot.execution.runner import _slippage_ok
     t = make_trade(price=0.50)
     assert not _slippage_ok(t, current_price=0.60, max_slippage=0.05, algo_name="x")
 
 
 def test_slippage_ok_with_zero_signal_price(default_params):
     """SettleIntent / forced-close trades carry price=0 — must not div-by-zero."""
-    from bot.runner import _slippage_ok
+    from bot.execution.runner import _slippage_ok
     t = make_trade(price=0.0)
     assert _slippage_ok(t, current_price=0.5, max_slippage=0.05, algo_name="x")
 
@@ -66,7 +66,7 @@ def test_slippage_ok_with_zero_signal_price(default_params):
 def test_slippage_ok_refuses_when_price_unavailable(default_params):
     """Fail-closed: a None current_price defeats slippage protection only
     if we silently fill at the signal price. The runner refuses instead."""
-    from bot.runner import _slippage_ok
+    from bot.execution.runner import _slippage_ok
     t = make_trade(price=0.50)
     assert not _slippage_ok(t, current_price=None, max_slippage=0.05, algo_name="x")
 
@@ -77,7 +77,7 @@ def test_slippage_ok_refuses_when_price_unavailable(default_params):
 
 
 def test_simulate_buy_uses_current_price(default_params):
-    from bot.runner import _simulate_buy
+    from bot.execution.runner import _simulate_buy
     fill = _simulate_buy(scaled_usdc=10.0, current_price=0.50, paper_fee_bps=0.0)
     assert fill.success
     assert fill.fill_price == 0.50
@@ -86,27 +86,27 @@ def test_simulate_buy_uses_current_price(default_params):
 
 
 def test_simulate_buy_charges_fee(default_params):
-    from bot.runner import _simulate_buy
+    from bot.execution.runner import _simulate_buy
     fill = _simulate_buy(scaled_usdc=100.0, current_price=0.50, paper_fee_bps=200.0)
     assert fill.fee_usdc == 2.0
     assert fill.shares == 98.0 / 0.50
 
 
 def test_simulate_buy_rejects_when_price_none(default_params):
-    from bot.runner import _simulate_buy
+    from bot.execution.runner import _simulate_buy
     fill = _simulate_buy(scaled_usdc=10.0, current_price=None, paper_fee_bps=0.0)
     assert not fill.success
 
 
 def test_simulate_buy_rejects_when_fee_exceeds_size(default_params):
     """120% fee would otherwise silently produce negative shares."""
-    from bot.runner import _simulate_buy
+    from bot.execution.runner import _simulate_buy
     fill = _simulate_buy(scaled_usdc=10.0, current_price=0.5, paper_fee_bps=12_000.0)
     assert not fill.success
 
 
 def test_simulate_sell_proceeds_and_fee(default_params):
-    from bot.runner import _simulate_sell
+    from bot.execution.runner import _simulate_sell
     fill = _simulate_sell(shares=100.0, current_price=0.70, paper_fee_bps=200.0)
     assert fill.amount_usdc == 70.0
     assert abs(fill.fee_usdc - 1.40) < 1e-9
@@ -118,13 +118,13 @@ def test_simulate_sell_proceeds_and_fee(default_params):
 
 
 def test_parse_fill_rejected_response_returns_failure():
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill({"success": False, "errorMsg": "no liquidity"}, side="BUY")
     assert not fill.success
 
 
 def test_parse_fill_unmatched_status_returns_failure():
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill({"status": "unmatched"}, side="BUY")
     assert not fill.success
 
@@ -135,7 +135,7 @@ def test_parse_fill_uses_actual_amounts_for_buy():
     Direction validated against prod fills 2026-06-12: a $1.00 buy at
     ~0.48 returned makingAmount=1.0, takingAmount=2.08.
     """
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill(
         {"success": True, "makingAmount": 1.0, "takingAmount": 2.08},
         side="BUY",
@@ -149,7 +149,7 @@ def test_parse_fill_uses_actual_amounts_for_buy():
 
 def test_parse_fill_uses_actual_amounts_for_sell():
     """SELL: we give tokens (making), we receive USDC (taking)."""
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill(
         {"success": True, "makingAmount": 20.0, "takingAmount": 14.0},
         side="SELL",
@@ -160,7 +160,7 @@ def test_parse_fill_uses_actual_amounts_for_sell():
 
 
 def test_parse_fill_accepts_alternative_field_names():
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill(
         {"success": True, "maker_amount": "1.0", "taker_amount": "2.0"},
         side="BUY",
@@ -171,14 +171,14 @@ def test_parse_fill_accepts_alternative_field_names():
 
 
 def test_parse_fill_rejects_success_without_amounts():
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     fill = _parse_fill({"success": True}, side="BUY")
     assert not fill.success
     assert "no fill amounts" in fill.reason
 
 
 def test_parse_fill_non_dict_returns_failure():
-    from bot.runner import _parse_fill
+    from bot.execution.runner import _parse_fill
     assert not _parse_fill("oops", side="BUY").success
     assert not _parse_fill(None, side="BUY").success
 
@@ -191,7 +191,7 @@ def test_parse_fill_non_dict_returns_failure():
 @pytest.fixture
 def stub_price(monkeypatch):
     """Pin runner._get_current_price for slippage + fill simulation."""
-    from bot import runner
+    from bot.execution import runner
 
     def _set(value):
         monkeypatch.setattr(
@@ -201,7 +201,7 @@ def stub_price(monkeypatch):
 
 
 def test_dispatch_open_intent_paper(ledger, risk, algo, default_params, stub_price):
-    from bot import runner
+    from bot.execution import runner
     stub_price(0.50)
 
     intent = OpenIntent(
@@ -220,7 +220,7 @@ def test_dispatch_open_records_leader_attributed_lot(
     ledger, risk, algo, default_params, stub_price,
 ):
     """A multi-leader fill creates an exit-attributable lot after it fills."""
-    from bot import runner
+    from bot.execution import runner
     from bot.execution import lots as copy_lots
 
     stub_price(0.50)
@@ -243,7 +243,7 @@ def test_dispatch_open_records_leader_attributed_lot(
 
 
 def test_dispatch_open_skipped_by_slippage(ledger, risk, algo, default_params, stub_price):
-    from bot import runner
+    from bot.execution import runner
     stub_price(0.70)         # 40% drift from signal 0.50
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
@@ -255,7 +255,7 @@ def test_dispatch_open_skipped_by_slippage(ledger, risk, algo, default_params, s
 def test_dispatch_open_skipped_when_price_fetch_fails(ledger, risk, algo,
                                                       default_params, stub_price):
     """If the current-price lookup returns None, slippage gate fails closed."""
-    from bot import runner
+    from bot.execution import runner
     stub_price(None)
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
@@ -267,7 +267,7 @@ def test_dispatch_open_skipped_when_price_fetch_fails(ledger, risk, algo,
 def test_dispatch_open_skipped_by_risk(ledger, risk, algo, default_params,
                                        monkeypatch, stub_price):
     """Risk check failure → no order placed."""
-    from bot import runner
+    from bot.execution import runner
     monkeypatch.setattr(default_params, "min_order_size_usdc", 5.0)
     stub_price(0.50)
     intent = OpenIntent(
@@ -278,7 +278,7 @@ def test_dispatch_open_skipped_by_risk(ledger, risk, algo, default_params,
 
 
 def test_dispatch_open_no_asset_id_is_skipped(ledger, risk, algo, default_params):
-    from bot import runner
+    from bot.execution import runner
     intent = OpenIntent(
         market_id="m1", asset_id="", usdc_amount=1.0, signal_price=0.50,
     )
@@ -293,7 +293,7 @@ def test_dispatch_open_no_asset_id_is_skipped(ledger, risk, algo, default_params
 
 def test_dispatch_close_partial(ledger, risk, algo, default_params, stub_price):
     """fraction=0.25 of 20 shares → 5 sold, 15 remain."""
-    from bot import runner
+    from bot.execution import runner
 
     seed = make_trade(action="BUY", price=0.50)
     ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
@@ -313,7 +313,7 @@ def test_dispatch_close_partial(ledger, risk, algo, default_params, stub_price):
 
 def test_dispatch_close_full(ledger, risk, algo, default_params, stub_price):
     """fraction=1.0 closes the entire position."""
-    from bot import runner
+    from bot.execution import runner
 
     seed = make_trade(action="BUY", price=0.50)
     ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
@@ -327,7 +327,7 @@ def test_dispatch_close_full(ledger, risk, algo, default_params, stub_price):
 
 
 def test_dispatch_close_no_position_is_noop(ledger, risk, algo, default_params, stub_price):
-    from bot import runner
+    from bot.execution import runner
     stub_price(0.50)
     intent = CloseIntent(market_id="m1", fraction=1.0, signal_price=0.50)
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
@@ -338,7 +338,7 @@ def test_dispatch_close_zero_signal_price_skips_slippage(ledger, risk, algo,
                                                          default_params, stub_price):
     """A MERGE-style forced exit has signal_price=0.0 and must bypass the
     slippage gate. Current price still must be available."""
-    from bot import runner
+    from bot.execution import runner
 
     seed = make_trade(action="BUY", price=0.50)
     ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
@@ -355,7 +355,7 @@ def test_dispatch_close_zero_signal_price_skips_slippage(ledger, risk, algo,
 def test_dispatch_close_aborts_when_price_unavailable(ledger, risk, algo,
                                                       default_params, stub_price):
     """signal_price=0 + None current → must not attempt the fill."""
-    from bot import runner
+    from bot.execution import runner
 
     seed = make_trade(action="BUY", price=0.50)
     ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
@@ -376,12 +376,13 @@ def test_dispatch_close_aborts_when_price_unavailable(ledger, risk, algo,
 
 
 def test_dispatch_settle_wins_at_one(ledger, risk, algo, default_params, monkeypatch):
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40)
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
@@ -391,12 +392,13 @@ def test_dispatch_settle_wins_at_one(ledger, risk, algo, default_params, monkeyp
 
 
 def test_dispatch_settle_loss_at_zero(ledger, risk, algo, default_params, monkeypatch):
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40)
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.01)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.01)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
@@ -407,12 +409,13 @@ def test_dispatch_settle_loss_at_zero(ledger, risk, algo, default_params, monkey
 def test_dispatch_settle_ambiguous_leaves_open(ledger, risk, algo,
                                                default_params, monkeypatch):
     """Mid-range price + no Gamma confirmation → leave the position open."""
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40)
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.50)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.50)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
@@ -422,19 +425,20 @@ def test_dispatch_settle_ambiguous_leaves_open(ledger, risk, algo,
 def test_dispatch_settle_uses_gamma_when_closed(ledger, risk, algo,
                                                 default_params, monkeypatch):
     """Closed market with outcomePrices pinned to 0/1 → trust Gamma."""
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda *a, **kw: {
             "closed": True,
             "clobTokenIds": '["winner", "loser"]',
             "outcomePrices": '["1.0", "0.0"]',
         },
     )
-    monkeypatch.setattr(fetcher, "fetch_resolution_price",
+    monkeypatch.setattr(api, "fetch_resolution_price",
                         lambda *a, **kw: pytest.fail("should not be called"))
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
@@ -446,19 +450,20 @@ def test_dispatch_settle_uses_gamma_when_closed(ledger, risk, algo,
 def test_dispatch_settle_ignores_gamma_when_open(ledger, risk, algo,
                                                  default_params, monkeypatch):
     """Live mid (not a settlement) → fall back to CLOB binarisation."""
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda *a, **kw: {
             "closed": False,
             "clobTokenIds": '["winner", "loser"]',
             "outcomePrices": '["0.42", "0.58"]',
         },
     )
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
@@ -472,7 +477,7 @@ def test_dispatch_settle_ignores_gamma_when_open(ledger, risk, algo,
 
 
 def _signal_row(signal_id="tx1", algo="copy_trade"):
-    from bot import db
+    from bot.storage import db
     return db.get().execute(
         "SELECT * FROM signals WHERE signal_id=? AND algo=?", (signal_id, algo),
     ).fetchone()
@@ -480,7 +485,7 @@ def _signal_row(signal_id="tx1", algo="copy_trade"):
 
 def test_dispatch_open_records_executed_signal(ledger, risk, algo,
                                                default_params, stub_price):
-    from bot import runner
+    from bot.execution import runner
     stub_price(0.50)
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
@@ -499,7 +504,7 @@ def test_dispatch_open_records_executed_signal(ledger, risk, algo,
 def test_dispatch_open_records_risk_blocked_signal(ledger, risk, algo,
                                                    default_params, monkeypatch,
                                                    stub_price):
-    from bot import runner
+    from bot.execution import runner
     monkeypatch.setattr(default_params, "min_order_size_usdc", 5.0)
     stub_price(0.50)
     intent = OpenIntent(
@@ -515,7 +520,7 @@ def test_dispatch_open_records_risk_blocked_signal(ledger, risk, algo,
 
 def test_dispatch_open_records_slippage_skipped_signal(ledger, risk, algo,
                                                        default_params, stub_price):
-    from bot import runner
+    from bot.execution import runner
     stub_price(0.70)                       # 40% drift from signal 0.50
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
@@ -532,7 +537,8 @@ def test_dispatch_settle_labels_signal_outcome(ledger, risk, algo,
                                                default_params, monkeypatch,
                                                stub_price):
     """The settle path backfills outcome + pnl on this market's signal rows."""
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     stub_price(0.50)
     open_intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
@@ -540,8 +546,8 @@ def test_dispatch_settle_labels_signal_outcome(ledger, risk, algo,
     )
     runner.dispatch(open_intent, algo, ledger, risk, client=None, paper=True)
 
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
     settle = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(settle, algo, ledger, risk, client=None, paper=True)
 
@@ -553,9 +559,9 @@ def test_dispatch_settle_labels_signal_outcome(ledger, risk, algo,
 
 
 def test_market_is_resolved_accepts_alternate_flags():
-    # Lives in bot.fetcher (not runner) so paper-mode algorithms can use it
+    # Lives in bot.polymarket.api (not runner) so paper-mode algorithms can use it
     # without transitively importing py_clob_client.
-    from bot.fetcher import market_is_resolved
+    from bot.polymarket.api import market_is_resolved
     assert market_is_resolved({"closed": True})
     assert market_is_resolved({"resolved": True})
     assert market_is_resolved({"archived": True})
@@ -565,7 +571,7 @@ def test_market_is_resolved_accepts_alternate_flags():
 
 
 def test_market_outcome_is_final_requires_determined_outcome():
-    from bot.fetcher import market_outcome_is_final
+    from bot.polymarket.api import market_outcome_is_final
 
     # Explicit resolution markers are final on their own.
     assert market_outcome_is_final({"resolved": True})
@@ -601,19 +607,20 @@ def test_dispatch_settle_falls_back_when_closed_but_undetermined(
         ledger, risk, algo, default_params, monkeypatch):
     """Closed but still in the UMA window → outcomePrices is the last book,
     not a settlement. Must ignore it and use the CLOB binarization."""
-    from bot import runner, fetcher
+    from bot.polymarket import api
+    from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda *a, **kw: {
             "closed": True,
             "clobTokenIds": '["winner", "loser"]',
             "outcomePrices": '["0.97", "0.03"]',
         },
     )
-    monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
+    monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)

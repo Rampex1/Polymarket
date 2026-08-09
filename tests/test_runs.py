@@ -11,7 +11,7 @@ from bot.domain.params import Mode
 
 
 def test_record_run_writes_resolved_params(fresh_db):
-    from bot import runs
+    from bot.storage import runs
     from tests.conftest import copy_trade_params
 
     p = copy_trade_params(name="ct_test", mode=Mode.PAPER,
@@ -31,7 +31,7 @@ def test_record_run_writes_resolved_params(fresh_db):
 
 def test_record_run_never_raises(monkeypatch):
     """Provenance is best-effort — a DB failure must not kill the worker."""
-    from bot import db as dbmod, runs
+    from bot.storage import db as dbmod, runs
     from tests.conftest import copy_trade_params
 
     def boom():

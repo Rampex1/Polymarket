@@ -73,7 +73,7 @@ def test_get_creates_missing_parent_dirs(tmp_path, monkeypatch):
     """sqlite3.connect fails on a missing directory; db.get() must create it
     so the data/ default works on a fresh checkout."""
     from bot import config
-    import bot.db as dbmod
+    import bot.storage.db as dbmod
 
     nested = tmp_path / "data" / "deep" / "pos.db"
     monkeypatch.setattr(config, "DB_PATH", str(nested))

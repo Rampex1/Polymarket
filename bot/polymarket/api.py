@@ -1,5 +1,5 @@
 """
-fetcher.py
+api.py
 
 Polymarket HTTP reads — wallet lookup, trades, positions, prices, resolution.
 All requests share one retrying session so transient 429/5xx don't drop trades.
@@ -16,8 +16,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from . import config
-from .domain.records import GlobalTrade, Trade
+from .. import config
+from ..domain.records import GlobalTrade, Trade
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ def _parse_trade(item: dict) -> Optional[Trade]:
                 return None
 
             size = float(item.get("usdcSize") or 0)
-            # Min-size filtering is per-algorithm; the fetcher emits every
+            # Min-size filtering is per-algorithm; the API layer emits every
             # parseable trade and the algorithm decides what to ignore.
             if size <= 0:
                 return None

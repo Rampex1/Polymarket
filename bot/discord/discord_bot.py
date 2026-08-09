@@ -22,7 +22,7 @@ from discord import app_commands
 
 from .. import config
 from . import notifier
-from ..ledger import Ledger
+from ..storage.ledger import Ledger
 
 logger = logging.getLogger(__name__)
 

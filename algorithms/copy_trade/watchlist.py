@@ -3,7 +3,7 @@
 import time
 from typing import Iterable
 
-from bot import db
+from bot.storage import db
 
 from .ranker import ResolvedBet, WalletScore, rank_wallets
 

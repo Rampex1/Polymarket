@@ -24,7 +24,7 @@ import sqlite3
 import time
 from typing import Optional
 
-from bot import fetcher
+from bot.polymarket import api
 
 logger = logging.getLogger(__name__)
 
@@ -167,13 +167,13 @@ def collect_universe(
     """
     added = 0
 
-    for market in fetcher.fetch_top_markets(closed=False, limit=top_n):
+    for market in api.fetch_top_markets(closed=False, limit=top_n):
         added += track_market(conn, market, source="gamma_active")
 
     end_date_min = time.strftime(
         "%Y-%m-%d", time.gmtime(time.time() - RECENT_CLOSED_DAYS * 86_400),
     )
-    for market in fetcher.fetch_top_markets(
+    for market in api.fetch_top_markets(
         closed=True, limit=top_n, end_date_min=end_date_min,
     ):
         added += track_market(conn, market, source="gamma_recent_closed")
@@ -187,10 +187,10 @@ def collect_universe(
     tracked_ids = {
         row[0] for row in conn.execute("SELECT condition_id FROM tracked_markets")
     }
-    for trade in fetcher.fetch_global_trades(min_cash):
+    for trade in api.fetch_global_trades(min_cash):
         if trade.market_id in tracked_ids:
             continue
-        market = fetcher.fetch_market_resolution(trade.market_id)
+        market = api.fetch_market_resolution(trade.market_id)
         if not (market and market.get("clobTokenIds")):
             market = {
                 "conditionId": trade.market_id,
@@ -237,7 +237,7 @@ def snapshot_all(conn: sqlite3.Connection, fidelity: int = 60) -> dict:
         market_ok = True
         for token_id in json.loads(raw_tokens):
             tokens_seen += 1
-            points = fetcher.fetch_price_history(
+            points = api.fetch_price_history(
                 token_id, fidelity=fidelity, start_ts=start_ts,
             )
             if points is None:

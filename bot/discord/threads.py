@@ -19,7 +19,8 @@ import time
 
 import requests as http
 
-from .. import config, db
+from .. import config
+from ..storage import db
 
 logger = logging.getLogger(__name__)
 

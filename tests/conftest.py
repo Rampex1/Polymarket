@@ -99,7 +99,7 @@ def tmp_db_path(tmp_path):
 def fresh_db(tmp_db_path, monkeypatch):
     """Point bot.db at a brand-new file for this test, then close + reset."""
     from bot import config
-    import bot.db as dbmod
+    import bot.storage.db as dbmod
 
     monkeypatch.setattr(config, "DB_PATH", tmp_db_path)
     dbmod.reset_for_tests()
@@ -110,7 +110,7 @@ def fresh_db(tmp_db_path, monkeypatch):
 @pytest.fixture
 def ledger(fresh_db):
     """A Ledger bound to a fresh DB, namespaced to copy_trade."""
-    from bot.ledger import Ledger
+    from bot.storage.ledger import Ledger
 
     t = Ledger(algo="copy_trade")
     t.init_paper_balance(10_000.0)
@@ -162,7 +162,7 @@ def default_config(default_params):
 
 @pytest.fixture
 def risk(ledger, default_params):
-    from bot.risk import RiskManager
+    from bot.execution.risk import RiskManager
     return RiskManager(ledger, default_params)
 
 

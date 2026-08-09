@@ -23,7 +23,7 @@ from algorithms.copy_trade.public_history import (
     leaderboard_wallets,
 )
 from algorithms.copy_trade.ranker import SQLiteResolvedBetSource
-from bot import db
+from bot.storage import db
 
 
 def _store(bets) -> int:

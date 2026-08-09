@@ -8,20 +8,20 @@ import json
 import logging
 from typing import Optional
 
-from .. import fetcher
+from ..polymarket import api
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     """Use final Gamma outcome data, then a confidently binary CLOB price."""
-    market = fetcher.fetch_market_resolution(market_id)
-    if market and fetcher.market_outcome_is_final(market):
+    market = api.fetch_market_resolution(market_id)
+    if market and api.market_outcome_is_final(market):
         outcome_price = gamma_outcome_price(market, asset_id)
         if outcome_price is not None:
             return outcome_price
 
-    price = fetcher.fetch_resolution_price(asset_id)
+    price = api.fetch_resolution_price(asset_id)
     if price is None:
         return None
     if price > 0.95:

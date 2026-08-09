@@ -3,7 +3,7 @@ Price-history archiver tests.
 
 The archiver hoards CLOB price history into its own SQLite file because the
 public API drops history once markets resolve. Real SQLite via tmp_path,
-HTTP stubbed at the bot.fetcher boundary (the archiver's only network path).
+HTTP stubbed at the bot.polymarket.api boundary (the archiver's only network path).
 """
 
 import json
@@ -109,7 +109,7 @@ def test_track_market_registers_once_and_keeps_first_source(conn):
 
 
 def test_collect_universe_unions_and_dedupes_sources(conn, monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
     active = [
@@ -123,15 +123,15 @@ def test_collect_universe_unions_and_dedupes_sources(conn, monkeypatch):
     def fake_top_markets(closed, limit=50, end_date_min=None, end_date_max=None):
         return recently_closed if closed else active
 
-    monkeypatch.setattr(fetcher, "fetch_top_markets", fake_top_markets)
+    monkeypatch.setattr(api, "fetch_top_markets", fake_top_markets)
     monkeypatch.setattr(
-        fetcher, "fetch_global_trades",
+        api, "fetch_global_trades",
         lambda *a, **kw: [make_global_trade(market_id="0xw", asset_id="tw1")],
     )
     # Whale-flow markets get their full token list from Gamma — the firehose
     # row only carries the traded side.
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: {
             "conditionId": mid, "question": "W?",
             "clobTokenIds": '["tw1","tw2"]',
@@ -153,15 +153,15 @@ def test_collect_universe_whale_flow_falls_back_to_traded_token(
 ):
     """Gamma lookup failure must not drop the market — half a price series
     beats none."""
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
-    monkeypatch.setattr(fetcher, "fetch_top_markets", lambda *a, **kw: [])
+    monkeypatch.setattr(api, "fetch_top_markets", lambda *a, **kw: [])
     monkeypatch.setattr(
-        fetcher, "fetch_global_trades",
+        api, "fetch_global_trades",
         lambda *a, **kw: [make_global_trade(market_id="0xw", asset_id="tw1")],
     )
-    monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda mid: None)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda mid: None)
 
     assert archive.collect_universe(conn) == 1
     rows = conn.execute(
@@ -174,7 +174,7 @@ def test_collect_universe_skips_gamma_lookup_for_tracked_markets(
 ):
     """An already-tracked whale market must not cost a Gamma round-trip on
     every pass — the firehose repeats hot markets constantly."""
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
     archive.track_market(
@@ -183,14 +183,14 @@ def test_collect_universe_skips_gamma_lookup_for_tracked_markets(
         source="gamma_active",
     )
 
-    monkeypatch.setattr(fetcher, "fetch_top_markets", lambda *a, **kw: [])
+    monkeypatch.setattr(api, "fetch_top_markets", lambda *a, **kw: [])
     monkeypatch.setattr(
-        fetcher, "fetch_global_trades",
+        api, "fetch_global_trades",
         lambda *a, **kw: [make_global_trade(market_id="0xw", asset_id="tw1")],
     )
     gamma_calls = []
     monkeypatch.setattr(
-        fetcher, "fetch_market_resolution",
+        api, "fetch_market_resolution",
         lambda mid: gamma_calls.append(mid) or None,
     )
 
@@ -204,7 +204,7 @@ def test_collect_universe_skips_gamma_lookup_for_tracked_markets(
 
 
 def test_snapshot_all_stores_points_and_skips_failures(conn, monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
     archive.track_market(
@@ -223,7 +223,7 @@ def test_snapshot_all_stores_points_and_skips_failures(conn, monkeypatch):
             return [{"t": 10, "p": 0.4}, {"t": 20, "p": 0.45}]
         return None                                    # HTTP failure for t2
 
-    monkeypatch.setattr(fetcher, "fetch_price_history", fake_history)
+    monkeypatch.setattr(api, "fetch_price_history", fake_history)
 
     summary = archive.snapshot_all(conn, fidelity=60)
     assert summary == {"tokens": 2, "points_added": 2, "failures": 1}
@@ -244,7 +244,7 @@ def test_snapshot_all_uses_delta_fetch_after_first_pass(conn, monkeypatch):
     """First pass pulls full history; later passes must fetch only the
     window since last_snapshot, or bandwidth grows without bound as the
     archive ages."""
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
     archive.track_market(
@@ -259,7 +259,7 @@ def test_snapshot_all_uses_delta_fetch_after_first_pass(conn, monkeypatch):
         calls.append(kw)
         return [{"t": 10, "p": 0.4}]
 
-    monkeypatch.setattr(fetcher, "fetch_price_history", fake_history)
+    monkeypatch.setattr(api, "fetch_price_history", fake_history)
 
     archive.snapshot_all(conn, fidelity=60)
     assert calls[0].get("start_ts") is None            # first pass: full history
@@ -278,19 +278,19 @@ def test_snapshot_all_uses_delta_fetch_after_first_pass(conn, monkeypatch):
 
 
 def test_run_once_smoke(tmp_path, monkeypatch):
-    from bot import fetcher
+    from bot.polymarket import api
     from discovery import archive
 
     monkeypatch.setattr(
-        fetcher, "fetch_top_markets",
+        api, "fetch_top_markets",
         lambda closed, limit=50, end_date_min=None, end_date_max=None: (
             [] if closed else
             [{"conditionId": "0xa", "question": "A?", "clobTokenIds": '["ta1"]'}]
         ),
     )
-    monkeypatch.setattr(fetcher, "fetch_global_trades", lambda *a, **kw: [])
+    monkeypatch.setattr(api, "fetch_global_trades", lambda *a, **kw: [])
     monkeypatch.setattr(
-        fetcher, "fetch_price_history",
+        api, "fetch_price_history",
         lambda token_id, fidelity=60, **kw: [{"t": 1, "p": 0.9}],
     )
 
