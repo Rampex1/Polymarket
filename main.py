@@ -21,7 +21,7 @@ import threading
 
 from bot import config, db, reconciliation, runner, runs
 from bot.algorithm import Algorithm
-from bot.domain.intents import Mode
+from bot.domain.params import Mode
 from bot.discord import notifier
 from bot.logs.setup import setup_logging
 from bot.positions import PositionTracker

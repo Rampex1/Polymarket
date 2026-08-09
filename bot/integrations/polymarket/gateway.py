@@ -8,7 +8,7 @@ makes their external dependency explicit and easy to replace in tests.
 from typing import Optional
 
 from ... import fetcher
-from ...domain.models import GlobalTrade, Trade
+from ...domain.records import GlobalTrade, Trade
 
 
 class MarketDataGateway:

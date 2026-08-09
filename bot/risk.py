@@ -5,7 +5,7 @@ Pre-trade gate for BUYs, using each algorithm's own caps.
 Sells and redeems always pass — blocking one would trap us in a loser.
 """
 
-from .domain.models import Trade
+from .domain.records import Trade
 from .positions import PositionTracker
 
 

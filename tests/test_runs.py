@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from bot.domain.intents import Mode
+from bot.domain.params import Mode
 
 
 def test_record_run_writes_resolved_params(fresh_db):

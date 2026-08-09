@@ -69,9 +69,13 @@ bot/
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
   report.py               # CLI: per-algo performance report (`python -m bot.report`)
   runs.py                 # Run provenance — stamps resolved params + git sha per boot
-  algorithm.py            # Algorithm ABC + Intent types (Open/Close/Settle) + Mode + AlgoParams protocol
+  algorithm.py            # Algorithm ABC — the contract every strategy implements
   runner.py               # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
-  domain/models.py        # Trade / GlobalTrade dataclasses (boundary records the runner adapts intents into)
+  domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
+    intents.py            # What we decided: Open/Close/SettleIntent
+    position.py           # What we hold in a market
+    records.py            # What the APIs said: Trade, GlobalTrade
+    params.py             # Mode (paper/live) + AlgoParams protocol
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
   fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
   positions.py            # PositionTracker — repository for positions, trade_log, daily_stats, paper_account

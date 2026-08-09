@@ -1,4 +1,9 @@
-"""External-market records used at integration boundaries."""
+"""
+records.py
+
+What the APIs told us: one wallet activity event (Trade) and one
+platform-firehose row (GlobalTrade). Boundary data, not our decisions.
+"""
 
 from dataclasses import dataclass
 from typing import Optional

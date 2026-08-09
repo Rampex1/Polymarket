@@ -51,9 +51,10 @@ from typing import Iterator, Optional
 
 from bot import fetcher
 from bot.algorithm import Algorithm
-from bot.domain.intents import Intent, Mode, OpenIntent, SettleIntent
+from bot.domain.intents import Intent, OpenIntent, SettleIntent
+from bot.domain.params import Mode
 from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
-from bot.domain.models import GlobalTrade
+from bot.domain.records import GlobalTrade
 
 from .params import InsiderFlowParams
 

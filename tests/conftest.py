@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 def copy_trade_params(**overrides):
     """A complete CopyTradeParams for tests. Override what the test is about."""
     from algorithms.copy_trade import CopyTradeParams
-    from bot.domain.intents import Mode
+    from bot.domain.params import Mode
 
     base = dict(
         name="copy_trade", mode=Mode.PAPER,
@@ -57,7 +57,7 @@ def copy_trade_params(**overrides):
 def insider_flow_params(**overrides):
     """A complete InsiderFlowParams for tests. Override what the test is about."""
     from algorithms.insider_flow import InsiderFlowParams
-    from bot.domain.intents import Mode
+    from bot.domain.params import Mode
 
     base = dict(
         name="insider_flow", mode=Mode.PAPER,
@@ -150,7 +150,7 @@ class _TestParams:
 @pytest.fixture
 def default_params():
     """A fully-initialised _TestParams instance defaulting to PAPER mode."""
-    from bot.domain.intents import Mode
+    from bot.domain.params import Mode
     return _TestParams(mode=Mode.PAPER)
 
 
@@ -171,7 +171,7 @@ def make_global_trade(**overrides):
     filter by default: big cash, long odds, non-sports title."""
     import time
 
-    from bot.domain.models import GlobalTrade
+    from bot.domain.records import GlobalTrade
 
     defaults = dict(
         tx_hash="0xtx1",
@@ -204,7 +204,7 @@ def make_trade(
     timestamp: int = 1_700_000_000,
 ):
     """Helper for building Trade objects."""
-    from bot.domain.models import Trade
+    from bot.domain.records import Trade
 
     return Trade(
         id=trade_id,

@@ -6,7 +6,7 @@ from typing import Optional
 from py_clob_client_v2.client import ClobClient
 
 from .. import fetcher
-from ..domain.models import Trade
+from ..domain.records import Trade
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ every knob.
 
 from dataclasses import dataclass, field
 
-from bot.domain.intents import Mode
+from bot.domain.params import Mode
 
 
 def _doc(doc: str):

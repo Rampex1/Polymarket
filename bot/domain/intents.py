@@ -1,20 +1,11 @@
-"""The stable language between strategies and execution.
+"""
+intents.py
 
-Strategies only decide *what* should happen.  They emit these immutable-ish
-data objects; execution owns all side effects such as risk checks, orders,
-persistence, and notifications.
+What we decided to do — the stable language between strategies and
+execution. A strategy emits these; the runner owns every side effect.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Protocol
-
-
-class Mode(str, Enum):
-    """Execution mode selected independently for each algorithm."""
-
-    PAPER = "paper"
-    LIVE = "live"
 
 
 @dataclass
@@ -63,20 +54,3 @@ class SettleIntent:
 
 
 Intent = OpenIntent | CloseIntent | SettleIntent
-
-
-class AlgoParams(Protocol):
-    """The parameter surface shared by execution and risk policy."""
-
-    name: str
-    mode: Mode
-    max_position_size_usdc: float
-    max_total_exposure_usdc: float
-    daily_loss_limit_usdc: float
-    min_order_size_usdc: float
-    max_slippage: float
-    poll_interval_seconds: int
-    paper_starting_balance: float
-    order_type: str
-    paper_fee_bps: float
-    webhook_url: str

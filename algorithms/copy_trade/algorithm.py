@@ -35,10 +35,10 @@ from bot.algorithm import Algorithm
 from bot.domain.intents import (
     CloseIntent,
     Intent,
-    Mode,
     OpenIntent,
     SettleIntent,
 )
+from bot.domain.params import Mode
 from bot.integrations.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams

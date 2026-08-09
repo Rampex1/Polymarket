@@ -1,4 +1,8 @@
-"""Portfolio value objects independent of SQLite and risk policy."""
+"""
+position.py
+
+What we hold in one market. Independent of SQLite and risk policy.
+"""
 
 from dataclasses import dataclass
 
