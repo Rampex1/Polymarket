@@ -1,11 +1,8 @@
-"""Logging setup — console plus per-level rotating files under logs/<profile>/.
+"""
+logging_setup.py
 
-tmux scrollback dies with the pane, so a crash investigated after a restart
-has no history. The file sinks are what survive.
-
-Files are cumulative: error.log is the short list of what broke, info.log
-the normal narrative, debug.log the full story including third-party HTTP
-chatter. The same ERROR record lands in all three.
+Console plus cumulative per-level files under logs/<profile>/, rotated daily.
+tmux scrollback dies with the pane; the file sinks are what survive a restart.
 """
 
 import logging
