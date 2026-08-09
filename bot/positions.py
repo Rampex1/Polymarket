@@ -1,29 +1,8 @@
 """
-Position tracking + risk management.
+positions.py
 
-Two important design rules enforced here:
-
-  1. The `paper` flag is *passed in* by the caller (resolved once at startup
-     and threaded through). This module never reads `config.PAPER_TRADE`
-     directly.
-
-  2. Sells/redeems never block on risk checks. A sell *reduces* exposure;
-     blocking it (e.g. because we're down on the day) would lock the bot
-     into a losing position. Only BUYs are gated.
-
-Multi-algorithm awareness
--------------------------
-Each algorithm runs with its own `PositionTracker(algo="...")` instance.
-Every query is filtered by that algo so two algorithms can be long the same
-market simultaneously without clobbering each other. `paper_account` is
-keyed by algo, so each strategy has its own paper bankroll.
-
-Cost-basis source of truth
---------------------------
-`total_cost_usdc` is the *only* persisted record of how much we spent on
-the position. Anything that needs cost basis must read it, not recompute
-`shares * avg_price` (which drifts under floating-point rounding on
-partial sells).
+PositionTracker (DB reads/writes, one instance per algo) + RiskManager.
+Only BUYs are gated — blocking a sell would lock us into a losing position.
 """
 
 import logging

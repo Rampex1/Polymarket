@@ -13,6 +13,8 @@ class Position:
     outcome: str
     shares: float
     avg_price: float
+    # Read this for cost basis, never `shares * avg_price` — that drifts
+    # under float rounding on partial sells.
     total_cost_usdc: float
     opened_at: int
     updated_at: int
