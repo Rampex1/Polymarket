@@ -1,11 +1,8 @@
 """
-Run-provenance + report CLI smoke tests.
+Run-provenance tests.
 """
 
 import json
-import os
-import subprocess
-import sys
 
 from bot.domain.params import Mode
 
@@ -39,20 +36,3 @@ def test_record_run_never_raises(monkeypatch):
 
     monkeypatch.setattr(dbmod, "get", boom)
     runs.record_run(copy_trade_params(target_address="0xabc"), profile="x")  # no raise
-
-
-def _run_module(mod, *args, env_extra=None):
-    env = {**os.environ, **(env_extra or {})}
-    return subprocess.run(
-        [sys.executable, "-m", mod, *args],
-        capture_output=True, text=True, timeout=60, env=env,
-    )
-
-
-def test_report_cli_runs_on_fresh_db(tmp_path, monkeypatch):
-    out = subprocess.run(
-        [sys.executable, "-m", "bot.report"],
-        capture_output=True, text=True, timeout=60,
-        env={"DB_PATH": str(tmp_path / "r.db"), "PATH": "/usr/bin:/bin"},
-    )
-    assert out.returncode == 0, out.stderr

@@ -23,7 +23,6 @@ only here:
 PROFILE=<name> python main.py                   # run one profile's workers
 python -m discovery.archive --once              # archiver: one pass (cron-friendly)
 python -m discovery.archive --loop --every 3600 # archiver: long-running
-python -m bot.report                            # per-algo P&L, skip reasons, win rate vs odds
 ```
 
 ## Invariants — don't break these
@@ -68,7 +67,6 @@ bot/
   config.py               # Infra only: API URLs, creds, DB path, webhook resolution, timezone, heartbeat interval
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
-  report.py               # CLI: per-algo performance report (`python -m bot.report`)
   domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
     algorithm.py          # Algorithm ABC — the contract every strategy implements
     intents.py            # What we decided: Open/Close/SettleIntent
@@ -215,7 +213,7 @@ column so multiple algorithms share one DB without collisions.
 - `copy_lots` — leader-attributed fills behind an aggregated position
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
-- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Written on every boot but not yet joined against; `bot.report` reads only the latest row, for a `last boot:` line. Attributing results to the run that produced them is unimplemented.
+- `runs` — one row per worker boot: resolved params JSON, profile, git sha. Written on every boot; nothing reads it yet. Kept so the config behind a stretch of results stays recoverable after the fact.
 
 Schema is created by `CREATE TABLE IF NOT EXISTS` on every connect. There
 is no migration path — a database predating the multi-algorithm layout

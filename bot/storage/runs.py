@@ -5,9 +5,8 @@ Records the fully-resolved params (JSON), profile, and git sha, so the
 config that produced a stretch of results is recoverable after the fact —
 comparing two paper variants is only valid if neither changed mid-experiment.
 
-The rows are written but not yet joined against: `bot.report` reads only
-the latest run, to print one `last boot:` line. Attributing trades and
-signals to the run that produced them is unimplemented.
+Write-only for now — nothing reads these rows back. They exist so the
+config behind a stretch of results is still recoverable months later.
 """
 
 import dataclasses
