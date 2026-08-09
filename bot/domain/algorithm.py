@@ -8,8 +8,8 @@ A strategy polls for opportunities and yields intents; the runner executes them.
 from abc import ABC, abstractmethod
 from typing import Iterator
 
-from .domain.intents import Intent
-from .domain.params import AlgoParams
+from .intents import Intent
+from .params import AlgoParams
 
 
 class Algorithm(ABC):

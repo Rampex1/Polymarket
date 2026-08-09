@@ -69,9 +69,9 @@ bot/
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
   report.py               # CLI: per-algo performance report (`python -m bot.report`)
   runs.py                 # Run provenance — stamps resolved params + git sha per boot
-  algorithm.py            # Algorithm ABC — the contract every strategy implements
   runner.py               # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
   domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
+    algorithm.py          # Algorithm ABC — the contract every strategy implements
     intents.py            # What we decided: Open/Close/SettleIntent
     position.py           # What we hold in a market
     records.py            # What the APIs said: Trade, GlobalTrade

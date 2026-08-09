@@ -101,7 +101,7 @@ def build_client() -> Optional[ClobClient]:
 
 def dispatch(
     intent: Intent,
-    algo,                     # bot.algorithm.Algorithm
+    algo,                     # bot.domain.algorithm.Algorithm
     tracker: PositionTracker,
     risk: RiskManager,
     client: Optional[ClobClient],
