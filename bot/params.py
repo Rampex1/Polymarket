@@ -1,13 +1,8 @@
 """
-Knob discovery CLI — answers "what can I configure?" and "what is actually
-running?" without reading algorithm code.
+params.py
 
-    python -m bot.params                  # list algorithm types
-    python -m bot.params copy_trade       # every knob: name, type, default, doc
-    python -m bot.params --effective      # fully-resolved config for $PROFILE
-
-`--effective` marks knobs that differ from the schema default with `*` —
-that column is the entire diff between a profile and stock behavior.
+Knob-discovery CLI: `python -m bot.params [type] [--effective]`.
+Reads the params dataclasses, so it can't go stale the way prose docs do.
 """
 
 import argparse
