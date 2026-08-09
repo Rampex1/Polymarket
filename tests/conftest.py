@@ -117,7 +117,7 @@ def make_global_trade(**overrides):
     filter by default: big cash, long odds, non-sports title."""
     import time
 
-    from bot.models import GlobalTrade
+    from bot.domain.models import GlobalTrade
 
     defaults = dict(
         tx_hash="0xtx1",
@@ -150,7 +150,7 @@ def make_trade(
     timestamp: int = 1_700_000_000,
 ):
     """Helper for building Trade objects."""
-    from bot.models import Trade
+    from bot.domain.models import Trade
 
     return Trade(
         id=trade_id,

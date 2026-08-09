@@ -17,7 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from . import config
-from .models import GlobalTrade, Trade
+from .domain.models import GlobalTrade, Trade
 
 logger = logging.getLogger(__name__)
 

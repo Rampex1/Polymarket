@@ -1,6 +1,7 @@
 """
-Algorithm ABC — the contract every trading strategy implements.
+algorithm.py
 
+The contract every trading strategy implements.
 A strategy polls for opportunities and yields intents; the runner executes them.
 """
 

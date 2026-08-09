@@ -33,7 +33,7 @@ from typing import Optional
 
 from . import db
 from .domain.portfolio import Position
-from .models import Trade
+from .domain.models import Trade
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import requests as http
 
 from . import config, threads
-from .models import Trade
+from .domain.models import Trade
 from .notifications.messages import (
     escape as _esc,
     feature_line as _feature_line,

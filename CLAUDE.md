@@ -66,7 +66,7 @@ bot/
   runs.py                 # Run provenance — stamps resolved params + git sha per boot
   algorithm.py            # Algorithm ABC + Intent types (Open/Close/Settle) + Mode + AlgoParams protocol
   runner.py               # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
-  models.py               # Trade dataclass (legacy interface the runner adapts intents into)
+  domain/models.py        # Trade / GlobalTrade dataclasses (boundary records the runner adapts intents into)
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
   fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
   positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
