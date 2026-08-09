@@ -1,13 +1,8 @@
 """
-Discord notifications + midnight daily summary thread.
+notifier.py
 
-Messages are sent to a Discord channel via an incoming webhook. User-
-controlled strings (market questions, outcomes, reasons) are escaped for
-Discord markdown so a `*` or `_` in a title can't break formatting.
-
-The midnight summary thread uses `config.TIMEZONE` instead of naive
-`datetime.now()`. Without an explicit tz the rollover would happen at
-whatever the VPS local time happened to be.
+Webhook alerts per trade event, plus the daily / heartbeat / weekly threads.
+Scheduled sends use config.TIMEZONE — naive now() would roll over at VPS local.
 """
 
 import logging
