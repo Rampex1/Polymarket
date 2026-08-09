@@ -18,7 +18,7 @@ CLOB placement remains here because it is the only stateful exchange edge.
 
 What changed:
   * Slippage cap and order type come from `algo.params`, not module config.
-  * Risk + tracker are algo-scoped (each thread gets its own instances).
+  * Risk + ledger are algo-scoped (each thread gets its own instances).
 """
 
 import logging
@@ -102,7 +102,7 @@ def build_client() -> Optional[ClobClient]:
 def dispatch(
     intent: Intent,
     algo,                     # bot.domain.algorithm.Algorithm
-    tracker: Ledger,
+    ledger: Ledger,
     risk: RiskManager,
     client: Optional[ClobClient],
     paper: bool,
@@ -120,11 +120,11 @@ def dispatch(
                        paper=paper)
 
     if isinstance(intent, OpenIntent):
-        _handle_open(intent, algo, tracker, risk, client, paper)
+        _handle_open(intent, algo, ledger, risk, client, paper)
     elif isinstance(intent, CloseIntent):
-        _handle_close(intent, algo, tracker, client, paper)
+        _handle_close(intent, algo, ledger, client, paper)
     elif isinstance(intent, SettleIntent):
-        _handle_settle(intent, algo, tracker, paper)
+        _handle_settle(intent, algo, ledger, paper)
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def dispatch(
 def _handle_open(
     intent: OpenIntent,
     algo,
-    tracker: Ledger,
+    ledger: Ledger,
     risk: RiskManager,
     client: Optional[ClobClient],
     paper: bool,
@@ -143,7 +143,7 @@ def _handle_open(
         logger.warning("OpenIntent missing asset_id, skipping: %s", intent.reason)
         return
 
-    # Build a synthetic Trade so existing tracker/risk/notifier APIs work
+    # Build a synthetic Trade so existing ledger/risk/notifier APIs work
     # unchanged. (Trade is the legacy data class; intents are the new front-end.)
     trade = _intent_to_trade(intent, action="BUY")
 
@@ -186,7 +186,7 @@ def _handle_open(
         return
 
     signals.record(algo.name, intent, paper, executed=True)
-    tracker.record_buy(
+    ledger.record_buy(
         trade,
         spent_usdc=fill.amount_usdc,
         shares=fill.shares,
@@ -200,7 +200,7 @@ def _handle_open(
             intent.leader_event_id or intent.signal_id, fill.shares, fill.amount_usdc,
         )
     notifier.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
-    tracker.print_summary(paper=paper)
+    ledger.print_summary(paper=paper)
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +210,11 @@ def _handle_open(
 def _handle_close(
     intent: CloseIntent,
     algo,
-    tracker: Ledger,
+    ledger: Ledger,
     client: Optional[ClobClient],
     paper: bool,
 ) -> None:
-    position = tracker.get(intent.market_id, paper)
+    position = ledger.get(intent.market_id, paper)
     if position is None or position.shares <= 0:
         logger.info("[%s] CLOSE with no position: %s",
                     algo.name, intent.reason or intent.market_id[:12])
@@ -261,7 +261,7 @@ def _handle_close(
         return
 
     pnl = (fill.amount_usdc - fill.fee_usdc) - (position.avg_price * fill.shares)
-    tracker.record_sell(
+    ledger.record_sell(
         trade,
         shares=fill.shares,
         proceeds_usdc=fill.amount_usdc,
@@ -274,7 +274,7 @@ def _handle_close(
             algo.name, intent.market_id, intent.leader_wallet, fill.shares,
         )
     notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
-    tracker.print_summary(paper=paper)
+    ledger.print_summary(paper=paper)
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +284,10 @@ def _handle_close(
 def _handle_settle(
     intent: SettleIntent,
     algo,
-    tracker: Ledger,
+    ledger: Ledger,
     paper: bool,
 ) -> None:
-    position = tracker.get(intent.market_id, paper)
+    position = ledger.get(intent.market_id, paper)
     if position is None or position.shares <= 0:
         return
 
@@ -315,7 +315,7 @@ def _handle_settle(
         question=intent.question or position.question,
         outcome=intent.outcome or position.outcome,
     )
-    tracker.record_sell(
+    ledger.record_sell(
         trade,
         shares=position.shares,
         proceeds_usdc=proceeds,
@@ -327,7 +327,7 @@ def _handle_settle(
     # is the moment a logged signal becomes a labeled training example.
     signals.label_outcomes(algo.name, intent.market_id, close_price, pnl, paper)
     copy_lots.close_market(algo.name, intent.market_id)
-    tracker.print_summary(paper=paper)
+    ledger.print_summary(paper=paper)
 
     notifier.on_settle_executed(
         market_id=intent.market_id,
@@ -354,7 +354,7 @@ def _intent_to_trade(
     question: Optional[str] = None,
     outcome: Optional[str] = None,
 ) -> Trade:
-    """Build a synthetic Trade from an Intent for tracker/notifier APIs.
+    """Build a synthetic Trade from an Intent for ledger/notifier APIs.
 
     The Trade dataclass is what the existing Ledger, RiskManager,
     and notifier expect. Rather than refactor all three to take Intents

@@ -53,10 +53,10 @@ def _status_text() -> str:
     for profile, algos in _by_profile().items():
         lines.append(f"**{notifier._esc(profile)}**")
         for name, paper in algos:
-            tracker = Ledger(algo=name)
-            n_pos = len(tracker.all_open(paper=paper))
-            exposure = tracker.total_exposure_usdc(paper=paper)
-            pnl = tracker.today_pnl_usdc(paper=paper)
+            ledger = Ledger(algo=name)
+            n_pos = len(ledger.all_open(paper=paper))
+            exposure = ledger.total_exposure_usdc(paper=paper)
+            pnl = ledger.today_pnl_usdc(paper=paper)
             sign = "+" if pnl >= 0 else ""
             mode = "📄 PAPER" if paper else "🟢 LIVE"
             lines.append(
@@ -72,8 +72,8 @@ def _positions_text(algo_filter: str = "") -> str:
     for name, paper, profile in _algo_infos:
         if algo_filter and algo_filter.lower() not in name.lower():
             continue
-        tracker = Ledger(algo=name)
-        positions = tracker.all_open(paper=paper)
+        ledger = Ledger(algo=name)
+        positions = ledger.all_open(paper=paper)
         mode = "PAPER" if paper else "LIVE"
         lines.append(
             f"📋 **{notifier._esc(name)}** · {mode} · {notifier._esc(profile)}"
@@ -97,9 +97,9 @@ def _pnl_text() -> str:
     total_pnl = 0.0
     total_exp = 0.0
     for name, paper, profile in _algo_infos:
-        tracker = Ledger(algo=name)
-        pnl = tracker.today_pnl_usdc(paper=paper)
-        exp = tracker.total_exposure_usdc(paper=paper)
+        ledger = Ledger(algo=name)
+        pnl = ledger.today_pnl_usdc(paper=paper)
+        exp = ledger.total_exposure_usdc(paper=paper)
         total_pnl += pnl
         total_exp += exp
         sign = "+" if pnl >= 0 else ""

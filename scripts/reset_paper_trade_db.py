@@ -23,6 +23,6 @@ if os.path.exists(db_path):
 for algo in ENABLED:
     name = algo.params.name
     bal = algo.params.paper_starting_balance
-    tracker = Ledger(algo=name)
-    tracker.init_paper_balance(bal)
+    ledger = Ledger(algo=name)
+    ledger.init_paper_balance(bal)
     print(f"Fresh paper account [{name}] created with ${bal:.2f}")

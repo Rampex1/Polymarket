@@ -11,27 +11,27 @@ from tests.conftest import make_trade
 from bot import reconciliation
 
 
-def test_paper_mode_is_skipped(tracker):
+def test_paper_mode_is_skipped(ledger):
     """Paper has nothing to reconcile against."""
     summary = reconciliation.reconcile_positions(
-        tracker, funder_address="0xabc", algo_name="test", paper=True,
+        ledger, funder_address="0xabc", algo_name="test", paper=True,
     )
     assert summary["skipped"] is True
     assert summary["agreed"] == []
 
 
-def test_missing_funder_address_is_skipped(tracker):
+def test_missing_funder_address_is_skipped(ledger):
     summary = reconciliation.reconcile_positions(
-        tracker, funder_address="", algo_name="test", paper=False,
+        ledger, funder_address="", algo_name="test", paper=False,
     )
     assert summary["skipped"] is True
 
 
-def test_no_positions_either_side(tracker, monkeypatch):
+def test_no_positions_either_side(ledger, monkeypatch):
     from bot import fetcher
     monkeypatch.setattr(fetcher, "fetch_user_positions", lambda *a, **kw: [])
     summary = reconciliation.reconcile_positions(
-        tracker, funder_address="0xabc", algo_name="test", paper=False,
+        ledger, funder_address="0xabc", algo_name="test", paper=False,
     )
     assert summary["agreed"] == []
     assert summary["stale"] == []
@@ -39,19 +39,19 @@ def test_no_positions_either_side(tracker, monkeypatch):
     assert summary["divergent"] == []
 
 
-def test_agreed_position(tracker, monkeypatch):
+def test_agreed_position(ledger, monkeypatch):
     """Both sides hold the same shares → counts as agreed, no warning."""
     from bot import fetcher
 
     seed = make_trade(action="BUY", price=0.5)
-    tracker.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
+    ledger.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
 
     monkeypatch.setattr(
         fetcher, "fetch_user_positions",
         lambda *a, **kw: [{"conditionId": "m1", "size": 6.0, "value": 3.0, "asset": "a1"}],
     )
     summary = reconciliation.reconcile_positions(
-        tracker, funder_address="0xabc", algo_name="test", paper=False,
+        ledger, funder_address="0xabc", algo_name="test", paper=False,
     )
     assert summary["agreed"] == ["m1"]
     assert summary["stale"] == []
@@ -59,24 +59,24 @@ def test_agreed_position(tracker, monkeypatch):
     assert summary["divergent"] == []
 
 
-def test_stale_position_warns(tracker, monkeypatch, caplog):
+def test_stale_position_warns(ledger, monkeypatch, caplog):
     """DB has it, on-chain doesn't → STALE warning."""
     import logging
     from bot import fetcher
 
     seed = make_trade(action="BUY", price=0.5)
-    tracker.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
+    ledger.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
 
     monkeypatch.setattr(fetcher, "fetch_user_positions", lambda *a, **kw: [])
     with caplog.at_level(logging.WARNING):
         summary = reconciliation.reconcile_positions(
-            tracker, funder_address="0xabc", algo_name="test", paper=False,
+            ledger, funder_address="0xabc", algo_name="test", paper=False,
         )
     assert summary["stale"] == ["m1"]
     assert any("STALE" in r.message for r in caplog.records)
 
 
-def test_ghost_position_warns(tracker, monkeypatch, caplog):
+def test_ghost_position_warns(ledger, monkeypatch, caplog):
     """On-chain has it, DB doesn't → GHOST warning."""
     import logging
     from bot import fetcher
@@ -87,13 +87,13 @@ def test_ghost_position_warns(tracker, monkeypatch, caplog):
     )
     with caplog.at_level(logging.WARNING):
         summary = reconciliation.reconcile_positions(
-            tracker, funder_address="0xabc", algo_name="test", paper=False,
+            ledger, funder_address="0xabc", algo_name="test", paper=False,
         )
     assert summary["ghost"] == ["m1"]
     assert any("GHOST" in r.message for r in caplog.records)
 
 
-def test_ghost_below_usd_epsilon_ignored(tracker, monkeypatch, caplog):
+def test_ghost_below_usd_epsilon_ignored(ledger, monkeypatch, caplog):
     """A dust on-chain position (value < $0.10) doesn't warn."""
     import logging
     from bot import fetcher
@@ -104,19 +104,19 @@ def test_ghost_below_usd_epsilon_ignored(tracker, monkeypatch, caplog):
     )
     with caplog.at_level(logging.WARNING):
         summary = reconciliation.reconcile_positions(
-            tracker, funder_address="0xabc", algo_name="test", paper=False,
+            ledger, funder_address="0xabc", algo_name="test", paper=False,
         )
     assert summary["ghost"] == []
     assert not any("GHOST" in r.message for r in caplog.records)
 
 
-def test_divergent_shares_warn(tracker, monkeypatch, caplog):
+def test_divergent_shares_warn(ledger, monkeypatch, caplog):
     """Both sides have it but shares disagree → DIVERGENT warning."""
     import logging
     from bot import fetcher
 
     seed = make_trade(action="BUY", price=0.5)
-    tracker.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
+    ledger.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
 
     monkeypatch.setattr(
         fetcher, "fetch_user_positions",
@@ -124,19 +124,19 @@ def test_divergent_shares_warn(tracker, monkeypatch, caplog):
     )
     with caplog.at_level(logging.WARNING):
         summary = reconciliation.reconcile_positions(
-            tracker, funder_address="0xabc", algo_name="test", paper=False,
+            ledger, funder_address="0xabc", algo_name="test", paper=False,
         )
     assert summary["divergent"] == ["m1"]
     assert any("DIVERGENT" in r.message for r in caplog.records)
 
 
-def test_divergent_within_epsilon_does_not_warn(tracker, monkeypatch, caplog):
+def test_divergent_within_epsilon_does_not_warn(ledger, monkeypatch, caplog):
     """Sub-epsilon difference is rounding noise, not real divergence."""
     import logging
     from bot import fetcher
 
     seed = make_trade(action="BUY", price=0.5)
-    tracker.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
+    ledger.record_buy(seed, spent_usdc=3.0, shares=6.0, fill_price=0.5, paper=False)
 
     monkeypatch.setattr(
         fetcher, "fetch_user_positions",
@@ -144,19 +144,19 @@ def test_divergent_within_epsilon_does_not_warn(tracker, monkeypatch, caplog):
     )
     with caplog.at_level(logging.WARNING):
         summary = reconciliation.reconcile_positions(
-            tracker, funder_address="0xabc", algo_name="test", paper=False,
+            ledger, funder_address="0xabc", algo_name="test", paper=False,
         )
     assert summary["agreed"] == ["m1"]
     assert summary["divergent"] == []
 
 
-def test_both_sides_summed_at_market_level(tracker, monkeypatch):
+def test_both_sides_summed_at_market_level(ledger, monkeypatch):
     """If the wallet holds both YES and NO of one market, on-chain rows
     are summed before comparing — the DB keys by market_id, not asset_id."""
     from bot import fetcher
 
     seed = make_trade(action="BUY", price=0.5)
-    tracker.record_buy(seed, spent_usdc=4.0, shares=8.0, fill_price=0.5, paper=False)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=8.0, fill_price=0.5, paper=False)
 
     monkeypatch.setattr(
         fetcher, "fetch_user_positions",
@@ -166,7 +166,7 @@ def test_both_sides_summed_at_market_level(tracker, monkeypatch):
         ],
     )
     summary = reconciliation.reconcile_positions(
-        tracker, funder_address="0xabc", algo_name="test", paper=False,
+        ledger, funder_address="0xabc", algo_name="test", paper=False,
     )
     # 5 + 3 = 8 shares total, matches DB.
     assert summary["agreed"] == ["m1"]

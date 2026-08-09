@@ -4,7 +4,7 @@ Algorithm registry — declarative, config-driven profiles.
 The `PROFILE` env var selects `config/<profile>.toml`, which declares the
 bundle of algorithms this process runs (see bot/profile_loader.py for the
 file shape). Each entry runs in its own worker thread with its own poll
-cadence, tracker, risk pool, and paper bankroll.
+cadence, ledger, risk pool, and paper bankroll.
 
 Examples:
     PROFILE=prod          → config/prod.toml

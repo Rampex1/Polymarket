@@ -88,7 +88,7 @@ class CopyTradeAlgorithm(Algorithm):
         ) if self.params.watchlist_size > 0 else None
 
         self._address: str = ""
-        self._tracker = None        # Ledger, set in setup()
+        self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen_ids = fetcher.SeenRing(SEEN_IDS_MAX)
         self.holding_cache = fetcher.TargetHoldingCache()
@@ -111,13 +111,13 @@ class CopyTradeAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker) -> None:
-        self._tracker = tracker
+    def setup(self, ledger) -> None:
+        self._ledger = ledger
         # Mode comes from this algorithm's own params — no global toggle.
         self._paper = self.params.mode == Mode.PAPER
 
         if self._multi is not None:
-            self._multi.setup(tracker, self._paper)
+            self._multi.setup(ledger, self._paper)
             logger.info("[%s] Ranked multi-leader watcher initialized.", self.params.name)
             return
 
@@ -227,7 +227,7 @@ class CopyTradeAlgorithm(Algorithm):
 
             self.holding_cache.set(market_id, holding)
             tier = self._tier_for_holding(holding)
-            our_position = self._tracker.get(market_id, self._paper)
+            our_position = self._ledger.get(market_id, self._paper)
             current_cost = our_position.total_cost_usdc if our_position else 0.0
 
             top_up = round(tier - current_cost, 8)
@@ -263,7 +263,7 @@ class CopyTradeAlgorithm(Algorithm):
         (> 0.95 or < 0.05), which means the CLOB settled the market even if
         Gamma's REST API is lagging behind.
         """
-        for pos in self._tracker.all_open(paper=self._paper):
+        for pos in self._ledger.all_open(paper=self._paper):
             market = self._market_data.market(pos.market_id)
             is_final = bool(market and self._market_data.market_outcome_is_final(market))
             if not is_final:
@@ -353,7 +353,7 @@ class CopyTradeAlgorithm(Algorithm):
             return
 
         tier = self._tier_for_holding(holding)
-        position = self._tracker.get(t.market_id, self._paper)
+        position = self._ledger.get(t.market_id, self._paper)
         current_cost = position.total_cost_usdc if position else 0.0
         scaled = round(tier - current_cost, 8)
 
@@ -437,7 +437,7 @@ class CopyTradeAlgorithm(Algorithm):
         else:
             new_target_cost = self._tier_for_holding(post_sell_holding)
 
-        position = self._tracker.get(t.market_id, self._paper)
+        position = self._ledger.get(t.market_id, self._paper)
         if position is None or position.shares <= 0:
             return    # nothing held; nothing to close
         current_cost = position.total_cost_usdc

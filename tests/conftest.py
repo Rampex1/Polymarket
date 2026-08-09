@@ -108,7 +108,7 @@ def fresh_db(tmp_db_path, monkeypatch):
 
 
 @pytest.fixture
-def tracker(fresh_db):
+def ledger(fresh_db):
     """A Ledger bound to a fresh DB, namespaced to copy_trade."""
     from bot.ledger import Ledger
 
@@ -161,9 +161,9 @@ def default_config(default_params):
 
 
 @pytest.fixture
-def risk(tracker, default_params):
+def risk(ledger, default_params):
     from bot.risk import RiskManager
-    return RiskManager(tracker, default_params)
+    return RiskManager(ledger, default_params)
 
 
 def make_global_trade(**overrides):

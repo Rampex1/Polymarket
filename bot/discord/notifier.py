@@ -260,8 +260,8 @@ def on_heartbeat(
     lines = [f"💓 **Heartbeat · {profile_label} · {now_str}**"]
 
     for name, paper in algo_infos:
-        tracker = Ledger(algo=name)
-        exposure = tracker.total_exposure_usdc(paper=paper)
+        ledger = Ledger(algo=name)
+        exposure = ledger.total_exposure_usdc(paper=paper)
         mode_tag = "PAPER" if paper else "LIVE"
         lines.append(f"> {_esc(name)} · {mode_tag} · ${exposure:.2f} exposure")
 
@@ -311,7 +311,7 @@ def start_heartbeat(
 # ---------------------------------------------------------------------------
 
 def start_daily_summary(
-    tracker,
+    ledger,
     paper: bool,
     stop_event: threading.Event | None = None,
     algo_name: str = "",
@@ -320,7 +320,7 @@ def start_daily_summary(
     """Send a portfolio summary every day at midnight (config.TIMEZONE).
 
     Per-algorithm: each worker thread starts its own daily-summary thread
-    against its own tracker. The `algo_name` tag disambiguates messages
+    against its own ledger. The `algo_name` tag disambiguates messages
     when multiple algorithms are active.
     """
     def _loop() -> None:
@@ -331,7 +331,7 @@ def start_daily_summary(
                     return
             else:
                 threading.Event().wait(wait_s)
-            _send_daily_summary(tracker, paper=paper, algo_name=algo_name,
+            _send_daily_summary(ledger, paper=paper, algo_name=algo_name,
                                 webhook_url=webhook_url)
 
     thread_name = f"daily-summary-{algo_name}" if algo_name else "daily-summary"
@@ -343,10 +343,10 @@ def start_daily_summary(
     )
 
 
-def _send_daily_summary(tracker, paper: bool, algo_name: str = "", webhook_url: str = "") -> None:
-    positions = tracker.all_open(paper=paper)
-    exposure = tracker.total_exposure_usdc(paper=paper)
-    pnl = tracker.today_pnl_usdc(paper=paper)
+def _send_daily_summary(ledger, paper: bool, algo_name: str = "", webhook_url: str = "") -> None:
+    positions = ledger.all_open(paper=paper)
+    exposure = ledger.total_exposure_usdc(paper=paper)
+    pnl = ledger.today_pnl_usdc(paper=paper)
     sign = "+" if pnl >= 0 else ""
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
     mode_tag = "PAPER" if paper else "LIVE"
@@ -375,7 +375,7 @@ def send_profile_summary(
 
     `algo_infos` is a list of (algo_name, paper) tuples. Fresh Ledger
     instances are created per algo so this can run from any thread without
-    holding live tracker references.
+    holding live ledger references.
 
     Layout:
       📊 **Daily Summary · DATE · PROFILE**
@@ -403,10 +403,10 @@ def send_profile_summary(
     total_exposure = 0.0
 
     for name, paper in algo_infos:
-        tracker = Ledger(algo=name)
-        positions = tracker.all_open(paper=paper)
-        exposure = tracker.total_exposure_usdc(paper=paper)
-        pnl = tracker.today_pnl_usdc(paper=paper)
+        ledger = Ledger(algo=name)
+        positions = ledger.all_open(paper=paper)
+        exposure = ledger.total_exposure_usdc(paper=paper)
+        pnl = ledger.today_pnl_usdc(paper=paper)
         total_pnl += pnl
         total_exposure += exposure
 

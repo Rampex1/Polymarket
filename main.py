@@ -6,7 +6,7 @@ Each algorithm in `algorithms.ENABLED` (selected by the `PROFILE` env var)
 runs as a fully independent worker:
 
   * Own `Ledger(algo=...)` — DB rows partitioned by algo.
-  * Own `RiskManager(tracker, params)` — caps come from algo params.
+  * Own `RiskManager(ledger, params)` — caps come from algo params.
   * Own polling cadence (`params.poll_interval_seconds`).
   * Own paper bankroll (per-algo row in `paper_account`).
   * Own daily-summary thread tagged with algo name.
@@ -54,19 +54,19 @@ def _run_worker(
     paper = algo.params.mode == Mode.PAPER
 
     try:
-        tracker = Ledger(algo=name)
+        ledger = Ledger(algo=name)
         if paper:
-            tracker.init_paper_balance(algo.params.paper_starting_balance)
+            ledger.init_paper_balance(algo.params.paper_starting_balance)
         runs.record_run(algo.params, config.PROFILE)
-        risk = RiskManager(tracker, algo.params)
-        algo.setup(tracker)
+        risk = RiskManager(ledger, algo.params)
+        algo.setup(ledger)
 
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url
 
         notifier.on_startup(
             "PAPER" if paper else "LIVE",
-            tracker.total_exposure_usdc(paper=paper),
+            ledger.total_exposure_usdc(paper=paper),
             algo_name=display_name,
             webhook_url=webhook_url,
         )
@@ -82,12 +82,12 @@ def _run_worker(
             algo.params.max_slippage * 100,
             algo.params.order_type.upper(),
         )
-        tracker.print_summary(paper=paper)
+        ledger.print_summary(paper=paper)
 
         # Startup reconciliation — surfaces ghost positions or stale DB rows
         # before we start acting. Live-only; paper has nothing to reconcile.
         reconciliation.reconcile_positions(
-            tracker,
+            ledger,
             config.POLY_FUNDER_ADDRESS,
             algo.display_name,
             paper,
@@ -100,7 +100,7 @@ def _run_worker(
                 for intent in algo.poll():
                     if stop_event.is_set():
                         break
-                    runner.dispatch(intent, algo, tracker, risk, client, paper)
+                    runner.dispatch(intent, algo, ledger, risk, client, paper)
                 consecutive_errors = 0
             except Exception as exc:
                 consecutive_errors += 1
@@ -119,7 +119,7 @@ def _run_worker(
             if not paper and poll_count % RECONCILE_EVERY_N_POLLS == 0:
                 try:
                     reconciliation.reconcile_positions(
-                        tracker,
+                        ledger,
                         config.POLY_FUNDER_ADDRESS,
                         algo.display_name,
                         paper,
@@ -130,8 +130,8 @@ def _run_worker(
             stop_event.wait(algo.params.poll_interval_seconds)
     finally:
         try:
-            tracker = Ledger(algo=name)
-            tracker.print_summary(paper=paper)
+            ledger = Ledger(algo=name)
+            ledger.print_summary(paper=paper)
         except Exception:
             pass
         notifier.on_shutdown(

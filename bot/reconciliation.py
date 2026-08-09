@@ -44,7 +44,7 @@ USD_EPSILON = 0.10
 
 
 def reconcile_positions(
-    tracker: Ledger,
+    ledger: Ledger,
     funder_address: str,
     algo_name: str,
     paper: bool,
@@ -101,7 +101,7 @@ def reconcile_positions(
             existing["size"] += size
             existing["value"] += value
 
-    db_positions = {p.market_id: p for p in tracker.all_open(paper=False)}
+    db_positions = {p.market_id: p for p in ledger.all_open(paper=False)}
 
     # 1. Stale: bot DB has, on-chain doesn't.
     for market_id, p in db_positions.items():

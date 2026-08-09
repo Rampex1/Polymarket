@@ -200,7 +200,7 @@ def stub_price(monkeypatch):
     return _set
 
 
-def test_dispatch_open_intent_paper(tracker, risk, algo, default_params, stub_price):
+def test_dispatch_open_intent_paper(ledger, risk, algo, default_params, stub_price):
     from bot import runner
     stub_price(0.50)
 
@@ -208,16 +208,16 @@ def test_dispatch_open_intent_paper(tracker, risk, algo, default_params, stub_pr
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         question="Q?", outcome="Yes", signal_id="tx1", reason="tier 1",
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
-    p = tracker.get("m1", paper=True)
+    p = ledger.get("m1", paper=True)
     assert p is not None
     assert p.total_cost_usdc == 1.0
-    assert tracker.paper_balance() == 10_000.0 - 1.0
+    assert ledger.paper_balance() == 10_000.0 - 1.0
 
 
 def test_dispatch_open_records_leader_attributed_lot(
-    tracker, risk, algo, default_params, stub_price,
+    ledger, risk, algo, default_params, stub_price,
 ):
     """A multi-leader fill creates an exit-attributable lot after it fills."""
     from bot import runner
@@ -229,7 +229,7 @@ def test_dispatch_open_records_leader_attributed_lot(
         signal_id="leader-event", leader_wallet="0xleader",
         leader_event_id="0xleader:leader-event",
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
     assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 2.0
 
@@ -237,22 +237,22 @@ def test_dispatch_open_records_leader_attributed_lot(
         CloseIntent(
             market_id="m1", fraction=1.0, signal_price=0.5,
             leader_wallet="0xleader", leader_event_id="0xleader:leader-sell",
-        ), algo, tracker, risk, client=None, paper=True,
+        ), algo, ledger, risk, client=None, paper=True,
     )
     assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 0.0
 
 
-def test_dispatch_open_skipped_by_slippage(tracker, risk, algo, default_params, stub_price):
+def test_dispatch_open_skipped_by_slippage(ledger, risk, algo, default_params, stub_price):
     from bot import runner
     stub_price(0.70)         # 40% drift from signal 0.50
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_open_skipped_when_price_fetch_fails(tracker, risk, algo,
+def test_dispatch_open_skipped_when_price_fetch_fails(ledger, risk, algo,
                                                       default_params, stub_price):
     """If the current-price lookup returns None, slippage gate fails closed."""
     from bot import runner
@@ -260,11 +260,11 @@ def test_dispatch_open_skipped_when_price_fetch_fails(tracker, risk, algo,
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_open_skipped_by_risk(tracker, risk, algo, default_params,
+def test_dispatch_open_skipped_by_risk(ledger, risk, algo, default_params,
                                        monkeypatch, stub_price):
     """Risk check failure → no order placed."""
     from bot import runner
@@ -273,17 +273,17 @@ def test_dispatch_open_skipped_by_risk(tracker, risk, algo, default_params,
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_open_no_asset_id_is_skipped(tracker, risk, algo, default_params):
+def test_dispatch_open_no_asset_id_is_skipped(ledger, risk, algo, default_params):
     from bot import runner
     intent = OpenIntent(
         market_id="m1", asset_id="", usdc_amount=1.0, signal_price=0.50,
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
 # ---------------------------------------------------------------------------
@@ -291,81 +291,81 @@ def test_dispatch_open_no_asset_id_is_skipped(tracker, risk, algo, default_param
 # ---------------------------------------------------------------------------
 
 
-def test_dispatch_close_partial(tracker, risk, algo, default_params, stub_price):
+def test_dispatch_close_partial(ledger, risk, algo, default_params, stub_price):
     """fraction=0.25 of 20 shares → 5 sold, 15 remain."""
     from bot import runner
 
     seed = make_trade(action="BUY", price=0.50)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
 
     stub_price(0.50)
 
     intent = CloseIntent(
         market_id="m1", fraction=0.25, signal_price=0.50, outcome="Yes",
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
-    p = tracker.get("m1", paper=True)
+    p = ledger.get("m1", paper=True)
     assert p is not None
     assert abs(p.shares - 15.0) < 1e-6
     assert p.avg_price == 0.50
 
 
-def test_dispatch_close_full(tracker, risk, algo, default_params, stub_price):
+def test_dispatch_close_full(ledger, risk, algo, default_params, stub_price):
     """fraction=1.0 closes the entire position."""
     from bot import runner
 
     seed = make_trade(action="BUY", price=0.50)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
 
     stub_price(0.50)
 
     intent = CloseIntent(market_id="m1", fraction=1.0, signal_price=0.50)
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
-    assert tracker.get("m1", paper=True) is None
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_close_no_position_is_noop(tracker, risk, algo, default_params, stub_price):
+def test_dispatch_close_no_position_is_noop(ledger, risk, algo, default_params, stub_price):
     from bot import runner
     stub_price(0.50)
     intent = CloseIntent(market_id="m1", fraction=1.0, signal_price=0.50)
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_close_zero_signal_price_skips_slippage(tracker, risk, algo,
+def test_dispatch_close_zero_signal_price_skips_slippage(ledger, risk, algo,
                                                          default_params, stub_price):
     """A MERGE-style forced exit has signal_price=0.0 and must bypass the
     slippage gate. Current price still must be available."""
     from bot import runner
 
     seed = make_trade(action="BUY", price=0.50)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
 
     # Pretend current price drifted way up — slippage would normally block.
     stub_price(0.95)
 
     intent = CloseIntent(market_id="m1", fraction=1.0, signal_price=0.0,
                          reason="target merged")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
 
 
-def test_dispatch_close_aborts_when_price_unavailable(tracker, risk, algo,
+def test_dispatch_close_aborts_when_price_unavailable(ledger, risk, algo,
                                                       default_params, stub_price):
     """signal_price=0 + None current → must not attempt the fill."""
     from bot import runner
 
     seed = make_trade(action="BUY", price=0.50)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=20.0, fill_price=0.50, paper=True)
 
     stub_price(None)
     intent = CloseIntent(market_id="m1", fraction=1.0, signal_price=0.0)
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
     # Position untouched because we couldn't price the close.
-    p = tracker.get("m1", paper=True)
+    p = ledger.get("m1", paper=True)
     assert p is not None
     assert p.shares == 20.0
 
@@ -375,56 +375,56 @@ def test_dispatch_close_aborts_when_price_unavailable(tracker, risk, algo,
 # ---------------------------------------------------------------------------
 
 
-def test_dispatch_settle_wins_at_one(tracker, risk, algo, default_params, monkeypatch):
+def test_dispatch_settle_wins_at_one(ledger, risk, algo, default_params, monkeypatch):
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40)
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
-    assert tracker.get("m1", paper=True) is None
-    assert tracker.today_pnl_usdc(paper=True) == 6.0
+    assert ledger.get("m1", paper=True) is None
+    assert ledger.today_pnl_usdc(paper=True) == 6.0
 
 
-def test_dispatch_settle_loss_at_zero(tracker, risk, algo, default_params, monkeypatch):
+def test_dispatch_settle_loss_at_zero(ledger, risk, algo, default_params, monkeypatch):
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40)
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.01)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
-    assert tracker.today_pnl_usdc(paper=True) == -4.0
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
+    assert ledger.today_pnl_usdc(paper=True) == -4.0
 
 
-def test_dispatch_settle_ambiguous_leaves_open(tracker, risk, algo,
+def test_dispatch_settle_ambiguous_leaves_open(ledger, risk, algo,
                                                default_params, monkeypatch):
     """Mid-range price + no Gamma confirmation → leave the position open."""
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40)
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.50)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is not None
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is not None
 
 
-def test_dispatch_settle_uses_gamma_when_closed(tracker, risk, algo,
+def test_dispatch_settle_uses_gamma_when_closed(ledger, risk, algo,
                                                 default_params, monkeypatch):
     """Closed market with outcomePrices pinned to 0/1 → trust Gamma."""
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
         fetcher, "fetch_market_resolution",
@@ -438,17 +438,17 @@ def test_dispatch_settle_uses_gamma_when_closed(tracker, risk, algo,
                         lambda *a, **kw: pytest.fail("should not be called"))
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
-    assert tracker.today_pnl_usdc(paper=True) == 6.0
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
+    assert ledger.today_pnl_usdc(paper=True) == 6.0
 
 
-def test_dispatch_settle_ignores_gamma_when_open(tracker, risk, algo,
+def test_dispatch_settle_ignores_gamma_when_open(ledger, risk, algo,
                                                  default_params, monkeypatch):
     """Live mid (not a settlement) → fall back to CLOB binarisation."""
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
         fetcher, "fetch_market_resolution",
@@ -461,9 +461,9 @@ def test_dispatch_settle_ignores_gamma_when_open(tracker, risk, algo,
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
-    assert tracker.today_pnl_usdc(paper=True) == 6.0
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
+    assert ledger.today_pnl_usdc(paper=True) == 6.0
 
 
 # ---------------------------------------------------------------------------
@@ -478,7 +478,7 @@ def _signal_row(signal_id="tx1", algo="copy_trade"):
     ).fetchone()
 
 
-def test_dispatch_open_records_executed_signal(tracker, risk, algo,
+def test_dispatch_open_records_executed_signal(ledger, risk, algo,
                                                default_params, stub_price):
     from bot import runner
     stub_price(0.50)
@@ -486,7 +486,7 @@ def test_dispatch_open_records_executed_signal(tracker, risk, algo,
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         signal_id="tx1", features={"odds": 0.5, "wallet": "0xw"},
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
     row = _signal_row()
     assert row is not None
@@ -496,7 +496,7 @@ def test_dispatch_open_records_executed_signal(tracker, risk, algo,
     assert json.loads(row["features"]) == {"odds": 0.5, "wallet": "0xw"}
 
 
-def test_dispatch_open_records_risk_blocked_signal(tracker, risk, algo,
+def test_dispatch_open_records_risk_blocked_signal(ledger, risk, algo,
                                                    default_params, monkeypatch,
                                                    stub_price):
     from bot import runner
@@ -506,14 +506,14 @@ def test_dispatch_open_records_risk_blocked_signal(tracker, risk, algo,
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         signal_id="tx1",
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
     row = _signal_row()
     assert row["executed"] == 0
     assert row["skip_reason"].startswith("risk:")
 
 
-def test_dispatch_open_records_slippage_skipped_signal(tracker, risk, algo,
+def test_dispatch_open_records_slippage_skipped_signal(ledger, risk, algo,
                                                        default_params, stub_price):
     from bot import runner
     stub_price(0.70)                       # 40% drift from signal 0.50
@@ -521,14 +521,14 @@ def test_dispatch_open_records_slippage_skipped_signal(tracker, risk, algo,
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         signal_id="tx1",
     )
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
     row = _signal_row()
     assert row["executed"] == 0
     assert row["skip_reason"] == "slippage"
 
 
-def test_dispatch_settle_labels_signal_outcome(tracker, risk, algo,
+def test_dispatch_settle_labels_signal_outcome(ledger, risk, algo,
                                                default_params, monkeypatch,
                                                stub_price):
     """The settle path backfills outcome + pnl on this market's signal rows."""
@@ -538,12 +538,12 @@ def test_dispatch_settle_labels_signal_outcome(tracker, risk, algo,
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         signal_id="tx1",
     )
-    runner.dispatch(open_intent, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(open_intent, algo, ledger, risk, client=None, paper=True)
 
     monkeypatch.setattr(fetcher, "fetch_market_resolution", lambda *a, **kw: None)
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
     settle = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(settle, algo, tracker, risk, client=None, paper=True)
+    runner.dispatch(settle, algo, ledger, risk, client=None, paper=True)
 
     row = _signal_row()
     assert row["outcome"] == 1.0                       # binarized win
@@ -598,12 +598,12 @@ def test_market_outcome_is_final_requires_determined_outcome():
 
 
 def test_dispatch_settle_falls_back_when_closed_but_undetermined(
-        tracker, risk, algo, default_params, monkeypatch):
+        ledger, risk, algo, default_params, monkeypatch):
     """Closed but still in the UMA window → outcomePrices is the last book,
     not a settlement. Must ignore it and use the CLOB binarization."""
     from bot import runner, fetcher
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
-    tracker.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
     monkeypatch.setattr(
         fetcher, "fetch_market_resolution",
@@ -616,6 +616,6 @@ def test_dispatch_settle_falls_back_when_closed_but_undetermined(
     monkeypatch.setattr(fetcher, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
-    runner.dispatch(intent, algo, tracker, risk, client=None, paper=True)
-    assert tracker.get("m1", paper=True) is None
-    assert tracker.today_pnl_usdc(paper=True) == 6.0
+    runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
+    assert ledger.get("m1", paper=True) is None
+    assert ledger.today_pnl_usdc(paper=True) == 6.0

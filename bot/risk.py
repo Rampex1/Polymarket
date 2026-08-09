@@ -16,8 +16,8 @@ class RiskManager:
     its own caps without sharing a global pool with sibling algorithms.
     """
 
-    def __init__(self, tracker: Ledger, params) -> None:
-        self.tracker = tracker
+    def __init__(self, ledger: Ledger, params) -> None:
+        self.ledger = ledger
         self.params = params
         # Markets where a BUY has failed this session. Cleared on restart.
         # Prevents retry loops and Discord spam after any unrecoverable failure.
@@ -78,7 +78,7 @@ class RiskManager:
         return True, ""
 
     def _check_daily_loss(self, paper: bool) -> tuple[bool, str]:
-        pnl = self.tracker.today_pnl_usdc(paper=paper)
+        pnl = self.ledger.today_pnl_usdc(paper=paper)
         if pnl < -self.params.daily_loss_limit_usdc:
             return (
                 False,
@@ -90,7 +90,7 @@ class RiskManager:
     def _check_position_size(
         self, trade: Trade, scaled_usdc: float, paper: bool
     ) -> tuple[bool, str]:
-        position = self.tracker.get(trade.market_id, paper)
+        position = self.ledger.get(trade.market_id, paper)
         current = position.total_cost_usdc if position else 0.0
         if current + scaled_usdc > self.params.max_position_size_usdc:
             return (
@@ -103,7 +103,7 @@ class RiskManager:
     def _check_total_exposure(
         self, scaled_usdc: float, paper: bool
     ) -> tuple[bool, str]:
-        total = self.tracker.total_exposure_usdc(paper)
+        total = self.ledger.total_exposure_usdc(paper)
         if total + scaled_usdc > self.params.max_total_exposure_usdc:
             return (
                 False,
@@ -119,7 +119,7 @@ class RiskManager:
         # needs manual gating.
         if not paper:
             return True, ""
-        balance = self.tracker.paper_balance()
+        balance = self.ledger.paper_balance()
         if scaled_usdc > balance:
             return False, f"Insufficient paper balance (${balance:.2f} available)"
         return True, ""

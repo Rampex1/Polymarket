@@ -26,10 +26,10 @@ def pnl_str(v: float) -> str:
 def print_section(algo, title: str, paper: bool) -> None:
     name = algo.params.name
     p_flag = int(paper)
-    tracker = Ledger(algo=name)
+    ledger = Ledger(algo=name)
 
-    positions = tracker.all_open(paper=paper)
-    exposure = tracker.total_exposure_usdc(paper=paper)
+    positions = ledger.all_open(paper=paper)
+    exposure = ledger.total_exposure_usdc(paper=paper)
 
     total_pnl = float(conn.execute(
         "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
@@ -60,7 +60,7 @@ def print_section(algo, title: str, paper: bool) -> None:
     print("├" + DIV + "┤")
 
     if paper:
-        balance = tracker.paper_balance()
+        balance = ledger.paper_balance()
         total_value = balance + exposure
         print(f"│  {'Available cash':<28} ${balance:>18,.2f}  │")
         print(f"│  {'Open position cost':<28} ${exposure:>18,.2f}  │")

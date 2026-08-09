@@ -268,7 +268,7 @@ in the VPS `.env` and redeploy.
   catches PRAGMA/index/migration bugs a mock would hide.
 - Use real `RiskManager`, `Ledger`, `Trade`. **The only thing
   stubbed is the HTTP boundary** (Polymarket API).
-- Each test gets a fresh DB; tracker fixtures are bound to the
+- Each test gets a fresh DB; ledger fixtures are bound to the
   `copy_trade` algo namespace.
 - `conftest.py` puts the repo root on `sys.path`, which depends on
   `pytest.ini` staying at the repo root (it sets rootdir).

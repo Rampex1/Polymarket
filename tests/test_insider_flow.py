@@ -3,7 +3,7 @@ InsiderFlow algorithm tests — fresh-wallet suspicious-flow detection.
 
 Filter chain, freshness gate (fail-closed), dedupe, top-up sizing, and the
 resolution settle-sweep. As everywhere else in the suite, only the HTTP
-boundary (`bot.fetcher` functions) is stubbed; tracker/params run real code.
+boundary (`bot.fetcher` functions) is stubbed; ledger/params run real code.
 """
 
 import time
@@ -74,11 +74,11 @@ def _params(**overrides):
 
 
 @pytest.fixture
-def algo(tracker):
+def algo(ledger):
     from algorithms.insider_flow import InsiderFlowAlgorithm
 
     a = InsiderFlowAlgorithm(params=_params())
-    a._tracker = tracker
+    a._ledger = ledger
     a._paper = True
     return a
 
@@ -345,7 +345,7 @@ def test_skips_market_resolving_too_far_out(algo, stub_firehose, stub_stats,
 
 
 def test_skips_when_annualized_return_below_hurdle(
-    tracker, stub_firehose, stub_stats, monkeypatch
+    ledger, stub_firehose, stub_stats, monkeypatch
 ):
     """Win-case +400% over 30 days is ~4870%/yr — a 10000%/yr hurdle
     rejects it. The same trade clears a 1000%/yr hurdle."""
@@ -360,7 +360,7 @@ def test_skips_when_annualized_return_below_hurdle(
     stub_stats(fresh_stats())
     for hurdle, expected in ((100.0, 0), (10.0, 1)):
         a = InsiderFlowAlgorithm(params=_params(min_annualized_return=hurdle))
-        a._tracker = tracker
+        a._ledger = ledger
         a._paper = True
         stub_firehose([make_global_trade(tx_hash=f"0x{hurdle}")])
         assert len(list(a.poll())) == expected, f"hurdle={hurdle}"
@@ -591,7 +591,7 @@ def test_same_row_not_processed_twice(algo, stub_firehose, stub_stats):
     assert list(algo.poll()) == []      # same tx hash → deduped
 
 
-def test_setup_seeds_dedupe_ring(tracker, stub_firehose, stub_stats):
+def test_setup_seeds_dedupe_ring(ledger, stub_firehose, stub_stats):
     """Rows already in the firehose at startup must not be replayed."""
     from algorithms.insider_flow import InsiderFlowAlgorithm
 
@@ -599,19 +599,19 @@ def test_setup_seeds_dedupe_ring(tracker, stub_firehose, stub_stats):
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
 
-    a.setup(tracker)
+    a.setup(ledger)
     assert list(a.poll()) == []
 
 
 def test_position_at_bet_size_skips_without_stats_call(
-    algo, stub_firehose, tracker, monkeypatch
+    algo, stub_firehose, ledger, monkeypatch
 ):
     """Already at bet size in this market → skip (and don't even vet the
     wallet — position check is the cheaper gate)."""
     from bot import fetcher
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     calls = []
     monkeypatch.setattr(
@@ -624,10 +624,10 @@ def test_position_at_bet_size_skips_without_stats_call(
 
 
 def test_partial_position_tops_up_to_bet_size(
-    algo, stub_firehose, stub_stats, tracker
+    algo, stub_firehose, stub_stats, ledger
 ):
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=4.0, shares=20.0, fill_price=0.20, paper=True)
+    ledger.record_buy(seed, spent_usdc=4.0, shares=20.0, fill_price=0.20, paper=True)
 
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
@@ -642,20 +642,20 @@ def test_partial_position_tops_up_to_bet_size(
 # ---------------------------------------------------------------------------
 
 
-def _buffered_algo(tracker, **overrides):
+def _buffered_algo(ledger, **overrides):
     from algorithms.insider_flow import InsiderFlowAlgorithm
 
     a = InsiderFlowAlgorithm(
         params=_params(buffer_window_seconds=900.0, **overrides))
-    a._tracker = tracker
+    a._ledger = ledger
     a._paper = True
     return a
 
 
 def test_buffer_holds_candidate_instead_of_emitting(
-    tracker, stub_firehose, stub_stats
+    ledger, stub_firehose, stub_stats
 ):
-    algo = _buffered_algo(tracker)
+    algo = _buffered_algo(ledger)
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
 
@@ -663,8 +663,8 @@ def test_buffer_holds_candidate_instead_of_emitting(
     assert len(algo._buffer) == 1
 
 
-def test_buffer_flushes_after_window(tracker, stub_firehose, stub_stats):
-    algo = _buffered_algo(tracker)
+def test_buffer_flushes_after_window(ledger, stub_firehose, stub_stats):
+    algo = _buffered_algo(ledger)
     stub_firehose([make_global_trade()])
     stub_stats(fresh_stats())
     assert list(algo.poll()) == []
@@ -677,10 +677,10 @@ def test_buffer_flushes_after_window(tracker, stub_firehose, stub_stats):
     assert algo._buffer == []
 
 
-def test_buffer_emits_only_top_n_by_score(tracker, stub_firehose, stub_stats):
+def test_buffer_emits_only_top_n_by_score(ledger, stub_firehose, stub_stats):
     """Three candidates, one slot: the biggest bet (highest conviction
     score, all else equal) gets copied; the others are dropped for good."""
-    algo = _buffered_algo(tracker, buffer_top_n=1)
+    algo = _buffered_algo(ledger, buffer_top_n=1)
     stub_firehose([
         make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1",
                           cash_usdc=6_000.0),
@@ -700,10 +700,10 @@ def test_buffer_emits_only_top_n_by_score(tracker, stub_firehose, stub_stats):
     assert algo._buffer == []
 
 
-def test_buffer_overflow_flushes_early(tracker, stub_firehose, stub_stats):
+def test_buffer_overflow_flushes_early(ledger, stub_firehose, stub_stats):
     """A burst that fills the buffer flushes immediately — the safety valve
     must not wait out the window."""
-    algo = _buffered_algo(tracker, buffer_max=2, buffer_top_n=2)
+    algo = _buffered_algo(ledger, buffer_max=2, buffer_top_n=2)
     stub_firehose([
         make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1"),
         make_global_trade(tx_hash="0xt2", market_id="m2", asset_id="a2"),
@@ -712,10 +712,10 @@ def test_buffer_overflow_flushes_early(tracker, stub_firehose, stub_stats):
     assert len(list(algo.poll())) == 2
 
 
-def test_score_ranks_younger_wallet_higher(tracker):
+def test_score_ranks_younger_wallet_higher(ledger):
     """Same cash: an hour-old wallet is more suspicious than a 13-day-old
     one near the freshness limit."""
-    algo = _buffered_algo(tracker)
+    algo = _buffered_algo(ledger)
     row = make_global_trade()
     young = algo._score(row, fresh_stats())
     older = algo._score(row, fresh_stats(oldest_ts=NOW - 13 * 86_400))
@@ -723,11 +723,11 @@ def test_score_ranks_younger_wallet_higher(tracker):
 
 
 def test_emitted_features_include_buffer_context(
-    tracker, stub_firehose, stub_stats
+    ledger, stub_firehose, stub_stats
 ):
     """Selection pressure itself must be visible in the training data —
     the sanctioned derived-score exception."""
-    algo = _buffered_algo(tracker, buffer_top_n=2)
+    algo = _buffered_algo(ledger, buffer_top_n=2)
     stub_firehose([
         make_global_trade(tx_hash="0xt1", market_id="m1", asset_id="a1"),
         make_global_trade(tx_hash="0xt2", market_id="m2", asset_id="a2"),
@@ -745,12 +745,12 @@ def test_emitted_features_include_buffer_context(
 
 
 def test_flush_rechecks_position_between_emits(
-    tracker, stub_firehose, stub_stats
+    ledger, stub_firehose, stub_stats
 ):
     """Two same-market candidates in one flush: the runner records the fill
     between yields (generator laziness), so the second emit must re-check
     the position and skip instead of doubling it."""
-    algo = _buffered_algo(tracker, buffer_top_n=2)
+    algo = _buffered_algo(ledger, buffer_top_n=2)
     stub_firehose([
         make_global_trade(tx_hash="0xt1", wallet="0xw1"),
         make_global_trade(tx_hash="0xt2", wallet="0xw2"),
@@ -765,7 +765,7 @@ def test_flush_rechecks_position_between_emits(
     assert first.usdc_amount == 10.0
     # Simulate the runner filling the first intent before the next yield.
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20,
+    ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20,
                        paper=True)
     assert list(gen) == []
 
@@ -776,22 +776,22 @@ def test_flush_rechecks_position_between_emits(
 
 
 @pytest.fixture
-def algo_sweeping(tracker):
+def algo_sweeping(ledger):
     from algorithms.insider_flow import InsiderFlowAlgorithm
 
     a = InsiderFlowAlgorithm(params=_params(settle_check_every=1))
-    a._tracker = tracker
+    a._ledger = ledger
     a._paper = True
     return a
 
 
 def test_settle_sweep_emits_settle_for_resolved_market(
-    algo_sweeping, stub_firehose, tracker, monkeypatch
+    algo_sweeping, stub_firehose, ledger, monkeypatch
 ):
     from bot import fetcher
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(
@@ -806,7 +806,7 @@ def test_settle_sweep_emits_settle_for_resolved_market(
 
 
 def test_settle_sweep_skips_closed_but_undetermined_market(
-    algo_sweeping, stub_firehose, tracker, monkeypatch
+    algo_sweeping, stub_firehose, ledger, monkeypatch
 ):
     """Trading has ended but the outcome is still in the UMA window —
     outcomePrices is the last book, not a settlement. Must NOT settle:
@@ -814,7 +814,7 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
     from bot import fetcher
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(
@@ -825,12 +825,12 @@ def test_settle_sweep_skips_closed_but_undetermined_market(
 
 
 def test_settle_sweep_leaves_unresolved_markets_alone(
-    algo_sweeping, stub_firehose, tracker, monkeypatch
+    algo_sweeping, stub_firehose, ledger, monkeypatch
 ):
     from bot import fetcher
 
     seed = make_trade(action="BUY", market_id="m1", asset_id="a1", price=0.20)
-    tracker.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
+    ledger.record_buy(seed, spent_usdc=10.0, shares=50.0, fill_price=0.20, paper=True)
 
     stub_firehose([])
     monkeypatch.setattr(

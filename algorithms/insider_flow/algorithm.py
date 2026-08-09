@@ -85,7 +85,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
 
-        self._tracker = None        # Ledger, set in setup()
+        self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen = fetcher.SeenRing(SEEN_IDS_MAX)
         self._poll_count = 0
@@ -105,8 +105,8 @@ class InsiderFlowAlgorithm(Algorithm):
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
-    def setup(self, tracker) -> None:
-        self._tracker = tracker
+    def setup(self, ledger) -> None:
+        self._ledger = ledger
         self._paper = self.params.mode == Mode.PAPER
 
         # Seed the dedupe ring with the current firehose tail so a restart
@@ -269,7 +269,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
     def _top_up_amount(self, market_id: str) -> float:
         """USDC needed to bring our position in this market to bet size."""
-        position = self._tracker.get(market_id, self._paper)
+        position = self._ledger.get(market_id, self._paper)
         current_cost = position.total_cost_usdc if position else 0.0
         return round(self.params.bet_size_usdc - current_cost, 8)
 
@@ -473,7 +473,7 @@ class InsiderFlowAlgorithm(Algorithm):
         # would book P&L off a stale book and permanently mislabel this
         # market's signal rows. Undetermined markets just wait for a later
         # sweep — resolution is not time-sensitive.
-        for pos in self._tracker.all_open(paper=self._paper):
+        for pos in self._ledger.all_open(paper=self._paper):
             market = self._market_data.market(pos.market_id)
             if market and self._market_data.market_outcome_is_final(market):
                 logger.info(

@@ -17,15 +17,15 @@ class MultiLeaderCopyEngine:
         self._watchlist = watchlist
         self._ranker_source = ranker_source
         self._tier_for_holding = tier_for_holding
-        self._tracker = None
+        self._ledger = None
         self._paper = True
         self._seen: dict[str, fetcher.SeenRing] = {}
         self._holdings: dict[str, fetcher.TargetHoldingCache] = {}
         self._recent_entries: list[tuple[float, str, str, str, str]] = []
         self._last_rank_refresh = 0.0
 
-    def setup(self, tracker, paper: bool) -> None:
-        self._tracker, self._paper = tracker, paper
+    def setup(self, ledger, paper: bool) -> None:
+        self._ledger, self._paper = ledger, paper
         self._refresh_watchlist(force=True)
         self._seed_active_wallets()
 
@@ -106,8 +106,8 @@ class MultiLeaderCopyEngine:
         target = self._tier_for_holding(holding)
         if len(leaders) >= self.params.consensus_min_leaders:
             target = min(self.params.max_position_size_usdc, target * self.params.consensus_size_multiplier)
-        position = self._tracker.get(trade.market_id, self._paper)
-        if position is None and len(self._tracker.all_open(paper=self._paper)) >= self.params.max_concurrent_positions:
+        position = self._ledger.get(trade.market_id, self._paper)
+        if position is None and len(self._ledger.all_open(paper=self._paper)) >= self.params.max_concurrent_positions:
             return
         current = position.total_cost_usdc if position else 0.0
         amount = round(target - current, 8)
@@ -122,7 +122,7 @@ class MultiLeaderCopyEngine:
         )
 
     def _close(self, wallet: str, trade, forced: bool) -> Iterator[CloseIntent]:
-        position = self._tracker.get(trade.market_id, self._paper)
+        position = self._ledger.get(trade.market_id, self._paper)
         leader_shares = copy_lots.remaining_shares(self.params.name, trade.market_id, wallet)
         if position is None or position.shares <= 0 or leader_shares <= 0:
             return

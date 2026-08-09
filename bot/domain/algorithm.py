@@ -17,7 +17,7 @@ class Algorithm(ABC):
 
     params: AlgoParams
 
-    def setup(self, tracker) -> None:
+    def setup(self, ledger) -> None:
         """One-time startup before the first poll"""
 
     @abstractmethod

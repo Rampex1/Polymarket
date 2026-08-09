@@ -54,7 +54,7 @@ def test_leader_close_consumes_only_that_leaders_lots(fresh_db):
     assert copy_lots.remaining_shares("copy", "m1", "0xb") == 20
 
 
-def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, tracker):
+def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, ledger):
     """The integrated copy algorithm reads active leaders from its watchlist."""
     from algorithms.copy_trade.algorithm import CopyTradeAlgorithm
     from tests.conftest import copy_trade_params
@@ -94,7 +94,7 @@ def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, tracker):
             watchlist_min_resolved_bets=2, tier1_size=1.0, max_position_size_usdc=3.0,
         ), market_data=data, watchlist=repo, ranker_source=FakeHistory(),
     )
-    algo.setup(tracker)
+    algo.setup(ledger)
     assert repo.active_wallets("multi") == ["0xa"]
     data.rows = [make_trade(action="BUY", trade_id="leader-buy", price=0.5)]
 
