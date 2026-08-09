@@ -2,6 +2,9 @@
 discord_bot.py
 
 Slash-command bot; one standalone daemon serves every profile.
+
+/status, /positions, /pnl — read state; /summary sends the daily summaries now;
+/restart pulls + redeploys on the VPS (admin only).
 """
 
 import asyncio
