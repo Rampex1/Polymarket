@@ -24,7 +24,8 @@ from bot.algorithm import Algorithm
 from bot.domain.intents import Mode
 from bot.observability.discord_notif import notifier
 from bot.observability.logs.setup import setup_logging
-from bot.positions import PositionTracker, RiskManager
+from bot.positions import PositionTracker
+from bot.risk import RiskManager
 from bot.profile_loader import ProfileError
 
 try:

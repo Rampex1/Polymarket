@@ -36,7 +36,8 @@ from .execution.fills import FillResult, simulate_buy as _simulate_buy, simulate
 from .execution.pricing import current_price as _get_current_price, slippage_ok as _slippage_ok
 from .execution.settlement import resolve_close_price as _resolve_close_price
 from .domain.models import Trade
-from .positions import PositionTracker, RiskManager
+from .positions import PositionTracker
+from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
 

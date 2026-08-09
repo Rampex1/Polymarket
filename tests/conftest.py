@@ -162,7 +162,7 @@ def default_config(default_params):
 
 @pytest.fixture
 def risk(tracker, default_params):
-    from bot.positions import RiskManager
+    from bot.risk import RiskManager
     return RiskManager(tracker, default_params)
 
 

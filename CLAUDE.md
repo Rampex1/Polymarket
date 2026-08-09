@@ -74,7 +74,8 @@ bot/
   domain/models.py        # Trade / GlobalTrade dataclasses (boundary records the runner adapts intents into)
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
   fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
-  positions.py            # PositionTracker (DB CRUD) + RiskManager (enforce limits)
+  positions.py            # PositionTracker — repository for positions, trade_log, daily_stats, paper_account
+  risk.py                 # RiskManager — pre-trade caps from each algo's params; BUYs only
   execution/              # Called by runner: fills.py (paper fills), pricing.py (price +
                           # slippage), settlement.py (resolution price), lots.py
                           # (leader-attributed lots — one leader's exit unwinds only its share)
