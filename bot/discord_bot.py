@@ -1,25 +1,7 @@
 """
-Discord bot — two-way interactive interface.
+discord_bot.py
 
-Runs as a standalone daemon (its own tmux session) so a single bot
-instance serves all profiles without needing one token per profile.
-
-Slash commands:
-  /status       — all algorithms grouped by profile: mode, exposure, P&L
-  /positions    — open positions (optional algo name filter)
-  /pnl          — P&L + exposure per algo, combined total
-  /summary      — send daily summaries to all profile summary channels now
-  /restart      — git pull + restart all VPS sessions (admin only)
-
-Entry point: scripts/run_discord_bot.py
-Config:      DISCORD_BOT_TOKEN + DISCORD_GUILD_ID in .env
-
-Setup (one-time):
-  1. discord.com/developers → New Application → Bot → Reset Token → copy it
-  2. OAuth2 → URL Generator → scopes: bot + applications.commands
-     → bot permissions: Send Messages, Use Slash Commands → invite URL
-  3. Set DISCORD_BOT_TOKEN and DISCORD_GUILD_ID in .env
-     (DISCORD_GUILD_ID: right-click server → Copy Server ID, needs Developer Mode)
+Slash-command bot; one standalone daemon serves every profile.
 """
 
 import asyncio
