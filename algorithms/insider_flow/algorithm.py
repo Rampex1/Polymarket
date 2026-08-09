@@ -72,6 +72,8 @@ WALLET_CACHE_MAX = 1000
 
 
 class InsiderFlowAlgorithm(Algorithm):
+    """Copy large first bets from fresh wallets at long odds."""
+
     def __init__(
         self,
         name: Optional[str] = None,

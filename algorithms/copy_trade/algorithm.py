@@ -61,6 +61,8 @@ _SMOKE_TEST_WALLET = "0x8b181a0f7ab8f2d886b9bb2765eb1699b6ecced9"
 
 
 class CopyTradeAlgorithm(Algorithm):
+    """Mirror one target wallet's trades, or a ranked cohort of wallets."""
+
     def __init__(
         self,
         name: Optional[str] = None,
