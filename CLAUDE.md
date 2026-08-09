@@ -78,8 +78,8 @@ bot/
     discord_notif/        # Outbound Discord
       notifier.py         # Discord alerts, daily summary, heartbeat, weekly signal digest
       messages.py         # Message rendering — markdown escaping, market URLs, feature lines
-    logging/              # Local log sinks (shadows the stdlib name only as bot.observability.logging)
-      logging_setup.py    # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
+    logs/                 # Local log sinks
+      setup.py            # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
   threads.py              # Discord thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
   discord_bot.py          # Slash-command bot (standalone daemon, its own process)
   signals.py              # Signal feature logging — training-data rows, outcome-labeled at settle

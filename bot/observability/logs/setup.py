@@ -1,5 +1,5 @@
 """
-logging_setup.py
+setup.py
 
 Console plus cumulative per-level files under logs/<profile>/, rotated daily.
 tmux scrollback dies with the pane; the file sinks are what survive a restart.
