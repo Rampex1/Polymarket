@@ -19,6 +19,7 @@ from algorithms import REGISTRY
 from algorithms.copy_trade import CopyTradeAlgorithm, CopyTradeParams
 from bot.domain.intents import Mode
 from bot.profile_loader import ProfileError, load_profile
+from tests.conftest import copy_trade_params, insider_flow_params
 
 
 # ---------------------------------------------------------------------------
@@ -81,15 +82,19 @@ def _toml(v) -> str:
     return f'"{v}"'
 
 
+_BASELINE = {"copy_trade": copy_trade_params, "insider_flow": insider_flow_params}
+
+
 def _block(algo_type: str, name: str, mode: str, **overrides) -> str:
     """An [[algorithm]] block naming *every* knob — the loader requires it.
 
-    Built from the schema defaults so adding a knob doesn't break these tests.
+    Built from the conftest test baseline, so adding a knob to a schema
+    breaks these once (in conftest) rather than in every fixture here.
     """
     _, params_cls = REGISTRY[algo_type]
-    defaults = params_cls()
+    baseline = _BASELINE[algo_type]()
     lines = [
-        f"{f.name} = {_toml(overrides.get(f.name, getattr(defaults, f.name)))}"
+        f"{f.name} = {_toml(overrides.get(f.name, getattr(baseline, f.name)))}"
         for f in fields(params_cls) if f.name not in ("name", "mode")
     ]
     return (
@@ -187,7 +192,7 @@ def test_copy_trade_without_target_rejected(tmp_path):
 
 
 def test_omitted_param_rejected(tmp_path):
-    """Schema defaults are dev-only: a profile must state every knob."""
+    """A profile must state every knob — there is nothing to inherit."""
     body = "\n".join(
         line for line in VALID.splitlines() if not line.startswith("max_slippage")
     )
@@ -213,13 +218,26 @@ def test_params_validate_failure_names_block(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Params schema — fail-safe defaults, instance separation
+# Params schema — no defaults, instance separation
 # ---------------------------------------------------------------------------
 
 
-def test_default_mode_is_paper():
-    """Fail-safe: a bare params object is PAPER unless a profile says LIVE."""
-    assert CopyTradeParams().mode == Mode.PAPER
+def test_schema_has_no_defaults():
+    """Every knob is required, so nothing can be half-configured in code."""
+    from dataclasses import MISSING
+
+    with pytest.raises(TypeError, match="required positional argument"):
+        CopyTradeParams()
+    assert all(
+        f.default is MISSING and f.default_factory is MISSING
+        for f in fields(CopyTradeParams)
+    )
+
+
+def test_algorithm_requires_params():
+    """No fallback to a default params object — a bare construction fails."""
+    with pytest.raises(TypeError):
+        CopyTradeAlgorithm()
 
 
 def test_two_instances_have_distinct_names_and_modes():
@@ -227,7 +245,7 @@ def test_two_instances_have_distinct_names_and_modes():
     those params separate — proves no leftover class-level mutable state."""
     from dataclasses import replace
 
-    base = CopyTradeParams()
+    base = copy_trade_params()
     a = CopyTradeAlgorithm(
         params=replace(base, name="copy_trade_prod", mode=Mode.LIVE),
     )
@@ -243,10 +261,3 @@ def test_two_instances_have_distinct_names_and_modes():
     # Internal caches must also be separate (not shared at class level).
     a.holding_cache.set("m1", 100_000.0)
     assert b.holding_cache.get("m1") is None
-
-
-def test_name_kwarg_clones_default_params():
-    """The shortcut `CopyTradeAlgorithm(name="x")` should produce default
-    params under the new name without a full params object."""
-    a = CopyTradeAlgorithm(name="copy_trade_variant")
-    assert a.params.name == "copy_trade_variant"

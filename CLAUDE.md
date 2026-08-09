@@ -37,15 +37,18 @@ python -m bot.report                            # per-algo P&L, skip reasons, wi
   `mode = "live"` block in a profile without it; only `prod.toml` sets it.
 - **`name` is the DB partition key.** Renaming an algorithm orphans its
   bankroll and history. Keep it stable once set.
-- **Knob schemas live in `algorithms/<type>/params.py`** — names, defaults,
+- **Knob schemas live in `algorithms/<type>/params.py`** — names, types,
   docs, and boot-time `validate()`. Never enumerate knobs in prose docs;
   they go stale. `python -m bot.params <type>` is the source of truth.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only. Behavior changes are TOML edits.
-- **Every `[algorithm.params]` block states every knob.** Schema defaults
-  exist for tests and `bot.params`, not for profiles — the loader rejects a
-  block that omits any, naming what's missing. A block is therefore the
-  complete, readable answer to "what is this algorithm running?".
+- **The params schemas carry no defaults.** Every field is required, so a
+  profile block states every knob and an algorithm can never be half
+  configured — `CopyTradeAlgorithm()` is a `TypeError`, and the loader
+  rejects a block that omits a knob, naming what's missing. A block is
+  therefore the complete answer to "what is this algorithm running?".
+  Tests get their values from `copy_trade_params()` / `insider_flow_params()`
+  in `tests/conftest.py`, deliberately separate from production.
 - **One `.env`, shared by every profile.** Per-profile env files are not
   read and `setup_vm.sh` deletes any it finds. Don't reintroduce a
   `.env.<profile>` fallback: paper's safety comes from the `allow_live`

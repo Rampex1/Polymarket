@@ -12,6 +12,12 @@ Design rules:
   * Each test gets a fresh DB. Every PositionTracker fixture is bound to
     the `copy_trade` algorithm namespace so existing tests behave the
     same way they did before the multi-algorithm refactor.
+
+  * The params schemas have no defaults — a profile must state every knob —
+    so `copy_trade_params()` / `insider_flow_params()` below carry a full
+    baseline for tests to override. These are *test* values, deliberately
+    not shared with production: a knob added to the schema fails here until
+    it is given one, which is the same fail-fast a profile gets.
 """
 
 import os
@@ -22,6 +28,53 @@ import pytest
 
 # Ensure project root is importable.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+
+def copy_trade_params(**overrides):
+    """A complete CopyTradeParams for tests. Override what the test is about."""
+    from algorithms.copy_trade import CopyTradeParams
+    from bot.domain.intents import Mode
+
+    base = dict(
+        name="copy_trade", mode=Mode.PAPER,
+        target_address="", target_username="",
+        watchlist_size=0, watchlist_candidate_wallets=(),
+        watchlist_refresh_seconds=86_400, watchlist_min_resolved_bets=50,
+        watchlist_confidence_z=1.645, watchlist_min_copyability_score=0.0,
+        consensus_window_seconds=1_800, consensus_min_leaders=2,
+        consensus_size_multiplier=2.0, max_concurrent_positions=8,
+        poll_interval_seconds=20, min_trade_size_usdc=0.0, settle_check_every=45,
+        tier1_min=80_000.0, tier1_max=150_000.0, tier1_size=1.0,
+        tier2_max=300_000.0, tier2_size=2.0, tier3_size=3.0,
+        max_position_size_usdc=3.0, max_total_exposure_usdc=12.0,
+        daily_loss_limit_usdc=4.0, min_order_size_usdc=1.0, max_slippage=0.05,
+        order_type="market", webhook_url="http://hook",
+        paper_starting_balance=10_000.0, paper_fee_bps=0.0,
+    )
+    return CopyTradeParams(**{**base, **overrides})
+
+
+def insider_flow_params(**overrides):
+    """A complete InsiderFlowParams for tests. Override what the test is about."""
+    from algorithms.insider_flow import InsiderFlowParams
+    from bot.domain.intents import Mode
+
+    base = dict(
+        name="insider_flow", mode=Mode.PAPER,
+        min_cash_size_usdc=5_000.0, max_entry_odds=0.35,
+        max_wallet_age_days=14.0, max_prior_trades=10,
+        exclude_title_patterns=(" vs. ", " vs ", "O/U", "Spread"),
+        exclude_categories=("sports",),
+        max_days_to_resolution=30.0, min_annualized_return=1.0,
+        bet_size_usdc=2.0, poll_interval_seconds=15, firehose_limit=100,
+        settle_check_every=20,
+        buffer_window_seconds=900.0, buffer_top_n=2, buffer_max=20,
+        max_position_size_usdc=2.0, max_total_exposure_usdc=10.0,
+        daily_loss_limit_usdc=5.0, min_order_size_usdc=1.0, max_slippage=0.10,
+        webhook_url="http://hook", order_type="market",
+        paper_starting_balance=20.0, paper_fee_bps=0.0,
+    )
+    return InsiderFlowParams(**{**base, **overrides})
 
 
 @pytest.fixture(autouse=True)

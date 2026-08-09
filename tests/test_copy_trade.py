@@ -6,10 +6,9 @@ runs the real code paths.
 
 import pytest
 
-from tests.conftest import make_trade
+from tests.conftest import copy_trade_params, make_trade
 
 from algorithms.copy_trade.algorithm import CopyTradeAlgorithm
-from algorithms.copy_trade.params import CopyTradeParams
 from bot.domain.intents import CloseIntent, OpenIntent, SettleIntent
 
 
@@ -19,7 +18,9 @@ from bot.domain.intents import CloseIntent, OpenIntent, SettleIntent
 
 
 def _algo(params=None):
-    algo = CopyTradeAlgorithm()
+    # Built with real params, then swapped: some callers pass the _TestParams
+    # stand-in, which only carries the risk fields __init__ doesn't read.
+    algo = CopyTradeAlgorithm(params=copy_trade_params())
     if params is not None:
         algo.params = params
     return algo
@@ -37,7 +38,7 @@ def test_setup_reads_through_injected_market_data():
 
     data = FakeMarketData()
     algo = CopyTradeAlgorithm(
-        params=CopyTradeParams(target_address="0xtarget"), market_data=data,
+        params=copy_trade_params(target_address="0xtarget"), market_data=data,
     )
 
     algo.setup(tracker=object())
@@ -47,15 +48,13 @@ def test_setup_reads_through_injected_market_data():
 
 def test_display_name_includes_username_when_set():
     """Notifications should self-identify which wallet they're mirroring."""
-    a = _algo(CopyTradeParams(name="copy_trade", target_username="surfandturf"))
+    a = _algo(copy_trade_params(target_username="surfandturf"))
     assert a.display_name == "copy_trade → surfandturf"
 
 
 def test_display_name_falls_back_to_short_address():
     """When only a wallet is configured, surface a shortened form."""
-    a = _algo(CopyTradeParams(
-        name="copy_trade",
-        target_username="",
+    a = _algo(copy_trade_params(
         target_address="0x1234567890abcdef1234567890abcdef12345678",
     ))
     assert a.display_name == "copy_trade → 0x1234…5678"
@@ -63,12 +62,12 @@ def test_display_name_falls_back_to_short_address():
 
 def test_display_name_is_bare_name_when_no_target():
     """No target configured (e.g. pre-setup) → no trailing arrow."""
-    a = _algo(CopyTradeParams(name="copy_trade", target_username="", target_address=""))
+    a = _algo(copy_trade_params())
     assert a.display_name == "copy_trade"
 
 
 def test_tier_boundaries():
-    a = _algo(CopyTradeParams())
+    a = _algo(copy_trade_params())
     assert a._tier_for_holding(80_000) == 1.0
     assert a._tier_for_holding(150_000) == 1.0           # inclusive
     assert a._tier_for_holding(150_001) == 2.0
@@ -362,7 +361,7 @@ def test_poll_filters_below_min_trade_size(algo_with_tracker, monkeypatch,
 @pytest.fixture
 def algo_sweeping(tracker):
     """Algorithm wired for sweep testing: settle_check_every=1 so every poll triggers."""
-    a = CopyTradeAlgorithm(params=CopyTradeParams(
+    a = CopyTradeAlgorithm(params=copy_trade_params(
         name="sweep_test",
         target_address="0xtarget",
         settle_check_every=1,
@@ -436,7 +435,7 @@ def test_settle_sweep_cadence(tracker, monkeypatch):
     """Sweep fires every `settle_check_every` polls, not every poll."""
     from bot import fetcher
 
-    a = CopyTradeAlgorithm(params=CopyTradeParams(
+    a = CopyTradeAlgorithm(params=copy_trade_params(
         name="cadence_test",
         target_address="0xtarget",
         settle_check_every=3,

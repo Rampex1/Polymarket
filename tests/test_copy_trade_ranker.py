@@ -57,7 +57,7 @@ def test_leader_close_consumes_only_that_leaders_lots(fresh_db):
 def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, tracker):
     """The integrated copy algorithm reads active leaders from its watchlist."""
     from algorithms.copy_trade.algorithm import CopyTradeAlgorithm
-    from algorithms.copy_trade.params import CopyTradeParams
+    from tests.conftest import copy_trade_params
 
     class FakeMarketData:
         def __init__(self):
@@ -89,7 +89,7 @@ def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, tracker):
             return _bets()
 
     algo = CopyTradeAlgorithm(
-        params=CopyTradeParams(
+        params=copy_trade_params(
             name="multi", watchlist_size=1, watchlist_candidate_wallets=("0xa",),
             watchlist_min_resolved_bets=2, tier1_size=1.0, max_position_size_usdc=3.0,
         ), market_data=data, watchlist=repo, ranker_source=FakeHistory(),

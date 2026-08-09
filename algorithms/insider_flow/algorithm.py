@@ -76,16 +76,11 @@ class InsiderFlowAlgorithm(Algorithm):
 
     def __init__(
         self,
-        name: Optional[str] = None,
-        params: Optional[InsiderFlowParams] = None,
+        params: InsiderFlowParams,
         market_data: Optional[MarketDataGateway] = None,
     ) -> None:
-        if params is not None:
-            self.params = params
-        elif name is not None:
-            self.params = InsiderFlowParams(name=name)
-        else:
-            self.params = InsiderFlowParams()
+        """`params` is required — there are no schema defaults to fall back on."""
+        self.params = params
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
 

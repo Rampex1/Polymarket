@@ -7,15 +7,7 @@ Reads the params dataclasses, so it can't go stale the way prose docs do.
 
 import argparse
 import sys
-from dataclasses import MISSING, fields
-
-
-def _default_of(f):
-    if f.default is not MISSING:
-        return f.default
-    if f.default_factory is not MISSING:  # type: ignore[misc]
-        return f.default_factory()        # type: ignore[misc]
-    return None
+from dataclasses import fields
 
 
 def _fmt(v) -> str:
@@ -37,17 +29,17 @@ def show_schema(registry, algo_type: str) -> None:
               file=sys.stderr)
         sys.exit(1)
     _, params_cls = registry[algo_type]
-    print(f"{algo_type} — knobs for [algorithm.params] in config/<profile>.toml\n")
+    print(f"{algo_type} — every one of these is required in "
+          f"[algorithm.params]\n")
     skip = {"name", "mode"}  # set at block level, not under params
     rows = [
-        (f.name, getattr(f.type, "__name__", str(f.type)), _fmt(_default_of(f)),
-         f.metadata.get("doc", ""))
+        (f.name, getattr(f.type, "__name__", str(f.type)), f.metadata.get("doc", ""))
         for f in fields(params_cls) if f.name not in skip
     ]
     w_name = max(len(r[0]) for r in rows)
-    w_def = max(len(r[2]) for r in rows)
-    for name, _type, default, doc in rows:
-        print(f"  {name:<{w_name}}  {default:<{w_def}}  {doc}")
+    w_type = max(len(r[1]) for r in rows)
+    for name, type_name, doc in rows:
+        print(f"  {name:<{w_name}}  {type_name:<{w_type}}  {doc}")
 
 
 def show_effective() -> None:
@@ -66,16 +58,12 @@ def show_effective() -> None:
             (t for t, (_, pc) in algorithms.REGISTRY.items() if isinstance(p, pc)),
             "?",
         )
-        defaults = type(p)()
         print(f"[{p.name}]  type={algo_type}  mode={p.mode.value}")
         for f in fields(p):
             if f.name in ("name", "mode"):
                 continue
-            val = getattr(p, f.name)
-            mark = " *" if val != getattr(defaults, f.name) else ""
-            print(f"    {f.name} = {_fmt(val)}{mark}")
+            print(f"    {f.name} = {_fmt(getattr(p, f.name))}")
         print()
-    print("(* = differs from schema default)")
 
 
 def main() -> None:

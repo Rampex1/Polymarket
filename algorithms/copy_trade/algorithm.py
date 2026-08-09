@@ -65,28 +65,19 @@ class CopyTradeAlgorithm(Algorithm):
 
     def __init__(
         self,
-        name: Optional[str] = None,
-        params: Optional[CopyTradeParams] = None,
+        params: CopyTradeParams,
         market_data: Optional[MarketDataGateway] = None,
         ranker_source=None,
         watchlist: Optional[WatchlistRepository] = None,
     ) -> None:
         """Create a copy-trade worker.
 
-        Two ways to construct:
-          * `CopyTradeAlgorithm()` — schema defaults. Convenient for tests.
-          * `CopyTradeAlgorithm(name="my_variant", params=CopyTradeParams(...))`
-            — full control over each instance, so a profile can spin up
-            multiple copy-trade workers (different wallets, different tiers,
-            different paper/live modes) in the same process. Normally built
-            by the profile loader from config/<profile>.toml.
+        `params` is required and carries every knob — there are no schema
+        defaults to fall back on. Normally built by the profile loader from
+        config/<profile>.toml, so one profile can spin up several copy-trade
+        workers (different wallets, tiers, paper/live modes) in one process.
         """
-        if params is not None:
-            self.params = params
-        elif name is not None:
-            self.params = CopyTradeParams(name=name)
-        else:
-            self.params = CopyTradeParams()
+        self.params = params
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
         self._watchlist = watchlist or WatchlistRepository()

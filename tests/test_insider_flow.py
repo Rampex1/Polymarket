@@ -65,6 +65,8 @@ def _params(**overrides):
         order_type="market",
         paper_starting_balance=10_000.0,
         paper_fee_bps=0.0,
+        exclude_categories=("sports",),
+        webhook_url="http://hook",
     )
     base.update(overrides)
     return InsiderFlowParams(**base)
@@ -302,11 +304,10 @@ def test_category_verdict_cached_per_market(algo, stub_firehose, stub_stats,
 
 
 def test_exclude_categories_override():
-    from algorithms.insider_flow.params import InsiderFlowParams
-
-    assert InsiderFlowParams().exclude_categories == ("sports",)
-    p = InsiderFlowParams(exclude_categories=("sports", "crypto"))
-    assert p.exclude_categories == ("sports", "crypto")
+    assert _params().exclude_categories == ("sports",)
+    assert _params(
+        exclude_categories=("sports", "crypto")
+    ).exclude_categories == ("sports", "crypto")
 
 
 def test_features_include_market_category(algo, stub_firehose, stub_stats):
@@ -843,17 +844,21 @@ def test_settle_sweep_leaves_unresolved_markets_alone(
 
 
 def test_params_overrides():
-    from algorithms.insider_flow.params import InsiderFlowParams
-
-    p = InsiderFlowParams(
-        min_cash_size_usdc=12_000.0, max_entry_odds=0.5, mode=Mode.LIVE,
-    )
+    p = _params(min_cash_size_usdc=12_000.0, max_entry_odds=0.5, mode=Mode.LIVE)
     assert p.min_cash_size_usdc == 12_000.0
     assert p.max_entry_odds == 0.5
     assert p.mode == Mode.LIVE
 
 
-def test_params_default_mode_is_paper():
+def test_schema_has_no_defaults():
+    """Every knob is required — nothing can be half-configured in code."""
+    from dataclasses import MISSING, fields
+
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    assert InsiderFlowParams().mode == Mode.PAPER
+    with pytest.raises(TypeError, match="required positional argument"):
+        InsiderFlowParams()
+    assert all(
+        f.default is MISSING and f.default_factory is MISSING
+        for f in fields(InsiderFlowParams)
+    )
