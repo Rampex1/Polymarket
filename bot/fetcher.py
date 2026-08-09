@@ -1,17 +1,8 @@
 """
-Trade fetcher — discovers the target wallet and polls for new trades.
+fetcher.py
 
-Design notes:
-  * `SESSION` is a shared requests.Session() with a retry-backoff adapter so
-    transient 429/5xx errors don't silently drop trades.
-  * `seen_ids` in `poll()` is bounded so the long-running process doesn't
-    leak memory.
-  * `fetch_target_position_value` accepts an `expected_min` hint so callers
-    can defeat the Data API's eventual-consistency race.
-  * A small in-memory cache (`target_holding_cache`) tracks the target's
-    last observed holding per market. The SELL path relies on it to compute
-    an accurate close ratio without trusting the volatile combination of
-    "post-sell value reported by the API" and "USDC notional of the sell".
+Polymarket HTTP reads — wallet lookup, trades, positions, prices, resolution.
+All requests share one retrying session so transient 429/5xx don't drop trades.
 """
 
 import collections
