@@ -3,8 +3,11 @@ discord_bot.py
 
 Slash-command bot; one standalone daemon serves every profile.
 
-/status, /positions, /pnl — read state; /summary sends the daily summaries now;
-/restart pulls + redeploys on the VPS (admin only).
+/status    — every algorithm by profile: mode, exposure, today's P&L
+/positions — open positions, optional algo name filter
+/pnl       — today's realized P&L + open exposure, combined
+/summary   — send the daily summaries to every profile channel now
+/restart   — git pull + restart the VPS sessions (admin only)
 """
 
 import asyncio
