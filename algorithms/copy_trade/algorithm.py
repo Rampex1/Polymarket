@@ -88,7 +88,7 @@ class CopyTradeAlgorithm(Algorithm):
         ) if self.params.watchlist_size > 0 else None
 
         self._address: str = ""
-        self._tracker = None        # PositionTracker, set in setup()
+        self._tracker = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen_ids = fetcher.SeenRing(SEEN_IDS_MAX)
         self.holding_cache = fetcher.TargetHoldingCache()

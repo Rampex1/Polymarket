@@ -247,20 +247,20 @@ def on_heartbeat(
     """Post a compact liveness ping with per-algo exposure.
 
     `algo_infos` is a list of (algo_name, paper) tuples — same shape as
-    `send_profile_summary`. Fresh PositionTracker instances are created
+    `send_profile_summary`. Fresh Ledger instances are created
     so this can run from any thread.
     """
     if not webhook_url:
         return
 
-    from bot.positions import PositionTracker
+    from bot.ledger import Ledger
 
     now_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
     profile_label = _esc(profile) if profile else "all"
     lines = [f"💓 **Heartbeat · {profile_label} · {now_str}**"]
 
     for name, paper in algo_infos:
-        tracker = PositionTracker(algo=name)
+        tracker = Ledger(algo=name)
         exposure = tracker.total_exposure_usdc(paper=paper)
         mode_tag = "PAPER" if paper else "LIVE"
         lines.append(f"> {_esc(name)} · {mode_tag} · ${exposure:.2f} exposure")
@@ -373,7 +373,7 @@ def send_profile_summary(
 ) -> None:
     """Profile-level daily summary — one message per profile to a shared channel.
 
-    `algo_infos` is a list of (algo_name, paper) tuples. Fresh PositionTracker
+    `algo_infos` is a list of (algo_name, paper) tuples. Fresh Ledger
     instances are created per algo so this can run from any thread without
     holding live tracker references.
 
@@ -392,7 +392,7 @@ def send_profile_summary(
     if not webhook_url:
         return
 
-    from bot.positions import PositionTracker
+    from bot.ledger import Ledger
 
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
     profile_label = _esc(profile) if profile else "all"
@@ -403,7 +403,7 @@ def send_profile_summary(
     total_exposure = 0.0
 
     for name, paper in algo_infos:
-        tracker = PositionTracker(algo=name)
+        tracker = Ledger(algo=name)
         positions = tracker.all_open(paper=paper)
         exposure = tracker.total_exposure_usdc(paper=paper)
         pnl = tracker.today_pnl_usdc(paper=paper)

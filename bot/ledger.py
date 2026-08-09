@@ -1,8 +1,8 @@
 """
-positions.py
+ledger.py
 
-PositionTracker — the repository for positions, trade_log, daily_stats and
-paper_account. Every query filters by algo, so strategies stay disjoint.
+The books for one algorithm: open positions, the trade log, daily realized
+P&L, and the paper cash balance. Every query filters by algo.
 """
 
 import logging
@@ -18,15 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Position tracker
+# Ledger
 # ---------------------------------------------------------------------------
 
 
-class PositionTracker:
+class Ledger:
     """Per-algorithm view of positions, trade log, and paper bankroll.
 
     Always pass an `algo` name in the constructor. Every read/write query
-    filters by that algo so two trackers (one per algorithm) operate on
+    filters by that algo so two ledgers (one per algorithm) operate on
     disjoint slices of the same DB.
     """
 

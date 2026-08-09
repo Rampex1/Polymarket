@@ -78,7 +78,7 @@ bot/
     params.py             # Mode (paper/live) + AlgoParams protocol
   db.py                   # SQLite, thread-local connections, WAL, per-algo schema + migrations
   fetcher.py              # Data API polling, wallet lookup, resolution-price helpers (requests + urllib3 Retry)
-  positions.py            # PositionTracker — repository for positions, trade_log, daily_stats, paper_account
+  ledger.py               # Ledger — repository for positions, trade_log, daily_stats, paper_account
   risk.py                 # RiskManager — pre-trade caps from each algo's params; BUYs only
   execution/              # Called by runner: fills.py (paper fills), pricing.py (price +
                           # slippage), settlement.py (resolution price), lots.py
@@ -120,7 +120,7 @@ scripts/
 
 ### Per-algorithm worker (`main.py:_run_worker`)
 
-Each enabled algorithm gets a daemon thread with its own `PositionTracker`
+Each enabled algorithm gets a daemon thread with its own `Ledger`
 (rows partitioned by `algo`), `RiskManager` built from that algorithm's
 params, poll cadence, and paper bankroll (a per-algo row in
 `paper_account`). Exceptions inside poll/dispatch are caught and logged so
@@ -266,7 +266,7 @@ in the VPS `.env` and redeploy.
 
 - Use a **real** SQLite DB via tempfile — no DB mocking. The real engine
   catches PRAGMA/index/migration bugs a mock would hide.
-- Use real `RiskManager`, `PositionTracker`, `Trade`. **The only thing
+- Use real `RiskManager`, `Ledger`, `Trade`. **The only thing
   stubbed is the HTTP boundary** (Polymarket API).
 - Each test gets a fresh DB; tracker fixtures are bound to the
   `copy_trade` algo namespace.

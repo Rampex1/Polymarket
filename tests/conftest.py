@@ -6,10 +6,10 @@ Design rules:
     engine catches integration bugs (PRAGMA, indexes, migrations) that a
     mock would hide.
 
-  * Use real RiskManager, PositionTracker, Trade dataclasses. The only
+  * Use real RiskManager, Ledger, Trade dataclasses. The only
     thing we stub is the HTTP boundary (Polymarket API).
 
-  * Each test gets a fresh DB. Every PositionTracker fixture is bound to
+  * Each test gets a fresh DB. Every Ledger fixture is bound to
     the `copy_trade` algorithm namespace so existing tests behave the
     same way they did before the multi-algorithm refactor.
 
@@ -109,10 +109,10 @@ def fresh_db(tmp_db_path, monkeypatch):
 
 @pytest.fixture
 def tracker(fresh_db):
-    """A PositionTracker bound to a fresh DB, namespaced to copy_trade."""
-    from bot.positions import PositionTracker
+    """A Ledger bound to a fresh DB, namespaced to copy_trade."""
+    from bot.ledger import Ledger
 
-    t = PositionTracker(algo="copy_trade")
+    t = Ledger(algo="copy_trade")
     t.init_paper_balance(10_000.0)
     return t
 

@@ -2,7 +2,7 @@
 Reconciliation tests — bot DB vs on-chain comparisons.
 
 Stubs the HTTP boundary (`fetcher.fetch_user_positions`). Everything else
-runs the real PositionTracker + DB.
+runs the real Ledger + DB.
 """
 
 

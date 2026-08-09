@@ -5,7 +5,7 @@ Architecture
 Each algorithm in `algorithms.ENABLED` (selected by the `PROFILE` env var)
 runs as a fully independent worker:
 
-  * Own `PositionTracker(algo=...)` — DB rows partitioned by algo.
+  * Own `Ledger(algo=...)` — DB rows partitioned by algo.
   * Own `RiskManager(tracker, params)` — caps come from algo params.
   * Own polling cadence (`params.poll_interval_seconds`).
   * Own paper bankroll (per-algo row in `paper_account`).
@@ -24,7 +24,7 @@ from bot.domain.algorithm import Algorithm
 from bot.domain.params import Mode
 from bot.discord import notifier
 from bot.logs.setup import setup_logging
-from bot.positions import PositionTracker
+from bot.ledger import Ledger
 from bot.risk import RiskManager
 from bot.profile_loader import ProfileError
 
@@ -54,7 +54,7 @@ def _run_worker(
     paper = algo.params.mode == Mode.PAPER
 
     try:
-        tracker = PositionTracker(algo=name)
+        tracker = Ledger(algo=name)
         if paper:
             tracker.init_paper_balance(algo.params.paper_starting_balance)
         runs.record_run(algo.params, config.PROFILE)
@@ -130,7 +130,7 @@ def _run_worker(
             stop_event.wait(algo.params.poll_interval_seconds)
     finally:
         try:
-            tracker = PositionTracker(algo=name)
+            tracker = Ledger(algo=name)
             tracker.print_summary(paper=paper)
         except Exception:
             pass
@@ -147,7 +147,7 @@ def _start_profile_summary(
     """Start a single daily summary thread for the whole profile.
 
     Sends to the profile-level summary webhook (config/webhooks.toml) at
-    midnight. Creates fresh PositionTracker instances at send time so it
+    midnight. Creates fresh Ledger instances at send time so it
     doesn't hold live references to worker state.
     """
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)

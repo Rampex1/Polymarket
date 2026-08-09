@@ -85,7 +85,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
 
-        self._tracker = None        # PositionTracker, set in setup()
+        self._tracker = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
         self._seen = fetcher.SeenRing(SEEN_IDS_MAX)
         self._poll_count = 0

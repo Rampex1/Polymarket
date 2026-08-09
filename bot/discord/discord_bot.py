@@ -22,7 +22,7 @@ from discord import app_commands
 
 from .. import config
 from . import notifier
-from ..positions import PositionTracker
+from ..ledger import Ledger
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def _status_text() -> str:
     for profile, algos in _by_profile().items():
         lines.append(f"**{notifier._esc(profile)}**")
         for name, paper in algos:
-            tracker = PositionTracker(algo=name)
+            tracker = Ledger(algo=name)
             n_pos = len(tracker.all_open(paper=paper))
             exposure = tracker.total_exposure_usdc(paper=paper)
             pnl = tracker.today_pnl_usdc(paper=paper)
@@ -72,7 +72,7 @@ def _positions_text(algo_filter: str = "") -> str:
     for name, paper, profile in _algo_infos:
         if algo_filter and algo_filter.lower() not in name.lower():
             continue
-        tracker = PositionTracker(algo=name)
+        tracker = Ledger(algo=name)
         positions = tracker.all_open(paper=paper)
         mode = "PAPER" if paper else "LIVE"
         lines.append(
@@ -97,7 +97,7 @@ def _pnl_text() -> str:
     total_pnl = 0.0
     total_exp = 0.0
     for name, paper, profile in _algo_infos:
-        tracker = PositionTracker(algo=name)
+        tracker = Ledger(algo=name)
         pnl = tracker.today_pnl_usdc(paper=paper)
         exp = tracker.total_exposure_usdc(paper=paper)
         total_pnl += pnl

@@ -1,5 +1,5 @@
 """
-PositionTracker tests — math, accounting, edge cases.
+Ledger tests — math, accounting, edge cases.
 
 These exercise the real SQLite DB. The bugs fixed in the senior review
 that this file pins down:

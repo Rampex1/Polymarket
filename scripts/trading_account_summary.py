@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from algorithms import ENABLED
 from bot import db
-from bot.positions import PositionTracker
+from bot.ledger import Ledger
 
 conn = db.get()
 
@@ -26,7 +26,7 @@ def pnl_str(v: float) -> str:
 def print_section(algo, title: str, paper: bool) -> None:
     name = algo.params.name
     p_flag = int(paper)
-    tracker = PositionTracker(algo=name)
+    tracker = Ledger(algo=name)
 
     positions = tracker.all_open(paper=paper)
     exposure = tracker.total_exposure_usdc(paper=paper)

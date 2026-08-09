@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from algorithms import ENABLED
 from bot import config
-from bot.positions import PositionTracker
+from bot.ledger import Ledger
 
 db_path = config.DB_PATH
 
@@ -23,6 +23,6 @@ if os.path.exists(db_path):
 for algo in ENABLED:
     name = algo.params.name
     bal = algo.params.paper_starting_balance
-    tracker = PositionTracker(algo=name)
+    tracker = Ledger(algo=name)
     tracker.init_paper_balance(bal)
     print(f"Fresh paper account [{name}] created with ${bal:.2f}")

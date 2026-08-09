@@ -6,7 +6,7 @@ Sells and redeems always pass — blocking one would trap us in a loser.
 """
 
 from .domain.records import Trade
-from .positions import PositionTracker
+from .ledger import Ledger
 
 
 class RiskManager:
@@ -16,7 +16,7 @@ class RiskManager:
     its own caps without sharing a global pool with sibling algorithms.
     """
 
-    def __init__(self, tracker: PositionTracker, params) -> None:
+    def __init__(self, tracker: Ledger, params) -> None:
         self.tracker = tracker
         self.params = params
         # Markets where a BUY has failed this session. Cleared on restart.

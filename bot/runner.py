@@ -36,7 +36,7 @@ from .execution.fills import FillResult, simulate_buy as _simulate_buy, simulate
 from .execution.pricing import current_price as _get_current_price, slippage_ok as _slippage_ok
 from .execution.settlement import resolve_close_price as _resolve_close_price
 from .domain.records import Trade
-from .positions import PositionTracker
+from .ledger import Ledger
 from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def build_client() -> Optional[ClobClient]:
 def dispatch(
     intent: Intent,
     algo,                     # bot.domain.algorithm.Algorithm
-    tracker: PositionTracker,
+    tracker: Ledger,
     risk: RiskManager,
     client: Optional[ClobClient],
     paper: bool,
@@ -134,7 +134,7 @@ def dispatch(
 def _handle_open(
     intent: OpenIntent,
     algo,
-    tracker: PositionTracker,
+    tracker: Ledger,
     risk: RiskManager,
     client: Optional[ClobClient],
     paper: bool,
@@ -210,7 +210,7 @@ def _handle_open(
 def _handle_close(
     intent: CloseIntent,
     algo,
-    tracker: PositionTracker,
+    tracker: Ledger,
     client: Optional[ClobClient],
     paper: bool,
 ) -> None:
@@ -284,7 +284,7 @@ def _handle_close(
 def _handle_settle(
     intent: SettleIntent,
     algo,
-    tracker: PositionTracker,
+    tracker: Ledger,
     paper: bool,
 ) -> None:
     position = tracker.get(intent.market_id, paper)
@@ -356,7 +356,7 @@ def _intent_to_trade(
 ) -> Trade:
     """Build a synthetic Trade from an Intent for tracker/notifier APIs.
 
-    The Trade dataclass is what the existing PositionTracker, RiskManager,
+    The Trade dataclass is what the existing Ledger, RiskManager,
     and notifier expect. Rather than refactor all three to take Intents
     directly (large blast radius), the runner wraps each Intent in a Trade
     on the way to those callees.

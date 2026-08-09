@@ -32,7 +32,7 @@ Paper mode is a no-op (paper positions live in the bot DB by definition).
 import logging
 
 from . import fetcher
-from .positions import PositionTracker
+from .ledger import Ledger
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ USD_EPSILON = 0.10
 
 
 def reconcile_positions(
-    tracker: PositionTracker,
+    tracker: Ledger,
     funder_address: str,
     algo_name: str,
     paper: bool,
