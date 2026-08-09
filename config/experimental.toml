@@ -2,15 +2,53 @@
 # Loaded with PROFILE=experimental. Nothing here can touch real money: this
 # profile never sets allow_live, so the loader rejects any mode = "live"
 # block outright — the guarantee is in config, not in which .env is loaded.
+#
+# Every knob must be stated explicitly; the loader rejects a block that
+# omits any. Run `python -m bot.params <type>` for what each one means.
 
 # Fresh-wallet suspicious-flow detector — paper validation phase. Copies
 # large long-odds BUYs from young wallets (the documented insider
-# fingerprint). All knobs at schema defaults.
+# fingerprint).
 [[algorithm]]
 type = "insider_flow"
 name = "insider_flow_paper"
 mode = "paper"
 
 [algorithm.params]
-webhook_url = "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q"
+# Signal filters
+min_cash_size_usdc = 5000.0
+max_entry_odds = 0.35
+max_wallet_age_days = 14.0
+max_prior_trades = 10
+exclude_title_patterns = [" vs. ", " vs ", "O/U", "Spread"]
+exclude_categories = ["sports"]
+
+# Time-value gate
+max_days_to_resolution = 30.0
+min_annualized_return = 1.0
+
+# Sizing + cadence
+bet_size_usdc = 2.0
+poll_interval_seconds = 15
+firehose_limit = 100
+settle_check_every = 20
+
+# Candidate buffer
+buffer_window_seconds = 900.0
+buffer_top_n = 2
+buffer_max = 20
+
+# Risk caps
+max_position_size_usdc = 2.0
 max_total_exposure_usdc = 1000000.0   # no cap for paper
+daily_loss_limit_usdc = 5.0
+min_order_size_usdc = 1.0
+max_slippage = 0.1
+
+# Notifications
+webhook_url = "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q"
+
+# Order placement / paper
+order_type = "market"
+paper_starting_balance = 20.0
+paper_fee_bps = 0.0

@@ -4,6 +4,9 @@
 # python scripts/import_polymarket_wallet_history.py --max-wallets 25
 # Or import a normalized Dune CSV:
 # python scripts/import_wallet_history.py /path/to/resolved_bets.csv
+#
+# Every knob must be stated explicitly; the loader rejects a block that
+# omits any. Run `python -m bot.params copy_trade` for what each one means.
 
 [[algorithm]]
 type = "copy_trade"
@@ -11,14 +14,48 @@ name = "ranked_copy_paper"
 mode = "paper"
 
 [algorithm.params]
+# Target — leave both empty when using the ranked watchlist below
+target_address = ""
+target_username = ""
+
+# Ranked cohort
 watchlist_size = 5
 watchlist_candidate_wallets = ["0xleader1", "0xleader2", "0xleader3"]
 watchlist_refresh_seconds = 86400
 watchlist_min_resolved_bets = 50
+watchlist_confidence_z = 1.645
 watchlist_min_copyability_score = 0.5
+
+# Consensus
 consensus_window_seconds = 1800
 consensus_min_leaders = 2
 consensus_size_multiplier = 2.0
 max_concurrent_positions = 8
+
+# Cadence
+poll_interval_seconds = 20
+min_trade_size_usdc = 0.0
+settle_check_every = 45
+
+# Tier sizing — our stake by the target's total holding in the market
+tier1_min = 80000.0
+tier1_max = 150000.0
+tier1_size = 1.0
+tier2_max = 300000.0
+tier2_size = 2.0
+tier3_size = 3.0
+
+# Risk caps
 max_position_size_usdc = 3.0
 max_total_exposure_usdc = 12.0
+daily_loss_limit_usdc = 4.0
+min_order_size_usdc = 1.0
+max_slippage = 0.05
+
+# Order placement / paper
+order_type = "market"
+paper_starting_balance = 10000.0
+paper_fee_bps = 0.0
+
+# Required — no global fallback, so an algorithm without one never notifies
+webhook_url = "https://discord.com/api/webhooks/REPLACE_ME"

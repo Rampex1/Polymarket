@@ -18,14 +18,14 @@ File shape:
     name = "copy_trade_prod"   # DB partition key — keep stable once set
     mode = "live"              # "paper" or "live"; always explicit
 
-    [algorithm.params]         # optional; omitted knobs use schema defaults
+    [algorithm.params]         # every knob, explicitly — nothing is inherited
     target_address = "0x..."
     tier1_size = 1.0
 
-Validation is fail-fast and boot-time: unknown param keys, duplicate
-names, bad modes, and per-algorithm `validate()` failures all raise
-ProfileError with the offending file and block named — a typo can never
-silently no-op the way a misspelled env var did.
+Validation is fail-fast and boot-time: unknown param keys, omitted param
+keys, duplicate names, bad modes, and per-algorithm `validate()` failures
+all raise ProfileError with the offending file and block named — a typo
+can never silently no-op the way a misspelled env var did.
 """
 
 import os
@@ -141,6 +141,16 @@ def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> 
                 f"{where}: unknown param(s) {sorted(unknown)} for type "
                 f"'{algo_type}'. Run `python -m bot.params {algo_type}` "
                 f"to list valid knobs."
+            )
+
+        # Schema defaults are a test/dev convenience only — a profile must
+        # state every knob, so what an algorithm runs is readable in one file.
+        missing = valid_keys - set(param_kwargs)
+        if missing:
+            raise ProfileError(
+                f"{where}: '{name}' is missing {len(missing)} required "
+                f"param(s): {', '.join(sorted(missing))}. Run "
+                f"`python -m bot.params {algo_type}` for the full list."
             )
 
         params = params_cls(

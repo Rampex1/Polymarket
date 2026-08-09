@@ -4,12 +4,14 @@ Profile-loader + params-schema tests.
 Covers:
   * The shipped config/*.toml files load and have the right shapes/modes.
   * Loader validation: missing profile, missing keys, bad mode, unknown
-    type, unknown param, duplicate names, per-params validate().
+    type, unknown param, omitted param, duplicate names, per-params
+    validate().
   * TOML list → tuple coercion for tuple-typed fields.
   * Multiple instances of one algorithm class keep params separate.
 """
 
 import importlib
+from dataclasses import fields
 
 import pytest
 
@@ -69,26 +71,38 @@ def _write_profile(tmp_path, body: str, name: str = "t") -> tuple[str, str]:
     return name, str(tmp_path)
 
 
-VALID = """
-[[algorithm]]
-type = "copy_trade"
-name = "ct"
-mode = "paper"
-[algorithm.params]
-target_address = "0xabc"
-webhook_url = "http://hook"
-"""
+def _toml(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, (tuple, list)):
+        return "[" + ", ".join(f'"{x}"' for x in v) + "]"
+    return f'"{v}"'
 
 
-LIVE_BLOCK = """
-[[algorithm]]
-type = "copy_trade"
-name = "ct_live"
-mode = "live"
-[algorithm.params]
-target_address = "0xabc"
-webhook_url = "http://hook"
-"""
+def _block(algo_type: str, name: str, mode: str, **overrides) -> str:
+    """An [[algorithm]] block naming *every* knob — the loader requires it.
+
+    Built from the schema defaults so adding a knob doesn't break these tests.
+    """
+    _, params_cls = REGISTRY[algo_type]
+    defaults = params_cls()
+    lines = [
+        f"{f.name} = {_toml(overrides.get(f.name, getattr(defaults, f.name)))}"
+        for f in fields(params_cls) if f.name not in ("name", "mode")
+    ]
+    return (
+        f'[[algorithm]]\ntype = "{algo_type}"\nname = "{name}"\n'
+        f'mode = "{mode}"\n[algorithm.params]\n' + "\n".join(lines) + "\n"
+    )
+
+
+VALID = _block("copy_trade", "ct", "paper",
+               target_address="0xabc", webhook_url="http://hook")
+
+LIVE_BLOCK = _block("copy_trade", "ct_live", "live",
+                    target_address="0xabc", webhook_url="http://hook")
 
 
 def test_live_mode_requires_allow_live_opt_in(tmp_path):
@@ -167,36 +181,33 @@ def test_duplicate_names_rejected(tmp_path):
 
 def test_copy_trade_without_target_rejected(tmp_path):
     name, d = _write_profile(
-        tmp_path, '[[algorithm]]\ntype="copy_trade"\nname="x"\nmode="paper"\n')
+        tmp_path, _block("copy_trade", "x", "paper", webhook_url="http://hook"))
     with pytest.raises(ProfileError, match="target"):
         load_profile(name, REGISTRY, config_dir=d)
 
 
-def test_toml_list_coerced_to_tuple(tmp_path):
-    body = """
-[[algorithm]]
-type = "insider_flow"
-name = "if"
-mode = "paper"
-[algorithm.params]
-exclude_title_patterns = ["foo", "bar"]
-webhook_url = "http://hook"
-"""
+def test_omitted_param_rejected(tmp_path):
+    """Schema defaults are dev-only: a profile must state every knob."""
+    body = "\n".join(
+        line for line in VALID.splitlines() if not line.startswith("max_slippage")
+    )
     name, d = _write_profile(tmp_path, body)
+    with pytest.raises(ProfileError, match="missing 1 required param.*max_slippage"):
+        load_profile(name, REGISTRY, config_dir=d)
+
+
+def test_toml_list_coerced_to_tuple(tmp_path):
+    name, d = _write_profile(tmp_path, _block(
+        "insider_flow", "if", "paper",
+        exclude_title_patterns=["foo", "bar"], webhook_url="http://hook"))
     (algo,) = load_profile(name, REGISTRY, config_dir=d)
     assert algo.params.exclude_title_patterns == ("foo", "bar")
 
 
 def test_params_validate_failure_names_block(tmp_path):
-    body = """
-[[algorithm]]
-type = "insider_flow"
-name = "if"
-mode = "paper"
-[algorithm.params]
-max_entry_odds = 1.5
-"""
-    name, d = _write_profile(tmp_path, body)
+    name, d = _write_profile(tmp_path, _block(
+        "insider_flow", "if", "paper",
+        max_entry_odds=1.5, webhook_url="http://hook"))
     with pytest.raises(ProfileError, match="max_entry_odds"):
         load_profile(name, REGISTRY, config_dir=d)
 

@@ -42,12 +42,16 @@ python -m bot.report                            # per-algo P&L, skip reasons, wi
   they go stale. `python -m bot.params <type>` is the source of truth.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only. Behavior changes are TOML edits.
+- **Every `[algorithm.params]` block states every knob.** Schema defaults
+  exist for tests and `bot.params`, not for profiles — the loader rejects a
+  block that omits any, naming what's missing. A block is therefore the
+  complete, readable answer to "what is this algorithm running?".
 - **One `.env`, shared by every profile.** Per-profile env files are not
   read and `setup_vm.sh` deletes any it finds. Don't reintroduce a
   `.env.<profile>` fallback: paper's safety comes from the `allow_live`
   gate, and a second env file only adds a way to shadow the real one.
-- **The loader fails fast** on unknown keys, duplicate names, bad modes, and
-  `validate()` violations. A typo in a TOML key must crash, never silently
+- **The loader fails fast** on unknown keys, omitted keys, duplicate names,
+  bad modes, and `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
 - **If an algorithm declares `LIVE` but no CLOB client can be built**, `main()`
   exits — it does **not** fall back to paper. Silently papering a live
