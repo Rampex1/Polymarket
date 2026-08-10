@@ -4,7 +4,7 @@ Run-provenance tests.
 
 import json
 
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 
 
 def test_record_run_writes_resolved_params(fresh_db):

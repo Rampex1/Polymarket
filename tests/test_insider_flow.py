@@ -13,7 +13,7 @@ import pytest
 from tests.conftest import make_global_trade, make_trade
 
 from bot.domain.intents import OpenIntent, SettleIntent
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 
 
 NOW = int(time.time())

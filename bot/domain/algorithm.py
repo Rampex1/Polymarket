@@ -1,18 +1,36 @@
 """
 algorithm.py
 
-The contract every trading strategy implements.
-A strategy polls for opportunities and yields intents; the runner executes them.
+The contract every trading strategy implements: the ABC itself, and the
+parameter surface execution reads off it. A strategy polls for
+opportunities and yields intents; the runner executes them.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterator, Protocol
 
 from .intents import Intent
-from .params import AlgoParams
+from .mode import Mode
 
 if TYPE_CHECKING:  # annotation only — domain must not import storage at runtime
     from ..storage.ledger import Ledger
+
+
+class AlgoParams(Protocol):
+    """The parameter surface shared by execution and risk policy."""
+
+    name: str
+    mode: Mode
+    max_position_size_usdc: float
+    max_total_exposure_usdc: float
+    daily_loss_limit_usdc: float
+    min_order_size_usdc: float
+    max_slippage: float
+    poll_interval_seconds: int
+    paper_starting_balance: float
+    order_type: str
+    paper_fee_bps: float
+    webhook_url: str
 
 
 class Algorithm(ABC):

@@ -7,7 +7,7 @@ every knob.
 
 from dataclasses import dataclass, field
 
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 
 
 def _doc(doc: str):
@@ -58,7 +58,7 @@ class InsiderFlowParams:
     buffer_top_n: int = _doc("Copy only the N best-scored candidates per window.")
     buffer_max: int = _doc("Safety valve — a burst filling the buffer flushes it early.")
 
-    # ── Risk caps (AlgoParams protocol — this algo's pool only) ─────────────
+    # ── Risk caps (the AlgoParams surface — this algo's pool only) ─────────
     max_position_size_usdc: float = _doc("Max spend per market.")
     max_total_exposure_usdc: float = _doc("Max total open exposure for this algorithm.")
     daily_loss_limit_usdc: float = _doc("Suspend buys if realized P&L is down this much today.")

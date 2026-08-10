@@ -75,11 +75,11 @@ bot/
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
   reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
   domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
-    algorithm.py          # Algorithm ABC — the contract every strategy implements
+    algorithm.py          # Algorithm ABC + the AlgoParams protocol — the strategy contract
     intents.py            # What we decided: Open/Close/SettleIntent
     position.py           # What we hold in a market
     records.py            # What the APIs said: Trade, GlobalTrade
-    params.py             # Mode (paper/live) + AlgoParams protocol
+    mode.py               # Mode (paper/live) — no global switch, one per algorithm
   storage/                # Every SQLite table and the code that reads it
     db.py                 # Thread-local connections, WAL, schema on every connect
     ledger.py             # Ledger — positions, trade_log, daily_stats, paper_account

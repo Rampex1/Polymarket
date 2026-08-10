@@ -52,7 +52,7 @@ from typing import Iterator, Optional
 from bot.polymarket import api
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import Intent, OpenIntent, SettleIntent
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 from bot.domain.records import GlobalTrade

@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 def copy_trade_params(**overrides):
     """A complete CopyTradeParams for tests. Override what the test is about."""
     from algorithms.copy_trade import CopyTradeParams
-    from bot.domain.params import Mode
+    from bot.domain.mode import Mode
 
     base = dict(
         name="copy_trade", mode=Mode.PAPER,
@@ -57,7 +57,7 @@ def copy_trade_params(**overrides):
 def insider_flow_params(**overrides):
     """A complete InsiderFlowParams for tests. Override what the test is about."""
     from algorithms.insider_flow import InsiderFlowParams
-    from bot.domain.params import Mode
+    from bot.domain.mode import Mode
 
     base = dict(
         name="insider_flow", mode=Mode.PAPER,
@@ -150,7 +150,7 @@ class _TestParams:
 @pytest.fixture
 def default_params():
     """A fully-initialised _TestParams instance defaulting to PAPER mode."""
-    from bot.domain.params import Mode
+    from bot.domain.mode import Mode
     return _TestParams(mode=Mode.PAPER)
 
 

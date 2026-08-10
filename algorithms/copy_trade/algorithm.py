@@ -38,7 +38,7 @@ from bot.domain.intents import (
     OpenIntent,
     SettleIntent,
 )
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 

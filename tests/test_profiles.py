@@ -17,7 +17,7 @@ import pytest
 
 from algorithms import REGISTRY
 from algorithms.copy_trade import CopyTradeAlgorithm, CopyTradeParams
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 from bot.profile_loader import ProfileError, load_profile
 from tests.conftest import copy_trade_params, insider_flow_params
 

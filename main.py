@@ -22,7 +22,7 @@ from bot import config, reconciliation
 from bot.execution import runner
 from bot.storage import db, runs
 from bot.domain.algorithm import Algorithm
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 from bot.discord import alerts, heartbeat
 from bot.logs.setup import setup_logging
 from bot.storage.ledger import Ledger

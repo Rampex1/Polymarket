@@ -8,7 +8,7 @@ variables.
 
 from dataclasses import dataclass, field
 
-from bot.domain.params import Mode
+from bot.domain.mode import Mode
 
 
 def _doc(doc: str):
