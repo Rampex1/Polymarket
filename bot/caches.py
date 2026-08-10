@@ -17,9 +17,9 @@ SEEN_IDS_MAX = 5000
 class SeenRing:
     """Bounded LRU set of already-processed signal ids.
 
-    The shared dedupe primitive for every polling loop (copy_trade,
-    insider_flow, the utility `poll` below). Re-marking an id refreshes its
-    recency; past `maxlen` the least-recently-marked id falls off.
+    The shared dedupe primitive for every polling loop — the same trade
+    reappears on every poll of an activity feed. Re-marking an id refreshes
+    its recency; past `maxlen` the least-recently-marked id falls off.
     """
 
     def __init__(self, maxlen: int = SEEN_IDS_MAX) -> None:
