@@ -24,7 +24,7 @@ from bot.storage import db, runs
 from bot.domain.algorithm import Algorithm
 from bot.domain.mode import Mode
 from bot.discord import alerts, heartbeat
-from bot.logs.setup import setup_logging
+from bot.logs import setup_logging
 from bot.storage.ledger import Ledger
 from bot.execution.risk import RiskManager
 from bot.profile_loader import ProfileError

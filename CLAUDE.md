@@ -109,8 +109,7 @@ bot/
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry + lifecycle — (market_id, algo, paper) → thread_id, so a market's updates nest
     discord_bot.py        # Slash commands — a text builder per command, plus the gateway wiring (own process)
-  logs/                   # Local log sinks
-    setup.py              # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
+  logs.py                 # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
 algorithms/
   __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
   copy_trade/             # Mirror one target wallet, or a ranked cohort
