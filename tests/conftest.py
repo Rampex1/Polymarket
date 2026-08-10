@@ -210,7 +210,6 @@ def make_trade(
         id=trade_id,
         market_id=market_id,
         question=question,
-        side=action if action in ("BUY", "SELL") else "REDEEM",
         size_usdc=size_usdc,
         price=price,
         action=action,

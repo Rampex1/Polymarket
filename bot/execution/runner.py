@@ -376,7 +376,6 @@ def _intent_to_trade(
         id=intent.signal_id or f"{action.lower()}-{int(_time.time())}",
         market_id=market_id,
         question=question if question is not None else intent.question,
-        side=action,
         size_usdc=size,
         price=price,
         action=action,

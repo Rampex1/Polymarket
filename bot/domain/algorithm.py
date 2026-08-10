@@ -6,10 +6,13 @@ A strategy polls for opportunities and yields intents; the runner executes them.
 """
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
 from .intents import Intent
 from .params import AlgoParams
+
+if TYPE_CHECKING:  # annotation only — domain must not import storage at runtime
+    from ..storage.ledger import Ledger
 
 
 class Algorithm(ABC):
@@ -17,7 +20,7 @@ class Algorithm(ABC):
 
     params: AlgoParams
 
-    def setup(self, ledger) -> None:
+    def setup(self, ledger: "Ledger") -> None:
         """One-time startup before the first poll"""
 
     @abstractmethod

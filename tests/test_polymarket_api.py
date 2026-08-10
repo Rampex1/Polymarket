@@ -193,7 +193,7 @@ def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
 def _fake_trade(tx_id):
     from bot.domain.records import Trade
     return Trade(
-        id=tx_id, market_id="m", question="q", side="BUY", size_usdc=1.0,
+        id=tx_id, market_id="m", question="q", size_usdc=1.0,
         price=0.5, action="BUY", timestamp=int(tx_id[2:]) if tx_id[2:].isdigit() else 0,
         outcome="Yes", asset_id="a",
     )

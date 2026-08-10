@@ -20,7 +20,6 @@ class Trade:
     id: str
     market_id: str
     question: str
-    side: str
     size_usdc: float
     price: float
     action: str
@@ -30,7 +29,7 @@ class Trade:
 
     def __str__(self) -> str:
         return (
-            f"[{self.timestamp}] {self.action} {self.side} ${self.size_usdc:.2f} "
+            f"[{self.timestamp}] {self.action} ${self.size_usdc:.2f} "
             f"@ {self.price:.3f} | {self.question[:60]}"
         )
 
