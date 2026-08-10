@@ -155,7 +155,7 @@ def test_skip_when_webhook_missing(monkeypatch):
 
 def test_summary_text_format(fresh_db):
     """/summary includes per-algo blocks and a combined total."""
-    from bot.discord import views
+    from bot.discord import discord_bot
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -165,7 +165,7 @@ def test_summary_text_format(fresh_db):
     trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.40)
     t.record_buy(trade, spent_usdc=2.0, shares=5.0, fill_price=0.40, paper=True)
 
-    body = views._summary_text([("a1", True)], profile="experimental")
+    body = discord_bot._summary_text([("a1", True)], profile="experimental")
 
     assert "experimental" in body
     assert "**a1**" in body
@@ -186,7 +186,7 @@ def test_send_skips_when_no_webhook(monkeypatch):
 
 def test_summary_text_combined_total(fresh_db):
     """Combined P&L/exposure sums across all algos."""
-    from bot.discord import views
+    from bot.discord import discord_bot
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -196,7 +196,7 @@ def test_summary_text_combined_total(fresh_db):
         trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.50)
         t.record_buy(trade, spent_usdc=usdc, shares=usdc * 2, fill_price=0.50, paper=True)
 
-    body = views._summary_text([("b1", True), ("b2", True)])
+    body = discord_bot._summary_text([("b1", True), ("b2", True)])
 
     assert "2 algorithms" in body
     assert "**b1**" in body

@@ -94,8 +94,7 @@ bot/
     heartbeat.py          # The only scheduled message — liveness ping, no portfolio data
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry + lifecycle — (market_id, algo, paper) → thread_id, so a market's updates nest
-    views.py              # What each slash command says — one pure builder per command
-    discord_bot.py        # Slash-command wiring (standalone daemon, its own process)
+    discord_bot.py        # Slash commands — a text builder per command, plus the gateway wiring (own process)
   logs/                   # Local log sinks
     setup.py              # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
 algorithms/
