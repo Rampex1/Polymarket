@@ -443,9 +443,18 @@ def _resolve_delayed(resp: dict, client: ClobClient, retries: int = 6, wait: flo
     return resp
 
 
-def _place_buy(
-    trade: Trade, scaled_usdc: float, client: ClobClient, order_type: str
+def _place_order(
+    side: str, trade: Trade, amount: float, client: ClobClient, order_type: str
 ) -> FillResult:
+    """Place one order and return what actually filled.
+
+    `amount` is USDC for a BUY and shares for a SELL — the CLOB's market
+    order takes the currency you are giving up.
+
+    Both sides share this path deliberately: they previously diverged, and
+    the SELL leg silently skipped the delayed-order poll, which reports a
+    matched sell as a no-fill and leaves a phantom position on the books.
+    """
     try:
         if order_type == "market":
             # price=0 → SDK calls calculate_market_price and prices the
@@ -454,65 +463,51 @@ def _place_buy(
             # vs signal_price, so this won't walk further than tolerated.
             args = MarketOrderArgs(
                 token_id=trade.asset_id,
-                amount=scaled_usdc,
-                side="BUY",
+                amount=amount,
+                side=side,
             )
             signed = client.create_market_order(args)
             resp = client.post_order(signed, OrderType.FAK)
         else:
-            shares = scaled_usdc / trade.price
+            # A limit BUY is sized in USDC; the exchange wants shares.
+            size = amount / trade.price if side == "BUY" else amount
             args = OrderArgs(
                 token_id=trade.asset_id,
                 price=trade.price,
-                size=shares,
-                side="BUY",
+                size=size,
+                side=side,
             )
             signed = client.create_order(args)
             resp = client.post_order(signed, OrderType.GTC)
+
         # Log the raw response (repr) so a misparse can be diagnosed from the
         # logs alone. The making/taking direction in `_parse_fill` was
         # validated against prod fills + on-chain balances on 2026-06-12;
         # the snake_case aliases remain unverified — keep this log until
         # they have been seen in the wild too.
-        logger.info("RAW BUY order response: %r", resp)
+        logger.info("RAW %s order response: %r", side, resp)
 
         # The CLOB matching engine is async — small orders sometimes land with
         # status='delayed' and empty takingAmount/makingAmount. Poll get_order()
         # until the order resolves (matched/live/cancelled) before parsing.
         resp = _resolve_delayed(resp, client)
 
-        return _parse_fill(resp, side="BUY")
+        return _parse_fill(resp, side=side)
     except Exception as e:
-        logger.error("BUY order failed: %s", e)
+        logger.error("%s order failed: %s", side, e)
         return FillResult(False, 0, 0, 0, reason=str(e))
+
+
+def _place_buy(
+    trade: Trade, scaled_usdc: float, client: ClobClient, order_type: str
+) -> FillResult:
+    return _place_order("BUY", trade, scaled_usdc, client, order_type)
 
 
 def _place_sell(
     trade: Trade, shares: float, client: ClobClient, order_type: str
 ) -> FillResult:
-    try:
-        if order_type == "market":
-            args = MarketOrderArgs(
-                token_id=trade.asset_id,
-                amount=shares,
-                side="SELL",
-            )
-            signed = client.create_market_order(args)
-            resp = client.post_order(signed, OrderType.FAK)
-        else:
-            args = OrderArgs(
-                token_id=trade.asset_id,
-                price=trade.price,
-                size=shares,
-                side="SELL",
-            )
-            signed = client.create_order(args)
-            resp = client.post_order(signed, OrderType.GTC)
-        logger.info("RAW SELL order response: %r", resp)
-        return _parse_fill(resp, side="SELL")
-    except Exception as e:
-        logger.error("SELL order failed: %s", e)
-        return FillResult(False, 0, 0, 0, reason=str(e))
+    return _place_order("SELL", trade, shares, client, order_type)
 
 
 def _parse_fill(resp, side: str) -> FillResult:

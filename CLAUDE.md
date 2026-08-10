@@ -54,6 +54,13 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
 - **The loader fails fast** on unknown keys, omitted keys, duplicate names,
   bad modes, and `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
+- **Both order legs must poll a `delayed` response.** The CLOB matching
+  engine is async: a small order returns `status='delayed'` with empty
+  amounts and resolves seconds later. Parsing that as-is reports a no-fill —
+  survivable on a BUY, but on a SELL it leaves a phantom position (ledger
+  holds shares we sold, proceeds never credited, live reconciliation drifts).
+  `_place_buy`/`_place_sell` are thin wrappers over one `_place_order` so
+  the two legs cannot diverge on this again.
 - **Never settle a market that is still trading.** A live favourite sits at
   0.97 for weeks undecided, and `fetch_resolution_price` is the last trade on
   an open book, not a resolution feed. `resolve_close_price` therefore gates
