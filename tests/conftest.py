@@ -83,9 +83,9 @@ def _no_discord(monkeypatch):
     real channel — the committed profile TOMLs carry live webhook URLs. Tests
     that assert on message bodies patch these themselves."""
     from bot.discord import threads
-    from bot.discord import notifier
+    from bot.discord import webhook
 
-    monkeypatch.setattr(notifier.http, "post", lambda *a, **kw: None)
+    monkeypatch.setattr(webhook.http, "post", lambda *a, **kw: None)
     monkeypatch.setattr(threads._session, "post", lambda *a, **kw: None)
 
 

@@ -89,7 +89,9 @@ bot/
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
     gateway.py            # The boundary strategies depend on instead of the transport
   discord/                # Everything that talks to Discord
-    notifier.py           # Discord alerts, on-demand summary, heartbeat, weekly signal digest
+    webhook.py            # The fire-and-forget POST both senders share
+    alerts.py             # One message per trade event
+    summaries.py          # Profile-level digests — /summary, heartbeat, weekly
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
     discord_bot.py        # Slash-command bot (standalone daemon, its own process)

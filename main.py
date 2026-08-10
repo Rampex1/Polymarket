@@ -23,7 +23,7 @@ from bot.execution import runner
 from bot.storage import db, runs
 from bot.domain.algorithm import Algorithm
 from bot.domain.params import Mode
-from bot.discord import notifier
+from bot.discord import alerts, summaries
 from bot.logs.setup import setup_logging
 from bot.storage.ledger import Ledger
 from bot.execution.risk import RiskManager
@@ -65,7 +65,7 @@ def _run_worker(
         display_name = algo.display_name
         webhook_url = algo.params.webhook_url
 
-        notifier.on_startup(
+        alerts.on_startup(
             "PAPER" if paper else "LIVE",
             ledger.total_exposure_usdc(paper=paper),
             algo_name=display_name,
@@ -107,7 +107,7 @@ def _run_worker(
                 consecutive_errors += 1
                 logger.exception("[%s] poll/dispatch raised, continuing", name)
                 if consecutive_errors % CRASH_ALERT_AFTER_N_ERRORS == 0:
-                    notifier.on_worker_unstable(
+                    alerts.on_worker_unstable(
                         display_name,
                         consecutive_errors,
                         exc,
@@ -135,7 +135,7 @@ def _run_worker(
             ledger.print_summary(paper=paper)
         except Exception:
             pass
-        notifier.on_shutdown(
+        alerts.on_shutdown(
             algo_name=algo.display_name, webhook_url=algo.params.webhook_url
         )
         logger.info("[%s] Stopped.", name)
@@ -222,7 +222,7 @@ def main() -> None:
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
         algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
-        notifier.start_heartbeat(
+        summaries.start_heartbeat(
             algo_infos,
             summary_webhook,
             stop_event,
@@ -233,7 +233,7 @@ def main() -> None:
     # Weekly signal performance digest — posts every Sunday to the same channel.
     if summary_webhook:
         algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
-        notifier.start_weekly_digest(
+        summaries.start_weekly_digest(
             algo_infos, summary_webhook, stop_event, profile=config.PROFILE
         )
 

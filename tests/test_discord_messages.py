@@ -1,5 +1,5 @@
 """
-Notifier tests — formatting, escaping, timezone math.
+Discord message tests — alert formatting, summaries, escaping, timezone math.
 
 We don't actually call Discord; we capture the payload by stubbing the
 HTTP POST. This is the bare minimum stubbing — the rest is real code.
@@ -18,9 +18,9 @@ HOOK = "https://discord.com/api/webhooks/123/abc"
 @pytest.fixture
 def capture_send(monkeypatch):
     """Capture every Discord webhook POST body so we can assert on it."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
-    monkeypatch.setattr(notifier.config, "DISCORD_BOT_TOKEN", "")
+    monkeypatch.setattr(alerts.config, "DISCORD_BOT_TOKEN", "")
 
     sent = []
 
@@ -32,7 +32,7 @@ def capture_send(monkeypatch):
 
         return R()
 
-    monkeypatch.setattr(notifier.http, "post", fake_post)
+    monkeypatch.setattr(webhook.http, "post", fake_post)
     return sent
 
 
@@ -40,10 +40,10 @@ def test_markdown_escape_question_with_special_chars(capture_send):
     """Market titles can contain Discord markdown chars (`*`, `_`, etc.)
     — they must be escaped so formatting can't be broken by a hostile
     or unlucky title."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     t = make_trade(question="A*B _foo_ wins?")
-    notifier.on_trade_detected(t, webhook_url=HOOK)
+    alerts.on_trade_detected(t, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     # Escaped versions present, raw markdown chars absent in title section.
     assert r"\*" in body
@@ -51,10 +51,10 @@ def test_markdown_escape_question_with_special_chars(capture_send):
 
 
 def test_markdown_escape_in_reason_and_question(capture_send):
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     t = make_trade(question="*Yes_* wins?")
-    notifier.on_risk_blocked("max | limit", t, webhook_url=HOOK)
+    alerts.on_risk_blocked("max | limit", t, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     # Both user-supplied strings (reason, question) get escaped.
     assert r"\*Yes\_\* wins?" in body
@@ -63,18 +63,18 @@ def test_markdown_escape_in_reason_and_question(capture_send):
 
 def test_markdown_escape_in_outcome(capture_send):
     """outcome is rendered in buy/sell messages — must be escaped too."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     t = make_trade(outcome="*Yes_*", question="q")
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5, webhook_url=HOOK)
+    alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert r"\*Yes\_\*" in body
 
 
 def test_buy_executed_format(capture_send):
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
+    alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "📄 **PAPER BUY**" in body
     assert "$1.00" in body
@@ -84,10 +84,10 @@ def test_buy_executed_format(capture_send):
 def test_buy_executed_shows_shares_and_drift(capture_send):
     """Fill detail: how many shares the spend bought and how far the fill
     drifted from the signal price."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     t = make_trade(action="BUY", price=0.50, outcome="Yes")
-    notifier.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
+    alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "1.82 shares" in body                  # 1.0 / 0.55
     assert "+10.0% slip" in body
@@ -98,7 +98,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
     point of the alert."""
     import time
 
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
@@ -114,7 +114,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
             "market_end_ts": time.time() + 7 * 86_400,
         },
     )
-    notifier.on_signal(intent, "insider_flow_paper", webhook_url=HOOK)
+    alerts.on_signal(intent, "insider_flow_paper", webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "fresh wallet" in body
     assert "0.1d old" in body                     # 7200s ≈ 0.083d → 0.1
@@ -126,34 +126,34 @@ def test_signal_message_includes_reason_and_features(capture_send):
 
 def test_signal_message_without_features_stays_compact(capture_send):
     """Copy-trade intents carry no features — no empty detail lines."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
         question="Q?", outcome="Yes", signal_id="s1",
     )
-    notifier.on_signal(intent, "copy_trade", webhook_url=HOOK)
+    alerts.on_signal(intent, "copy_trade", webhook_url=HOOK)
     body = capture_send[-1]["content"]
     assert "↳" not in body
 
 
 def test_skip_when_webhook_missing(monkeypatch):
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     posted = []
 
     def fake_post(*a, **kw):
         posted.append(1)
 
-    monkeypatch.setattr(notifier.http, "post", fake_post)
-    notifier.send("hello")          # no webhook → no global fallback → no post
+    monkeypatch.setattr(webhook.http, "post", fake_post)
+    webhook.send("hello")          # no webhook → no global fallback → no post
     assert not posted
 
 
 def test_send_profile_summary_format(fresh_db, monkeypatch):
     """Profile summary includes per-algo blocks and a combined total."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -164,9 +164,9 @@ def test_send_profile_summary_format(fresh_db, monkeypatch):
     t.record_buy(trade, spent_usdc=2.0, shares=5.0, fill_price=0.40, paper=True)
 
     sent = []
-    monkeypatch.setattr(notifier.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
+    monkeypatch.setattr(webhook.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
 
-    notifier.send_profile_summary([("a1", True)], webhook_url="http://test", profile="experimental")
+    summaries.send_profile_summary([("a1", True)], webhook_url="http://test", profile="experimental")
 
     assert len(sent) == 1
     body = sent[0]["content"]
@@ -179,16 +179,16 @@ def test_send_profile_summary_format(fresh_db, monkeypatch):
 
 
 def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     sent = []
-    monkeypatch.setattr(notifier.http, "post", lambda *a, **kw: sent.append(1))
-    notifier.send_profile_summary([("a1", True)], webhook_url="")
+    monkeypatch.setattr(webhook.http, "post", lambda *a, **kw: sent.append(1))
+    summaries.send_profile_summary([("a1", True)], webhook_url="")
     assert not sent
 
 
 def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
     """Combined P&L/exposure sums across all algos."""
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -199,8 +199,8 @@ def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
         t.record_buy(trade, spent_usdc=usdc, shares=usdc * 2, fill_price=0.50, paper=True)
 
     sent = []
-    monkeypatch.setattr(notifier.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
-    notifier.send_profile_summary([("b1", True), ("b2", True)], webhook_url="http://test")
+    monkeypatch.setattr(webhook.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
+    summaries.send_profile_summary([("b1", True), ("b2", True)], webhook_url="http://test")
 
     body = sent[0]["content"]
     assert "2 algorithms" in body
@@ -216,13 +216,13 @@ def test_weekly_schedule_differs_between_timezones(monkeypatch):
     measure the wait in two zones whose UTC offsets differ by 13-14h and
     verify they disagree. A bug dropping TIMEZONE returns the same value."""
     from bot import config
-    from bot.discord import notifier
+    from bot.discord import alerts, summaries, webhook
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("America/New_York"))
-    ny_secs = notifier._seconds_until_next_sunday()
+    ny_secs = summaries._seconds_until_next_sunday()
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("Asia/Tokyo"))
-    tokyo_secs = notifier._seconds_until_next_sunday()
+    tokyo_secs = summaries._seconds_until_next_sunday()
 
     assert 0 < ny_secs <= 8 * 24 * 3600
     assert 0 < tokyo_secs <= 8 * 24 * 3600

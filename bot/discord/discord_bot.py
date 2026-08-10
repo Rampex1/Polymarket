@@ -21,7 +21,7 @@ import discord
 from discord import app_commands
 
 from .. import config
-from . import notifier
+from . import summaries
 from .messages import escape as _esc
 from ..storage.ledger import Ledger
 
@@ -178,7 +178,7 @@ def _register_commands(client: _TradingClient) -> None:
         for profile, algos in _by_profile().items():
             webhook = config.resolve_summary_webhook(profile)
             if webhook:
-                notifier.send_profile_summary(algos, webhook, profile)
+                summaries.send_profile_summary(algos, webhook, profile)
                 sent.append(profile)
         if sent:
             await interaction.response.send_message(

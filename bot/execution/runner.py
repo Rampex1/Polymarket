@@ -30,7 +30,7 @@ from py_clob_client_v2.constants import POLYGON
 
 from .. import config
 from ..storage import signals
-from ..discord import notifier
+from ..discord import alerts
 from . import lots as copy_lots
 from ..domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 from .fills import FillResult, simulate_buy as _simulate_buy, simulate_sell as _simulate_sell
@@ -117,7 +117,7 @@ def dispatch(
     if isinstance(intent, OpenIntent) and risk.is_suspended(intent.market_id):
         return  # prior BUY failed — suppress all further signals silently
 
-    notifier.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
+    alerts.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
                        paper=paper)
 
     if isinstance(intent, OpenIntent):
@@ -144,7 +144,7 @@ def _handle_open(
         logger.warning("OpenIntent missing asset_id, skipping: %s", intent.reason)
         return
 
-    # Build a synthetic Trade so existing ledger/risk/notifier APIs work
+    # Build a synthetic Trade so existing ledger/risk/alert APIs work
     # unchanged. (Trade is the legacy data class; intents are the new front-end.)
     trade = _intent_to_trade(intent, action="BUY")
 
@@ -155,7 +155,7 @@ def _handle_open(
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"risk: {reason}")
         if "suspended" not in reason:
-            notifier.on_risk_blocked(reason, trade, algo.display_name,
+            alerts.on_risk_blocked(reason, trade, algo.display_name,
                                      webhook_url=algo.params.webhook_url, paper=paper)
         return
 
@@ -174,7 +174,7 @@ def _handle_open(
         reason_str = fill.reason if fill else "no fill"
         logger.warning("[%s] BUY did not fill (%s) — not recording.",
                        algo.name, reason_str)
-        notifier.on_buy_failed(trade, reason_str, algo.display_name, webhook_url=algo.params.webhook_url,
+        alerts.on_buy_failed(trade, reason_str, algo.display_name, webhook_url=algo.params.webhook_url,
                                paper=paper)
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"no fill: {reason_str}")
@@ -200,7 +200,7 @@ def _handle_open(
             algo.name, intent.market_id, trade.asset_id or "", intent.leader_wallet,
             intent.leader_event_id or intent.signal_id, fill.shares, fill.amount_usdc,
         )
-    notifier.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
+    alerts.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
     ledger.print_summary(paper=paper)
 
 
@@ -274,7 +274,7 @@ def _handle_close(
         copy_lots.close_for_leader(
             algo.name, intent.market_id, intent.leader_wallet, fill.shares,
         )
-    notifier.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
+    alerts.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
     ledger.print_summary(paper=paper)
 
 
@@ -330,7 +330,7 @@ def _handle_settle(
     copy_lots.close_market(algo.name, intent.market_id)
     ledger.print_summary(paper=paper)
 
-    notifier.on_settle_executed(
+    alerts.on_settle_executed(
         market_id=intent.market_id,
         question=intent.question or position.question,
         outcome=position.outcome,
@@ -355,10 +355,10 @@ def _intent_to_trade(
     question: Optional[str] = None,
     outcome: Optional[str] = None,
 ) -> Trade:
-    """Build a synthetic Trade from an Intent for ledger/notifier APIs.
+    """Build a synthetic Trade from an Intent for ledger/alert APIs.
 
     The Trade dataclass is what the existing Ledger, RiskManager,
-    and notifier expect. Rather than refactor all three to take Intents
+    and alerts expect. Rather than refactor all three to take Intents
     directly (large blast radius), the runner wraps each Intent in a Trade
     on the way to those callees.
 
