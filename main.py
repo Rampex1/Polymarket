@@ -23,7 +23,7 @@ from bot.execution import runner
 from bot.storage import db, runs
 from bot.domain.algorithm import Algorithm
 from bot.domain.params import Mode
-from bot.discord import alerts, summaries
+from bot.discord import alerts, heartbeat
 from bot.logs.setup import setup_logging
 from bot.storage.ledger import Ledger
 from bot.execution.risk import RiskManager
@@ -218,23 +218,15 @@ def main() -> None:
     for w in workers:
         w.start()
 
-    # Heartbeat — periodic liveness ping to the summary channel.
+    # Heartbeat — the only scheduled message: proof the process is alive.
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
-        algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
-        summaries.start_heartbeat(
-            algo_infos,
+        heartbeat.start(
             summary_webhook,
             stop_event,
             profile=config.PROFILE,
             interval_hours=config.HEARTBEAT_INTERVAL_HOURS,
-        )
-
-    # Weekly signal performance digest — posts every Sunday to the same channel.
-    if summary_webhook:
-        algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
-        summaries.start_weekly_digest(
-            algo_infos, summary_webhook, stop_event, profile=config.PROFILE
+            n_algos=len(ENABLED),
         )
 
     # Block the main thread until shutdown is signaled.

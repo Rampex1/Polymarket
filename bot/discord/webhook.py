@@ -2,7 +2,7 @@
 webhook.py
 
 The Discord webhook transport — one fire-and-forget POST, nothing else.
-Both alerts and summaries send through here, so neither imports the other.
+Every sender goes through here, so none of them import each other.
 """
 
 import logging

@@ -91,7 +91,7 @@ bot/
   discord/                # Everything that talks to Discord
     webhook.py            # The fire-and-forget POST both senders share
     alerts.py             # One message per trade event
-    summaries.py          # Profile-level digests — /summary, heartbeat, weekly
+    heartbeat.py          # The only scheduled message — liveness ping, no portfolio data
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
     discord_bot.py        # Slash-command bot (standalone daemon, its own process)
@@ -141,10 +141,11 @@ Failures only log; they never abort the worker.
 ### Profile-level threads (not per-worker)
 
 Started once by `main`, aggregating all algorithms in the profile:
-liveness heartbeat (`HEARTBEAT_INTERVAL_HOURS`, default 6, `0` disables)
-and a weekly signal digest on Sundays. There is **no scheduled portfolio
-summary** — it is sent only on `/summary`, deliberately, to keep the
-channel quiet.
+a liveness heartbeat and nothing else (`HEARTBEAT_INTERVAL_HOURS`,
+default 6, `0` disables). It carries no portfolio data — deliberately, so
+silence in the channel is the only signal it sends. Portfolio state is
+answered on demand by the slash commands; `/summary` is the sole entry
+point for a full summary, and it composes the text itself.
 
 ### Trade lifecycle
 
@@ -200,7 +201,7 @@ Two independent paths, no global fallback between them:
 - **Trade alerts** come from each algorithm's own `webhook_url` param in
   the profile TOML, which `validate()` requires — a block without one is a
   boot-time `ProfileError`, not a silently muted algorithm.
-- **Profile summaries** (daily, heartbeat, weekly digest) come from
+- **Profile-level messages** (heartbeat, `/summary`) come from
   `config/webhooks.toml` via `resolve_summary_webhook(profile)`, matching a
   block with `type = "summary"` and `profile = "<name>"`.
 

@@ -26,7 +26,7 @@ flowchart TB
         Runner["runner.dispatch<br/>risk caps · slippage gate"]
         Exec["live: CLOB order<br/>paper: simulated fill"]
         Recon["reconciliation<br/>live only, every 30 polls"]
-        Sched["heartbeat · weekly signal digest"]
+        Sched["heartbeat — liveness only"]
     end
 
     subgraph archiver["discovery.archive — separate process"]
@@ -156,9 +156,9 @@ After a deploy, check: one startup line per algorithm in
 ## Monitoring
 
 Discord is the interface. Trade alerts post to a per-market thread as they
-happen; the profile's summary channel gets a liveness heartbeat every 6
-hours, a signal digest on Sundays, and a portfolio summary whenever you ask
-for one with `/summary`.
+happen. The profile's summary channel gets exactly two things: a liveness
+heartbeat every 6 hours, and a portfolio summary whenever you ask for one
+with `/summary`. Nothing else is scheduled — silence means something broke.
 
 Slash commands — one bot, serving every profile:
 

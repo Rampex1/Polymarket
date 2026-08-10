@@ -18,7 +18,7 @@ HOOK = "https://discord.com/api/webhooks/123/abc"
 @pytest.fixture
 def capture_send(monkeypatch):
     """Capture every Discord webhook POST body so we can assert on it."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     monkeypatch.setattr(alerts.config, "DISCORD_BOT_TOKEN", "")
 
@@ -40,7 +40,7 @@ def test_markdown_escape_question_with_special_chars(capture_send):
     """Market titles can contain Discord markdown chars (`*`, `_`, etc.)
     — they must be escaped so formatting can't be broken by a hostile
     or unlucky title."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     t = make_trade(question="A*B _foo_ wins?")
     alerts.on_trade_detected(t, webhook_url=HOOK)
@@ -51,7 +51,7 @@ def test_markdown_escape_question_with_special_chars(capture_send):
 
 
 def test_markdown_escape_in_reason_and_question(capture_send):
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     t = make_trade(question="*Yes_* wins?")
     alerts.on_risk_blocked("max | limit", t, webhook_url=HOOK)
@@ -63,7 +63,7 @@ def test_markdown_escape_in_reason_and_question(capture_send):
 
 def test_markdown_escape_in_outcome(capture_send):
     """outcome is rendered in buy/sell messages — must be escaped too."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     t = make_trade(outcome="*Yes_*", question="q")
     alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.5, webhook_url=HOOK)
@@ -72,7 +72,7 @@ def test_markdown_escape_in_outcome(capture_send):
 
 
 def test_buy_executed_format(capture_send):
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
     t = make_trade(action="BUY", price=0.5, outcome="Yes", size_usdc=100)
     alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
     body = capture_send[-1]["content"]
@@ -84,7 +84,7 @@ def test_buy_executed_format(capture_send):
 def test_buy_executed_shows_shares_and_drift(capture_send):
     """Fill detail: how many shares the spend bought and how far the fill
     drifted from the signal price."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     t = make_trade(action="BUY", price=0.50, outcome="Yes")
     alerts.on_buy_executed(t, spent_usdc=1.0, paper=True, fill_price=0.55, webhook_url=HOOK)
@@ -98,7 +98,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
     point of the alert."""
     import time
 
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
@@ -126,7 +126,7 @@ def test_signal_message_includes_reason_and_features(capture_send):
 
 def test_signal_message_without_features_stays_compact(capture_send):
     """Copy-trade intents carry no features — no empty detail lines."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
     from bot.domain.intents import OpenIntent
 
     intent = OpenIntent(
@@ -139,7 +139,7 @@ def test_signal_message_without_features_stays_compact(capture_send):
 
 
 def test_skip_when_webhook_missing(monkeypatch):
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import alerts, webhook
 
     posted = []
 
@@ -151,9 +151,9 @@ def test_skip_when_webhook_missing(monkeypatch):
     assert not posted
 
 
-def test_send_profile_summary_format(fresh_db, monkeypatch):
-    """Profile summary includes per-algo blocks and a combined total."""
-    from bot.discord import alerts, summaries, webhook
+def test_summary_text_format(fresh_db):
+    """/summary includes per-algo blocks and a combined total."""
+    from bot.discord import discord_bot
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -163,13 +163,8 @@ def test_send_profile_summary_format(fresh_db, monkeypatch):
     trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.40)
     t.record_buy(trade, spent_usdc=2.0, shares=5.0, fill_price=0.40, paper=True)
 
-    sent = []
-    monkeypatch.setattr(webhook.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
+    body = discord_bot._summary_text([("a1", True)], profile="experimental")
 
-    summaries.send_profile_summary([("a1", True)], webhook_url="http://test", profile="experimental")
-
-    assert len(sent) == 1
-    body = sent[0]["content"]
     assert "experimental" in body
     assert "**a1**" in body
     assert "PAPER" in body
@@ -178,17 +173,18 @@ def test_send_profile_summary_format(fresh_db, monkeypatch):
     assert "────" in body   # separator present
 
 
-def test_send_profile_summary_skips_when_no_webhook(fresh_db, monkeypatch):
-    from bot.discord import alerts, summaries, webhook
+def test_send_skips_when_no_webhook(monkeypatch):
+    """No webhook configured -> no POST, whatever the text."""
+    from bot.discord import webhook
     sent = []
     monkeypatch.setattr(webhook.http, "post", lambda *a, **kw: sent.append(1))
-    summaries.send_profile_summary([("a1", True)], webhook_url="")
+    webhook.send("anything", webhook_url="")
     assert not sent
 
 
-def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
+def test_summary_text_combined_total(fresh_db):
     """Combined P&L/exposure sums across all algos."""
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import discord_bot
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -198,11 +194,8 @@ def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
         trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.50)
         t.record_buy(trade, spent_usdc=usdc, shares=usdc * 2, fill_price=0.50, paper=True)
 
-    sent = []
-    monkeypatch.setattr(webhook.http, "post", lambda url, json=None, timeout=None: sent.append(json or {}))
-    summaries.send_profile_summary([("b1", True), ("b2", True)], webhook_url="http://test")
+    body = discord_bot._summary_text([("b1", True), ("b2", True)])
 
-    body = sent[0]["content"]
     assert "2 algorithms" in body
     assert "**b1**" in body
     assert "**b2**" in body
@@ -210,20 +203,24 @@ def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
     assert "$8.00" in body
 
 
-def test_weekly_schedule_differs_between_timezones(monkeypatch):
-    """The weekly digest schedules in config.TIMEZONE. To prove the timezone
-    is actually consulted (rather than ignored and falling through to local),
-    measure the wait in two zones whose UTC offsets differ by 13-14h and
-    verify they disagree. A bug dropping TIMEZONE returns the same value."""
+def test_heartbeat_timestamp_uses_config_timezone(monkeypatch):
+    """The heartbeat stamps its time in config.TIMEZONE. To prove the setting
+    is consulted rather than silently falling through to VPS local time,
+    render in two zones and check the tz abbreviation differs."""
     from bot import config
-    from bot.discord import alerts, summaries, webhook
+    from bot.discord import heartbeat, webhook
+
+    sent = []
+    monkeypatch.setattr(webhook.http, "post",
+                        lambda url, json=None, timeout=None: sent.append(json["content"]))
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("America/New_York"))
-    ny_secs = summaries._seconds_until_next_sunday()
+    heartbeat.ping("http://test", profile="p", n_algos=1)
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("Asia/Tokyo"))
-    tokyo_secs = summaries._seconds_until_next_sunday()
+    heartbeat.ping("http://test", profile="p", n_algos=1)
 
-    assert 0 < ny_secs <= 8 * 24 * 3600
-    assert 0 < tokyo_secs <= 8 * 24 * 3600
-    assert abs(ny_secs - tokyo_secs) > 3 * 3600
+    assert len(sent) == 2
+    assert sent[0] != sent[1]
+    assert "JST" in sent[1]
+    assert "1 algorithm running" in sent[0]
