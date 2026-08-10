@@ -58,7 +58,7 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
   engine is async: a small order returns `status='delayed'` with empty
   amounts and resolves seconds later. Parsing that as-is reports a no-fill —
   survivable on a BUY, but on a SELL it leaves a phantom position (ledger
-  holds shares we sold, proceeds never credited, live reconciliation drifts).
+  holds shares we sold and the proceeds are never credited).
   `_place_buy`/`_place_sell` are thin wrappers over one `_place_order` so
   the two legs cannot diverge on this again.
 - **Never settle a market that is still trading.** A live favourite sits at
@@ -80,7 +80,6 @@ main.py                   # Entry point — worker thread per algorithm, signal 
 bot/
   config.py               # Infra only: API URLs, creds, DB path, webhook resolution, timezone, heartbeat interval
   profile_loader.py       # config/<profile>.toml → [Algorithm]; fail-fast validation
-  reconciliation.py       # Diff bot DB vs on-chain positions (live only); logs + Discord alerts
   domain/                 # Side-effect-free shared vocabulary; re-exports nothing, one path per name
     algorithm.py          # Algorithm ABC + the AlgoParams protocol — the strategy contract
     intents.py            # What we decided: Open/Close/SettleIntent
@@ -146,10 +145,6 @@ consecutive failures the worker posts a Discord instability alert.
 
 The CLOB client is built **once** in `main`, and only if at least one
 enabled algorithm is `Mode.LIVE`.
-
-Live-only reconciliation runs at startup and then every
-`RECONCILE_EVERY_N_POLLS` (30) polls — ~10 min at the default 20s cadence.
-Failures only log; they never abort the worker.
 
 ### Profile-level threads (not per-worker)
 

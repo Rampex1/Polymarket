@@ -18,7 +18,7 @@ import signal
 import sys
 import threading
 
-from bot import config, reconciliation
+from bot import config
 from bot.execution import runner
 from bot.storage import db, runs
 from bot.domain.algorithm import Algorithm
@@ -35,8 +35,7 @@ except ProfileError as e:
     raise SystemExit(f"error: {e}") from None
 
 
-# Reconcilier
-RECONCILE_EVERY_N_POLLS = 30
+# Consecutive poll failures before the worker posts an instability alert
 CRASH_ALERT_AFTER_N_ERRORS = 5
 
 
@@ -85,16 +84,6 @@ def _run_worker(
         )
         ledger.print_summary(paper=paper)
 
-        # Startup reconciliation — surfaces ghost positions or stale DB rows
-        # before we start acting. Live-only; paper has nothing to reconcile.
-        reconciliation.reconcile_positions(
-            ledger,
-            config.POLY_FUNDER_ADDRESS,
-            algo.display_name,
-            paper,
-        )
-
-        poll_count = 0
         consecutive_errors = 0
         while not stop_event.is_set():
             try:
@@ -113,20 +102,6 @@ def _run_worker(
                         exc,
                         webhook_url=webhook_url,
                     )
-
-            # Periodic reconciliation. Failures inside reconcile_positions
-            # only log; they never abort the worker.
-            poll_count += 1
-            if not paper and poll_count % RECONCILE_EVERY_N_POLLS == 0:
-                try:
-                    reconciliation.reconcile_positions(
-                        ledger,
-                        config.POLY_FUNDER_ADDRESS,
-                        algo.display_name,
-                        paper,
-                    )
-                except Exception:
-                    logger.exception("[%s] reconciliation raised, continuing", name)
 
             stop_event.wait(algo.params.poll_interval_seconds)
     finally:

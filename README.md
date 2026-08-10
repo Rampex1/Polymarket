@@ -25,7 +25,6 @@ flowchart TB
         WB["worker: insider_flow"]
         Runner["runner.dispatch<br/>risk caps · slippage gate"]
         Exec["live: CLOB order<br/>paper: simulated fill"]
-        Recon["reconciliation<br/>live only, every 30 polls"]
         Sched["heartbeat — liveness only"]
     end
 
@@ -62,8 +61,6 @@ flowchart TB
     Exec --> PDB
     Exec --> Discord
 
-    Recon <--> Data
-    Recon --> PDB
     Sched --> PDB
     Sched --> Discord
     WH --> Discord

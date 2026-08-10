@@ -239,9 +239,9 @@ def _parse_trade(item: dict) -> Optional[Trade]:
 def fetch_user_positions(address: str) -> list[dict]:
     """All open positions for `address`, as raw rows from the Data API.
 
-    Used by the reconciliation step to compare our actual on-chain holdings
-    against the bot's local DB. Returns an empty list on failure — callers
-    treat that as "couldn't check this tick" rather than "no positions".
+    Used by copy_trade to size against the target wallet's holdings.
+    Returns an empty list on failure — callers treat that as "couldn't check
+    this tick" rather than "no positions".
     """
     try:
         resp = SESSION.get(
