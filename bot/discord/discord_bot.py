@@ -22,6 +22,7 @@ from discord import app_commands
 
 from .. import config
 from . import notifier
+from .messages import escape as _esc
 from ..storage.ledger import Ledger
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _status_text() -> str:
     today = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d %H:%M")
     lines = [f"🤖 **Bot Status · {today}**", ""]
     for profile, algos in _by_profile().items():
-        lines.append(f"**{notifier._esc(profile)}**")
+        lines.append(f"**{_esc(profile)}**")
         for name, paper in algos:
             ledger = Ledger(algo=name)
             n_pos = len(ledger.all_open(paper=paper))
@@ -60,7 +61,7 @@ def _status_text() -> str:
             sign = "+" if pnl >= 0 else ""
             mode = "📄 PAPER" if paper else "🟢 LIVE"
             lines.append(
-                f"> **{notifier._esc(name)}** · {mode} · "
+                f"> **{_esc(name)}** · {mode} · "
                 f"{n_pos} open · **${exposure:.2f}** · today **{sign}${pnl:.2f}**"
             )
         lines.append("")
@@ -76,16 +77,16 @@ def _positions_text(algo_filter: str = "") -> str:
         positions = ledger.all_open(paper=paper)
         mode = "PAPER" if paper else "LIVE"
         lines.append(
-            f"📋 **{notifier._esc(name)}** · {mode} · {notifier._esc(profile)}"
+            f"📋 **{_esc(name)}** · {mode} · {_esc(profile)}"
         )
         if not positions:
             lines.append("> _No open positions_")
         else:
             for p in positions:
                 lines.append(
-                    f"> `{notifier._esc(p.outcome)}` {p.shares:.2f}sh"
+                    f"> `{_esc(p.outcome)}` {p.shares:.2f}sh"
                     f" @ **{p.avg_price:.3f}**  ·  ${p.total_cost_usdc:.2f} cost"
-                    f"  ·  {notifier._esc(p.question[:55])}"
+                    f"  ·  {_esc(p.question[:55])}"
                 )
         lines.append("")
     return "\n".join(lines).strip() or "_No matching algorithms._"
@@ -105,7 +106,7 @@ def _pnl_text() -> str:
         sign = "+" if pnl >= 0 else ""
         mode = "PAPER" if paper else "LIVE"
         lines.append(
-            f"**{notifier._esc(name)}** ({mode} · {notifier._esc(profile)}): "
+            f"**{_esc(name)}** ({mode} · {_esc(profile)}): "
             f"today **{sign}${pnl:.2f}** · exposure **${exp:.2f}**"
         )
     sign = "+" if total_pnl >= 0 else ""
@@ -199,7 +200,7 @@ def _register_commands(client: _TradingClient) -> None:
             )
             return
 
-        requester = notifier._esc(interaction.user.display_name)
+        requester = _esc(interaction.user.display_name)
         await interaction.response.send_message(
             f"⏳ **Restarting…** _(requested by {requester})_\n"
             "> Pulling latest code, installing deps, validating profiles.\n"
