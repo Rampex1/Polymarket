@@ -39,6 +39,7 @@ from bot.domain.intents import (
     SettleIntent,
 )
 from bot.domain.params import Mode
+from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams
@@ -256,32 +257,11 @@ class CopyTradeAlgorithm(Algorithm):
     # ── Exit safety net: settle resolved markets ─────────────────────────────
 
     def _settle_sweep(self) -> Iterator[SettleIntent]:
-        """Periodic Gamma check on our own open positions.
-
-        Primary gate: Gamma marks the market as fully final (resolved flag or
-        UMA status). Fallback: CLOB resolution price is already binarized
-        (> 0.95 or < 0.05), which means the CLOB settled the market even if
-        Gamma's REST API is lagging behind.
-        """
-        for pos in self._ledger.all_open(paper=self._paper):
-            market = self._market_data.market(pos.market_id)
-            is_final = bool(market and self._market_data.market_outcome_is_final(market))
-            if not is_final:
-                # Gamma may be lagging — check CLOB as fallback.
-                clob = self._market_data.price(pos.asset_id)
-                is_final = clob is not None and (clob > 0.95 or clob < 0.05)
-            if is_final:
-                logger.info(
-                    "[%s] Market resolved — settling: %s",
-                    self.params.name, pos.question[:55],
-                )
-                yield SettleIntent(
-                    market_id=pos.market_id,
-                    question=pos.question,
-                    outcome=pos.outcome,
-                    signal_id=f"settle:{pos.market_id}:{self._poll_count}",
-                    reason="market resolved (sweep)",
-                )
+        """Safety net for REDEEMs missed while the bot was offline."""
+        yield from settlement.sweep_resolved(
+            self._ledger, self._market_data, self._paper,
+            self.params.name, self._poll_count,
+        )
 
     # ── Trade → Intent translation ──────────────────────────────────────────
 

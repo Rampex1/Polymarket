@@ -53,6 +53,7 @@ from bot.polymarket import api
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import Intent, OpenIntent, SettleIntent
 from bot.domain.params import Mode
+from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 from bot.domain.records import GlobalTrade
 
@@ -468,25 +469,11 @@ class InsiderFlowAlgorithm(Algorithm):
     # ── Exit: settle resolved markets ────────────────────────────────────────
 
     def _settle_sweep(self) -> Iterator[SettleIntent]:
-        # Strict finality gate: `closed` alone means trading ended, not that
-        # the outcome is determined (UMA dispute window). Settling there
-        # would book P&L off a stale book and permanently mislabel this
-        # market's signal rows. Undetermined markets just wait for a later
-        # sweep — resolution is not time-sensitive.
-        for pos in self._ledger.all_open(paper=self._paper):
-            market = self._market_data.market(pos.market_id)
-            if market and self._market_data.market_outcome_is_final(market):
-                logger.info(
-                    "[%s] Market resolved — settling: %s",
-                    self.params.name, pos.question[:55],
-                )
-                yield SettleIntent(
-                    market_id=pos.market_id,
-                    question=pos.question,
-                    outcome=pos.outcome,
-                    signal_id=f"settle:{pos.market_id}:{self._poll_count}",
-                    reason="market resolved (sweep)",
-                )
+        """v1 exit: hold to resolution, then settle."""
+        yield from settlement.sweep_resolved(
+            self._ledger, self._market_data, self._paper,
+            self.params.name, self._poll_count,
+        )
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

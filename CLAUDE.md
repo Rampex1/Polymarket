@@ -54,6 +54,13 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
 - **The loader fails fast** on unknown keys, omitted keys, duplicate names,
   bad modes, and `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
+- **Never settle a market that is still trading.** A live favourite sits at
+  0.97 for weeks undecided, and `fetch_resolution_price` is the last trade on
+  an open book, not a resolution feed. `resolve_close_price` therefore gates
+  its binary-price fallback on Gamma reporting the market closed, and returns
+  `None` otherwise — the caller leaves the position open and a later sweep
+  retries. Settling early books P&L off a live book, drifts the DB from the
+  on-chain position, and writes a `signals.outcome` label that is write-once.
 - **If an algorithm declares `LIVE` but no CLOB client can be built**, `main()`
   exits — it does **not** fall back to paper. Silently papering a live
   algorithm is worse than not starting: the operator believes real money is
@@ -83,7 +90,7 @@ bot/
     risk.py               # RiskManager — pre-trade caps from each algo's params; BUYs only
     fills.py              # Paper-exchange fills — no DB, notification, or strategy imports
     pricing.py            # Current price + the slippage gate
-    settlement.py         # Canonical resolution price; stricter finality rules than order execution
+    settlement.py         # Resolved-market sweep + canonical close price; refuses anything still trading
     lots.py               # Leader-attributed lots — one leader's exit unwinds only its share
   polymarket/             # Everything that talks to Polymarket
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution

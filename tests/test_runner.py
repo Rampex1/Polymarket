@@ -381,7 +381,8 @@ def test_dispatch_settle_wins_at_one(ledger, risk, algo, default_params, monkeyp
     seed = make_trade(action="BUY", price=0.40)
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
-    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    # Gamma is closed but gives no usable outcomePrices; CLOB has settled.
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: {"closed": True})
     monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
@@ -397,7 +398,7 @@ def test_dispatch_settle_loss_at_zero(ledger, risk, algo, default_params, monkey
     seed = make_trade(action="BUY", price=0.40)
     ledger.record_buy(seed, spent_usdc=4.0, shares=10.0, fill_price=0.40, paper=True)
 
-    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: {"closed": True})
     monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.01)
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
@@ -447,9 +448,11 @@ def test_dispatch_settle_uses_gamma_when_closed(ledger, risk, algo,
     assert ledger.today_pnl_usdc(paper=True) == 6.0
 
 
-def test_dispatch_settle_ignores_gamma_when_open(ledger, risk, algo,
-                                                 default_params, monkeypatch):
-    """Live mid (not a settlement) → fall back to CLOB binarisation."""
+def test_dispatch_settle_refuses_while_market_is_open(ledger, risk, algo,
+                                                      default_params, monkeypatch):
+    """A live favourite sits at 0.99 for weeks without being decided. Settling
+    there books P&L off an open book, drifts the DB from the chain, and
+    write-once signal labels can never be corrected. Leave it open."""
     from bot.polymarket import api
     from bot.execution import runner
     seed = make_trade(action="BUY", price=0.40, asset_id="winner")
@@ -467,8 +470,8 @@ def test_dispatch_settle_ignores_gamma_when_open(ledger, risk, algo,
 
     intent = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
-    assert ledger.get("m1", paper=True) is None
-    assert ledger.today_pnl_usdc(paper=True) == 6.0
+    assert ledger.get("m1", paper=True) is not None     # still held
+    assert ledger.today_pnl_usdc(paper=True) == 0.0     # nothing booked
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +549,7 @@ def test_dispatch_settle_labels_signal_outcome(ledger, risk, algo,
     )
     runner.dispatch(open_intent, algo, ledger, risk, client=None, paper=True)
 
-    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: None)
+    monkeypatch.setattr(api, "fetch_market_resolution", lambda *a, **kw: {"closed": True})
     monkeypatch.setattr(api, "fetch_resolution_price", lambda *a, **kw: 0.99)
     settle = SettleIntent(market_id="m1", signal_id="r1")
     runner.dispatch(settle, algo, ledger, risk, client=None, paper=True)
