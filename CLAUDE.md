@@ -38,6 +38,13 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
 - **Knob schemas live in `algorithms/<type>/params.py`** — names, types,
   docs, and boot-time `validate()`. Never enumerate knobs in prose docs;
   they go stale. The dataclass is the source of truth.
+- **The trading path reads Polymarket through `MarketDataGateway`,** never
+  `polymarket.api` directly — strategies take one in their constructor,
+  `pricing`/`settlement` take an optional `market_data=` defaulting to
+  `DEFAULT_MARKET_DATA`. That keeps the external dependency visible in a
+  signature and swappable without monkeypatching. `discovery/archive.py` and
+  `copy_trade/public_history.py` are deliberately outside it: separate jobs
+  that hit unwrapped endpoints and inject their own session.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only. Behavior changes are TOML edits.
 - **The params schemas carry no defaults.** Every field is required, so a
@@ -98,9 +105,10 @@ bot/
     pricing.py            # Current price + the slippage gate
     settlement.py         # Resolved-market sweep + canonical close price; refuses anything still trading
     lots.py               # Attributed lots — closing one source unwinds only its share
+  caches.py               # SeenRing (bounded dedupe) + TargetHoldingCache — in-memory, no I/O
   polymarket/             # Everything that talks to Polymarket
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
-    gateway.py            # The boundary strategies depend on instead of the transport
+    gateway.py            # MarketDataGateway — the injectable read boundary
   discord/                # Everything that talks to Discord
     webhook.py            # The fire-and-forget POST every sender shares
     alerts.py             # One message per trade event

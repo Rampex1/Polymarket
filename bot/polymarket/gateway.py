@@ -1,8 +1,10 @@
 """Single read-side gateway for Polymarket data.
 
-The existing ``bot.polymarket.api`` functions remain the transport implementation
-and public compatibility surface.  Strategies use this object instead, which
-makes their external dependency explicit and easy to replace in tests.
+``bot.polymarket.api`` is the transport; everything on the trading path —
+strategies and execution alike — reads through this object instead, so the
+external dependency is explicit in a signature and replaceable in tests.
+The archiver and the offline history importer bypass it deliberately: they
+are separate jobs that inject their own session and market lookups.
 """
 
 from typing import Optional
@@ -42,6 +44,10 @@ class MarketDataGateway:
 
     def wallet_value(self, address: str) -> Optional[float]:
         return api.fetch_wallet_value(address)
+
+    @staticmethod
+    def market_is_resolved(market: dict) -> bool:
+        return api.market_is_resolved(market)
 
     @staticmethod
     def market_outcome_is_final(market: dict) -> bool:

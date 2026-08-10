@@ -4,6 +4,11 @@ This is intentionally an offline job.  The strategy worker reads only the
 normalized SQLite rows, so a slow public endpoint can never delay copying a
 leader trade.
 
+It talks to `bot.polymarket.api` directly rather than through
+MarketDataGateway: it hits endpoints the gateway does not wrap, and it
+already injects its own `session` and `market_for_id` for testing. The
+gateway is the boundary for the *trading path* — workers and execution.
+
 The Data API provides public BUY fills for a wallet.  We retain a fill only
 after Gamma confirms the market has a final outcome, then label its token
 using the final outcome prices.

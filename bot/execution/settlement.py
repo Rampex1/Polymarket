@@ -9,7 +9,7 @@ import logging
 from typing import Iterator, Optional
 
 from ..domain.intents import SettleIntent
-from ..polymarket import api
+from ..polymarket import DEFAULT_MARKET_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,9 @@ def sweep_resolved(
         )
 
 
-def resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
+def resolve_close_price(
+    market_id: str, asset_id: str, market_data=None,
+) -> Optional[float]:
     """Final Gamma outcome data, else a binary CLOB price on a closed market.
 
     Returning None is always safe: the caller leaves the position open and a
@@ -49,8 +51,9 @@ def resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     live book, the on-chain position would drift from the DB, and the
     signal's outcome label is write-once.
     """
-    market = api.fetch_market_resolution(market_id)
-    if market and api.market_outcome_is_final(market):
+    md = market_data or DEFAULT_MARKET_DATA
+    market = md.market(market_id)
+    if market and md.market_outcome_is_final(market):
         outcome_price = gamma_outcome_price(market, asset_id)
         if outcome_price is not None:
             return outcome_price
@@ -59,10 +62,10 @@ def resolve_close_price(market_id: str, asset_id: str) -> Optional[float]:
     # once trading has STOPPED: a live favourite sits at 0.97 for weeks
     # without being decided, and `fetch_resolution_price` is the last trade
     # on the open book, not a resolution feed.
-    if not (market and api.market_is_resolved(market)):
+    if not (market and md.market_is_resolved(market)):
         return None
 
-    price = api.fetch_resolution_price(asset_id)
+    price = md.price(asset_id)
     if price is None:
         return None
     if price > 0.95:

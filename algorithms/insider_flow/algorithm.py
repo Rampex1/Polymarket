@@ -49,7 +49,7 @@ import time
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-from bot.polymarket import api
+from bot.caches import SeenRing
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import Intent, OpenIntent, SettleIntent
 from bot.domain.mode import Mode
@@ -88,7 +88,7 @@ class InsiderFlowAlgorithm(Algorithm):
 
         self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
-        self._seen = api.SeenRing(SEEN_IDS_MAX)
+        self._seen = SeenRing(SEEN_IDS_MAX)
         self._poll_count = 0
         # wallet → (expires_at, stats-dict-if-fresh-else-None).
         # Failed lookups are never cached.

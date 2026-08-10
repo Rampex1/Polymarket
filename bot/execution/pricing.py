@@ -5,20 +5,22 @@ from typing import Optional
 
 from py_clob_client_v2.client import ClobClient
 
-from ..polymarket import api
 from ..domain.records import Trade
+from ..polymarket import DEFAULT_MARKET_DATA
 
 logger = logging.getLogger(__name__)
 
 
-def current_price(trade: Trade, client: Optional[ClobClient]) -> Optional[float]:
+def current_price(
+    trade: Trade, client: Optional[ClobClient], market_data=None,
+) -> Optional[float]:
     """Return a current asset price, failing closed at the caller."""
     if client is not None:
         try:
             return float(client.get_last_trade_price(trade.asset_id).get("price"))
         except Exception as exc:
             logger.warning("Authenticated price fetch failed: %s", exc)
-    return api.fetch_resolution_price(trade.asset_id)
+    return (market_data or DEFAULT_MARKET_DATA).price(trade.asset_id)
 
 
 def slippage_ok(

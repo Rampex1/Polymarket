@@ -17,6 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .. import config
+from ..caches import SEEN_IDS_MAX, SeenRing, TargetHoldingCache  # noqa: F401  (re-exported for now)
 from ..domain.records import GlobalTrade, Trade
 
 logger = logging.getLogger(__name__)
@@ -64,36 +65,6 @@ SESSION = _build_session()
 # populates the cache (we already fetch it for tier sizing). On SELL, the
 # cached value IS the pre-sell holding — no reconstruction needed. The cache
 # is then decremented in place. Cache miss → safe fallback (full close).
-
-
-class TargetHoldingCache:
-    """Thread-safe in-memory cache of the target's last-observed holding.
-
-    One instance per algorithm — algorithms that copy a wallet hold this as
-    instance state so multiple copy-trade algorithms (different targets) can
-    run in parallel without sharing cache.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._data: dict[str, float] = {}
-
-    def set(self, market_id: str, value: float) -> None:
-        with self._lock:
-            self._data[market_id] = max(0.0, float(value))
-
-    def get(self, market_id: str) -> Optional[float]:
-        with self._lock:
-            return self._data.get(market_id)
-
-    def decrement(self, market_id: str, amount: float) -> None:
-        with self._lock:
-            if market_id in self._data:
-                self._data[market_id] = max(0.0, self._data[market_id] - float(amount))
-
-    def clear(self) -> None:
-        with self._lock:
-            self._data.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -609,34 +580,6 @@ def fetch_top_markets(
 
 # Bound on the dedupe ring. Sized for ~weeks of an active trader's history;
 # tune up if monitoring a high-frequency target.
-SEEN_IDS_MAX = 5000
-
-
-class SeenRing:
-    """Bounded LRU set of already-processed signal ids.
-
-    The shared dedupe primitive for every polling loop (copy_trade,
-    insider_flow, the utility `poll` below). Re-marking an id refreshes its
-    recency; past `maxlen` the least-recently-marked id falls off.
-    """
-
-    def __init__(self, maxlen: int = SEEN_IDS_MAX) -> None:
-        self._maxlen = maxlen
-        self._ids: collections.OrderedDict[str, None] = collections.OrderedDict()
-
-    def __contains__(self, key: str) -> bool:
-        return key in self._ids
-
-    def __len__(self) -> int:
-        return len(self._ids)
-
-    def mark(self, key: str) -> None:
-        if key in self._ids:
-            self._ids.move_to_end(key)
-        else:
-            self._ids[key] = None
-            if len(self._ids) > self._maxlen:
-                self._ids.popitem(last=False)
 
 
 def poll(

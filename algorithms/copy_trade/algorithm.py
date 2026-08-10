@@ -30,7 +30,7 @@ Close strategy:
 import logging
 from typing import Iterator, Optional
 
-from bot.polymarket import api
+from bot.caches import SeenRing, TargetHoldingCache
 from bot.domain.algorithm import Algorithm
 from bot.domain.intents import (
     CloseIntent,
@@ -91,8 +91,8 @@ class CopyTradeAlgorithm(Algorithm):
         self._address: str = ""
         self._ledger = None        # Ledger, set in setup()
         self._paper: bool = self.params.mode == Mode.PAPER
-        self._seen_ids = api.SeenRing(SEEN_IDS_MAX)
-        self.holding_cache = api.TargetHoldingCache()
+        self._seen_ids = SeenRing(SEEN_IDS_MAX)
+        self.holding_cache = TargetHoldingCache()
         self._poll_count = 0
 
     @property
