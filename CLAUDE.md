@@ -89,7 +89,7 @@ bot/
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
     gateway.py            # The boundary strategies depend on instead of the transport
   discord/                # Everything that talks to Discord
-    notifier.py           # Discord alerts, daily summary, heartbeat, weekly signal digest
+    notifier.py           # Discord alerts, on-demand summary, heartbeat, weekly signal digest
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
     discord_bot.py        # Slash-command bot (standalone daemon, its own process)
@@ -139,9 +139,10 @@ Failures only log; they never abort the worker.
 ### Profile-level threads (not per-worker)
 
 Started once by `main`, aggregating all algorithms in the profile:
-daily summary at midnight (profile summary webhook), liveness heartbeat
-(`HEARTBEAT_INTERVAL_HOURS`, default 6, `0` disables), and a weekly signal
-digest on Sundays.
+liveness heartbeat (`HEARTBEAT_INTERVAL_HOURS`, default 6, `0` disables)
+and a weekly signal digest on Sundays. There is **no scheduled portfolio
+summary** — it is sent only on `/summary`, deliberately, to keep the
+channel quiet.
 
 ### Trade lifecycle
 
@@ -255,7 +256,7 @@ crashes the bot stays up; if the bot crashes the workers keep trading.
 | `/status` | All algorithms: mode, exposure, today's P&L |
 | `/positions [algo]` | Open positions, optionally filtered by algo |
 | `/pnl` | Realized P&L + exposure per algo and combined |
-| `/summary` | Send the daily summary immediately |
+| `/summary` | Post a portfolio summary now — there is no scheduled one |
 | `/restart` | git pull + `setup_vm.sh` on the VPS — **admin permission required** |
 
 One-time setup: [discord.com/developers](https://discord.com/developers) →

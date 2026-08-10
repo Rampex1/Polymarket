@@ -6,7 +6,7 @@ Slash-command bot; one standalone daemon serves every profile.
 /status    — every algorithm by profile: mode, exposure, today's P&L
 /positions — open positions, optional algo name filter
 /pnl       — today's realized P&L + open exposure, combined
-/summary   — send the daily summaries to every profile channel now
+/summary   — post a portfolio summary to every profile channel (on demand only)
 /restart   — git pull + restart the VPS sessions (admin only)
 """
 
@@ -171,7 +171,7 @@ def _register_commands(client: _TradingClient) -> None:
 
     @client.tree.command(
         name="summary",
-        description="Send daily summaries to all profile summary channels right now",
+        description="Post a portfolio summary to all profile summary channels",
     )
     async def summary_cmd(interaction: discord.Interaction) -> None:
         sent = []

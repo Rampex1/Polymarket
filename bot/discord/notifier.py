@@ -306,79 +306,21 @@ def start_heartbeat(
     )
 
 
-# ---------------------------------------------------------------------------
-# Daily summary background thread
-# ---------------------------------------------------------------------------
-
-def start_daily_summary(
-    ledger,
-    paper: bool,
-    stop_event: threading.Event | None = None,
-    algo_name: str = "",
-    webhook_url: str = "",
-) -> None:
-    """Send a portfolio summary every day at midnight (config.TIMEZONE).
-
-    Per-algorithm: each worker thread starts its own daily-summary thread
-    against its own ledger. The `algo_name` tag disambiguates messages
-    when multiple algorithms are active.
-    """
-    def _loop() -> None:
-        while True:
-            wait_s = _seconds_until_midnight()
-            if stop_event is not None:
-                if stop_event.wait(wait_s):
-                    return
-            else:
-                threading.Event().wait(wait_s)
-            _send_daily_summary(ledger, paper=paper, algo_name=algo_name,
-                                webhook_url=webhook_url)
-
-    thread_name = f"daily-summary-{algo_name}" if algo_name else "daily-summary"
-    t = threading.Thread(target=_loop, daemon=True, name=thread_name)
-    t.start()
-    logger.info(
-        "%sDaily summary thread started (timezone=%s, mode=%s).",
-        _subtitle(algo_name) or "", config.TIMEZONE.key, "PAPER" if paper else "LIVE",
-    )
-
-
-def _send_daily_summary(ledger, paper: bool, algo_name: str = "", webhook_url: str = "") -> None:
-    positions = ledger.all_open(paper=paper)
-    exposure = ledger.total_exposure_usdc(paper=paper)
-    pnl = ledger.today_pnl_usdc(paper=paper)
-    sign = "+" if pnl >= 0 else ""
-    today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
-    mode_tag = "PAPER" if paper else "LIVE"
-
-    lines = [
-        f"📊 **Daily Summary · {today_str} · {mode_tag}**{_subtitle(algo_name)}",
-        f"> Realized P&L: **{sign}${pnl:.2f}**",
-        f"> Open: {len(positions)} positions · Exposure: **${exposure:.2f}**",
-    ]
-    if positions:
-        lines.append(">")
-        for p in positions:
-            lines.append(
-                f"> `{_esc(p.outcome)}` {p.shares:.1f}sh @ {p.avg_price:.3f} · "
-                f"{_esc(p.question[:50])}"
-            )
-    send("\n".join(lines), webhook_url=webhook_url)
-
-
 def send_profile_summary(
     algo_infos: list,
     webhook_url: str,
     profile: str = "",
 ) -> None:
-    """Profile-level daily summary — one message per profile to a shared channel.
+    """Profile-level summary — one message per profile to a shared channel.
+
+    Sent on demand only (`/summary`); there is no scheduled version.
 
     `algo_infos` is a list of (algo_name, paper) tuples. Fresh Ledger
     instances are created per algo so this can run from any thread without
     holding live ledger references.
 
     Layout:
-      📊 **Daily Summary · DATE · PROFILE**
+      📊 **Summary · DATE · PROFILE**
 
       **algo_name** · PAPER/LIVE
       > Realized P&L: +$X.XX
@@ -397,7 +339,7 @@ def send_profile_summary(
     today_str = datetime.now(tz=config.TIMEZONE).strftime("%Y-%m-%d")
     profile_label = _esc(profile) if profile else "all"
 
-    lines = [f"📊 **Daily Summary · {today_str} · {profile_label}**", ""]
+    lines = [f"📊 **Summary · {today_str} · {profile_label}**", ""]
 
     total_pnl = 0.0
     total_exposure = 0.0
@@ -434,15 +376,6 @@ def send_profile_summary(
     lines.append(f"> {pnl_emoji} P&L: **{sign}${total_pnl:.2f}** · Exposure: **${total_exposure:.2f}**")
 
     send("\n".join(lines), webhook_url=webhook_url)
-
-
-def _seconds_until_midnight() -> float:
-    """Time until the next midnight in the configured timezone."""
-    now = datetime.now(tz=config.TIMEZONE)
-    midnight = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    return max(1.0, (midnight - now).total_seconds())
 
 
 def _seconds_until_next_sunday() -> float:

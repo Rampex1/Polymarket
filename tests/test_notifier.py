@@ -210,30 +210,20 @@ def test_send_profile_summary_combined_total(fresh_db, monkeypatch):
     assert "$8.00" in body
 
 
-def test_seconds_until_midnight_differs_between_timezones(monkeypatch):
-    """Midnight is computed in config.TIMEZONE. To prove the timezone is
-    actually consulted (rather than ignored and falling through to local),
-    measure the seconds-until-midnight in two timezones whose UTC offsets
-    differ by 4+ hours and verify the values disagree by a corresponding
-    margin. A bug where TIMEZONE is silently dropped would return the same
-    value for both."""
+def test_weekly_schedule_differs_between_timezones(monkeypatch):
+    """The weekly digest schedules in config.TIMEZONE. To prove the timezone
+    is actually consulted (rather than ignored and falling through to local),
+    measure the wait in two zones whose UTC offsets differ by 13-14h and
+    verify they disagree. A bug dropping TIMEZONE returns the same value."""
     from bot import config
     from bot.discord import notifier
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("America/New_York"))
-    ny_secs = notifier._seconds_until_midnight()
+    ny_secs = notifier._seconds_until_next_sunday()
 
     monkeypatch.setattr(config, "TIMEZONE", ZoneInfo("Asia/Tokyo"))
-    tokyo_secs = notifier._seconds_until_midnight()
+    tokyo_secs = notifier._seconds_until_next_sunday()
 
-    assert 0 < ny_secs <= 24 * 3600
-    assert 0 < tokyo_secs <= 24 * 3600
-    # NY and Tokyo are 13–14h apart depending on DST. The seconds-until-
-    # midnight values must differ by *at least* a few hours, modulo the
-    # 24-hour wraparound. We compare the *minimum* circular distance.
-    diff = abs(ny_secs - tokyo_secs)
-    circular_diff = min(diff, 24 * 3600 - diff)
-    assert circular_diff > 3 * 3600, (
-        f"ny={ny_secs}, tokyo={tokyo_secs} — timezone appears not to "
-        f"affect the computation"
-    )
+    assert 0 < ny_secs <= 8 * 24 * 3600
+    assert 0 < tokyo_secs <= 8 * 24 * 3600
+    assert abs(ny_secs - tokyo_secs) > 3 * 3600

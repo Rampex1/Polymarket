@@ -9,7 +9,6 @@ runs as a fully independent worker:
   * Own `RiskManager(ledger, params)` — caps come from algo params.
   * Own polling cadence (`params.poll_interval_seconds`).
   * Own paper bankroll (per-algo row in `paper_account`).
-  * Own daily-summary thread tagged with algo name.
 
 Crashes in one algorithm do not affect the others.
 """
@@ -142,43 +141,6 @@ def _run_worker(
         logger.info("[%s] Stopped.", name)
 
 
-def _start_profile_summary(
-    algos,
-    stop_event: threading.Event,
-) -> None:
-    """Start a single daily summary thread for the whole profile.
-
-    Sends to the profile-level summary webhook (config/webhooks.toml) at
-    midnight. Creates fresh Ledger instances at send time so it
-    doesn't hold live references to worker state.
-    """
-    summary_webhook = config.resolve_summary_webhook(config.PROFILE)
-    if not summary_webhook:
-        logger.info(
-            "No summary webhook configured for profile '%s' — skipping daily summary.",
-            config.PROFILE,
-        )
-        return
-
-    algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in algos]
-
-    def _loop() -> None:
-        while True:
-            wait_s = notifier._seconds_until_midnight()
-            if stop_event.wait(wait_s):
-                return
-            try:
-                notifier.send_profile_summary(
-                    algo_infos, summary_webhook, config.PROFILE
-                )
-            except Exception:
-                logger.exception("Profile daily summary raised, continuing")
-
-    t = threading.Thread(target=_loop, daemon=True, name="daily-summary")
-    t.start()
-    logger.info("Profile daily summary thread started (profile=%s).", config.PROFILE)
-
-
 def _warn_orphaned_algos() -> None:
     """Warn if the DB holds open positions under names absent from the
     profile — catches accidental renames in config/<profile>.toml, which
@@ -232,7 +194,7 @@ def main() -> None:
         ", ".join(f"{a.params.name}({a.params.mode.value})" for a in ENABLED),
     )
 
-    # Single Event coordinates shutdown for every worker + daily summary.
+    # Single Event coordinates shutdown for every worker and shared thread.
     stop_event = threading.Event()
 
     def _shutdown(signum, frame):
@@ -256,10 +218,6 @@ def main() -> None:
     for w in workers:
         w.start()
 
-    # One profile-level daily summary thread — aggregates all algorithms
-    # into a single message sent to the profile's summary channel.
-    _start_profile_summary(ENABLED, stop_event)
-
     # Heartbeat — periodic liveness ping to the summary channel.
     summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook and config.HEARTBEAT_INTERVAL_HOURS > 0:
@@ -273,7 +231,6 @@ def main() -> None:
         )
 
     # Weekly signal performance digest — posts every Sunday to the same channel.
-    summary_webhook = config.resolve_summary_webhook(config.PROFILE)
     if summary_webhook:
         algo_infos = [(a.params.name, a.params.mode == Mode.PAPER) for a in ENABLED]
         notifier.start_weekly_digest(

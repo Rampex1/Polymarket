@@ -26,7 +26,7 @@ flowchart TB
         Runner["runner.dispatch<br/>risk caps · slippage gate"]
         Exec["live: CLOB order<br/>paper: simulated fill"]
         Recon["reconciliation<br/>live only, every 30 polls"]
-        Sched["daily summary · heartbeat<br/>weekly signal digest"]
+        Sched["heartbeat · weekly signal digest"]
     end
 
     subgraph archiver["discovery.archive — separate process"]
@@ -156,8 +156,9 @@ After a deploy, check: one startup line per algorithm in
 ## Monitoring
 
 Discord is the interface. Trade alerts post to a per-market thread as they
-happen; the profile's summary channel gets a daily summary at midnight, a
-liveness heartbeat every 6 hours, and a signal digest on Sundays.
+happen; the profile's summary channel gets a liveness heartbeat every 6
+hours, a signal digest on Sundays, and a portfolio summary whenever you ask
+for one with `/summary`.
 
 Slash commands — one bot, serving every profile:
 
@@ -166,5 +167,5 @@ Slash commands — one bot, serving every profile:
 | `/status` | Every algorithm, grouped by profile: paper/live mode, open position count, exposure, and today's P&L |
 | `/positions [algo]` | Each open position — outcome, shares, average price, cost, market — optionally filtered to algorithms whose name contains `algo` |
 | `/pnl` | Today's realized P&L and exposure per algorithm, plus a combined total across all of them |
-| `/summary` | Sends the daily summary to every profile's summary channel now, instead of waiting for midnight |
+| `/summary` | Posts a portfolio summary to every profile's summary channel — the only way it is sent; there is no scheduled one |
 | `/restart` | Runs `setup_vm.sh` on the VPS — pull, deps, profile validation, session restart. **Admin only**, and every session goes briefly offline |
