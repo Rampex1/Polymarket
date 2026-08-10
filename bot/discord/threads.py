@@ -21,6 +21,7 @@ import requests as http
 
 from .. import config
 from ..storage import db
+from .webhook import send
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,28 @@ def route(webhook_url: str, market_id: str, algo_name: str, paper: bool) -> str:
     if thread_id:
         return f"{webhook_url}?thread_id={thread_id}"
     return webhook_url
+
+
+def send_or_open(
+    text: str,
+    webhook_url: str,
+    market_id: str,
+    algo_name: str,
+    paper: bool,
+    thread_name: str,
+) -> None:
+    """Send into this market's thread, creating the thread if this is the first.
+
+    Every branch of the thread lifecycle lives here so callers never have to
+    know whether a thread exists, or that creating one needs a bot token.
+    """
+    if get(market_id, algo_name, paper):
+        send(text, webhook_url=route(webhook_url, market_id, algo_name, paper))
+    elif config.DISCORD_BOT_TOKEN and webhook_url:
+        open_thread(text, webhook_url, market_id, algo_name, paper, thread_name)
+    else:
+        # No bot token, or no webhook: plain send, no thread.
+        send(text, webhook_url=webhook_url)
 
 
 # ---------------------------------------------------------------------------

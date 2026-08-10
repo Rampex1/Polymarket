@@ -89,12 +89,13 @@ bot/
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
     gateway.py            # The boundary strategies depend on instead of the transport
   discord/                # Everything that talks to Discord
-    webhook.py            # The fire-and-forget POST both senders share
+    webhook.py            # The fire-and-forget POST every sender shares
     alerts.py             # One message per trade event
     heartbeat.py          # The only scheduled message — liveness ping, no portfolio data
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
-    threads.py            # Thread registry — (market_id, algo, paper) → thread_id, so a market's updates nest
-    discord_bot.py        # Slash-command bot (standalone daemon, its own process)
+    threads.py            # Thread registry + lifecycle — (market_id, algo, paper) → thread_id, so a market's updates nest
+    views.py              # What each slash command says — one pure builder per command
+    discord_bot.py        # Slash-command wiring (standalone daemon, its own process)
   logs/                   # Local log sinks
     setup.py              # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
 algorithms/

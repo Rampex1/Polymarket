@@ -8,7 +8,6 @@ one market nest into that market's thread.
 
 import logging
 
-from .. import config
 from . import threads
 from ..domain.records import Trade
 from .messages import (
@@ -27,6 +26,16 @@ logger = logging.getLogger(__name__)
 # Each helper accepts an optional `algo_name` so the message can be
 # disambiguated when multiple algorithms run side-by-side.
 # ---------------------------------------------------------------------------
+
+
+def _post(text: str, market_id: str, algo_name: str, webhook_url: str,
+          paper: bool) -> None:
+    """Append the market link and route into that market's thread."""
+    url = _market_url(market_id)
+    send(
+        text + (f"\n{url}" if url else ""),
+        webhook_url=threads.route(webhook_url, market_id, algo_name, paper),
+    )
 
 
 def on_signal(intent, algo_name: str = "", webhook_url: str = "",
@@ -60,11 +69,7 @@ def on_signal(intent, algo_name: str = "", webhook_url: str = "",
     if feature_summary:
         lines.append(f"↳ {feature_summary}")
     market_id = getattr(intent, "market_id", "") or ""
-    url = _market_url(market_id)
-    if url:
-        lines.append(url)
-    routed = threads.route(webhook_url, market_id, algo_name, paper)
-    send("\n".join(lines), webhook_url=routed)
+    _post("\n".join(lines), market_id, algo_name, webhook_url, paper)
 
 
 def on_trade_detected(trade: Trade, algo_name: str = "", webhook_url: str = "",
@@ -72,15 +77,12 @@ def on_trade_detected(trade: Trade, algo_name: str = "", webhook_url: str = "",
     """Legacy entry point — kept for the wallet-watching CopyTrade flow that
     classifies a Trade before issuing an Intent. New algorithms should call
     `on_signal` instead."""
-    url = _market_url(trade.market_id)
-    routed = threads.route(webhook_url, trade.market_id, algo_name, paper)
-    send(
+    _post(
         f"📥 **SIGNAL**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
         f"{_esc(trade.action)} `{_esc(trade.outcome)}`  "
-        f"${trade.size_usdc:,.0f} @ **{trade.price:.3f}**"
-        + (f"\n{url}" if url else ""),
-        webhook_url=routed,
+        f"${trade.size_usdc:,.0f} @ **{trade.price:.3f}**",
+        trade.market_id, algo_name, webhook_url, paper,
     )
 
 
@@ -102,31 +104,20 @@ def on_buy_executed(
         f"@ **{fill_price:.3f}**{slip}"
         + (f"\n{url}" if url else "")
     )
-    existing_thread = threads.get(trade.market_id, algo_name, paper)
-    if existing_thread:
-        # Top-up: route into the existing thread
-        send(text, webhook_url=f"{webhook_url}?thread_id={existing_thread}")
-    elif config.DISCORD_BOT_TOKEN and webhook_url:
-        # First fill and bot token available: post with wait=true and open a thread
-        threads.open_thread(
-            text, webhook_url, trade.market_id, algo_name, paper,
-            thread_name=(trade.question or trade.market_id)[:100],
-        )
-    else:
-        # No bot token or no webhook: plain send, no thread
-        send(text, webhook_url=webhook_url)
+    # The first fill is what opens the market's thread; later top-ups join it.
+    threads.send_or_open(
+        text, webhook_url, trade.market_id, algo_name, paper,
+        thread_name=(trade.question or trade.market_id)[:100],
+    )
 
 
 def on_buy_failed(trade: Trade, reason: str, algo_name: str = "", webhook_url: str = "",
                   paper: bool = False) -> None:
-    url = _market_url(trade.market_id)
-    routed = threads.route(webhook_url, trade.market_id, algo_name, paper)
-    send(
+    _post(
         f"❌ **BUY failed**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
-        f"{_esc(reason)}"
-        + (f"\n{url}" if url else ""),
-        webhook_url=routed,
+        f"{_esc(reason)}",
+        trade.market_id, algo_name, webhook_url, paper,
     )
 
 
@@ -136,28 +127,22 @@ def on_sell_executed(
 ) -> None:
     tag = "📄 **PAPER SELL**" if paper else "✅ **SELL**"
     sign = "+" if pnl >= 0 else ""
-    url = _market_url(trade.market_id)
-    routed = threads.route(webhook_url, trade.market_id, algo_name, paper)
-    send(
+    _post(
         f"{tag}{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
         f"`{_esc(trade.outcome)}`  {shares:.2f} shares @ **{fill_price:.3f}** · "
-        f"P&L **{sign}${pnl:.2f}**"
-        + (f"\n{url}" if url else ""),
-        webhook_url=routed,
+        f"P&L **{sign}${pnl:.2f}**",
+        trade.market_id, algo_name, webhook_url, paper,
     )
 
 
 def on_risk_blocked(reason: str, trade: Trade, algo_name: str = "", webhook_url: str = "",
                     paper: bool = False) -> None:
-    url = _market_url(trade.market_id)
-    routed = threads.route(webhook_url, trade.market_id, algo_name, paper)
-    send(
+    _post(
         f"⚠️ **Risk block**{_subtitle(algo_name)}\n"
         f"{_q(trade.question)}\n"
-        f"{_esc(reason)}"
-        + (f"\n{url}" if url else ""),
-        webhook_url=routed,
+        f"{_esc(reason)}",
+        trade.market_id, algo_name, webhook_url, paper,
     )
 
 
@@ -177,15 +162,12 @@ def on_settle_executed(
     sign = "+" if pnl >= 0 else ""
     result = "WIN" if close_price > 0.5 else "LOSS"
     tag = "📄 **PAPER SETTLE**" if paper else ("✅ **WIN**" if result == "WIN" else "❌ **LOSS**")
-    url = _market_url(market_id)
-    routed = threads.route(webhook_url, market_id, algo_name, paper)
-    send(
+    _post(
         f"{tag}{_subtitle(algo_name)}\n"
         f"**{_esc(question[:80])}**\n"
         f"`{_esc(outcome)}` resolved | {shares:.2f} shares "
-        f"→ **${proceeds:.2f}** | P&L **{sign}${pnl:.2f}**"
-        + (f"\n{url}" if url else ""),
-        webhook_url=routed,
+        f"→ **${proceeds:.2f}** | P&L **{sign}${pnl:.2f}**",
+        market_id, algo_name, webhook_url, paper,
     )
 
 

@@ -18,9 +18,11 @@ HOOK = "https://discord.com/api/webhooks/123/abc"
 @pytest.fixture
 def capture_send(monkeypatch):
     """Capture every Discord webhook POST body so we can assert on it."""
-    from bot.discord import alerts, webhook
+    from bot.discord import threads, webhook
 
-    monkeypatch.setattr(alerts.config, "DISCORD_BOT_TOKEN", "")
+    # No bot token -> threads.send_or_open takes the plain-send branch, so
+    # every alert lands in the captured list rather than trying to open one.
+    monkeypatch.setattr(threads.config, "DISCORD_BOT_TOKEN", "")
 
     sent = []
 
@@ -153,7 +155,7 @@ def test_skip_when_webhook_missing(monkeypatch):
 
 def test_summary_text_format(fresh_db):
     """/summary includes per-algo blocks and a combined total."""
-    from bot.discord import discord_bot
+    from bot.discord import views
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -163,7 +165,7 @@ def test_summary_text_format(fresh_db):
     trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.40)
     t.record_buy(trade, spent_usdc=2.0, shares=5.0, fill_price=0.40, paper=True)
 
-    body = discord_bot._summary_text([("a1", True)], profile="experimental")
+    body = views._summary_text([("a1", True)], profile="experimental")
 
     assert "experimental" in body
     assert "**a1**" in body
@@ -184,7 +186,7 @@ def test_send_skips_when_no_webhook(monkeypatch):
 
 def test_summary_text_combined_total(fresh_db):
     """Combined P&L/exposure sums across all algos."""
-    from bot.discord import discord_bot
+    from bot.discord import views
     from bot.storage.ledger import Ledger
     from tests.conftest import make_trade
 
@@ -194,7 +196,7 @@ def test_summary_text_combined_total(fresh_db):
         trade = make_trade(action="BUY", market_id="m1", outcome="YES", price=0.50)
         t.record_buy(trade, spent_usdc=usdc, shares=usdc * 2, fill_price=0.50, paper=True)
 
-    body = discord_bot._summary_text([("b1", True), ("b2", True)])
+    body = views._summary_text([("b1", True), ("b2", True)])
 
     assert "2 algorithms" in body
     assert "**b1**" in body
