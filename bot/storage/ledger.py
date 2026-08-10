@@ -38,12 +38,12 @@ class Ledger:
     def init_paper_balance(self, starting: float) -> None:
         """Seed balance only on first run; subsequent calls are no-ops."""
         conn = db.get()
-        conn.execute(
-            "INSERT OR IGNORE INTO paper_account (algo, balance, updated_at) "
-            "VALUES (?, ?, ?)",
-            (self.algo, starting, int(time.time())),
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_account (algo, balance, updated_at) "
+                "VALUES (?, ?, ?)",
+                (self.algo, starting, int(time.time())),
+            )
 
     def paper_balance(self) -> float:
         row = db.get().execute(
@@ -51,22 +51,20 @@ class Ledger:
         ).fetchone()
         return float(row[0]) if row else 0.0
 
-    def _adjust_paper_balance(self, delta: float) -> None:
-        """Atomically adjust + commit the paper balance.
+    def adjust_paper_balance(self, delta: float) -> None:
+        """Move the paper balance by `delta`.
 
-        Standalone callers (tests, scripts) get auto-commit behavior. Inside
-        record_buy/record_sell we do NOT use this — we inline the balance
-        UPDATE into the same transaction as the position/trade_log writes,
-        so the whole record is atomic. Splitting into two commits would
-        risk a half-recorded trade on crash.
+        Not used when recording a trade — record_buy/record_sell inline the
+        same UPDATE so position, trade_log, and balance land in one
+        transaction. This is for setting up a balance directly.
         """
         conn = db.get()
-        conn.execute(
-            "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
-            "WHERE algo=?",
-            (delta, int(time.time()), self.algo),
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
+                "WHERE algo=?",
+                (delta, int(time.time()), self.algo),
+            )
 
     # ── Trade recording ──────────────────────────────────────────────────────
 
@@ -98,55 +96,56 @@ class Ledger:
         existing = self.get(trade.market_id, paper)
         now = int(time.time())
 
-        if existing:
-            new_shares = existing.shares + shares
-            new_cost = existing.total_cost_usdc + spent_usdc
-            new_avg = new_cost / new_shares if new_shares > 0 else 0
-            conn.execute(
-                """UPDATE positions
-                   SET shares=?, avg_price=?, total_cost_usdc=?, updated_at=?,
-                       asset_id=?, outcome=?
-                   WHERE market_id=? AND paper=? AND algo=?""",
-                (
-                    new_shares, new_avg, new_cost, now,
-                    trade.asset_id, trade.outcome,
-                    trade.market_id, int(paper), self.algo,
-                ),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO positions
-                   (market_id, paper, algo, asset_id, question, outcome,
-                    shares, avg_price, total_cost_usdc, opened_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    trade.market_id, int(paper), self.algo, trade.asset_id,
-                    trade.question, trade.outcome, shares, fill_price,
-                    spent_usdc, now, now,
-                ),
-            )
+        # One transaction: position, trade_log, and balance land together or
+        # not at all. `with conn` rolls back on any exception — without it
+        # the statements stay pending on a reused connection and the next
+        # trade's commit flushes a half-recorded one.
+        with conn:
+            if existing:
+                new_shares = existing.shares + shares
+                new_cost = existing.total_cost_usdc + spent_usdc
+                new_avg = new_cost / new_shares if new_shares > 0 else 0
+                conn.execute(
+                    """UPDATE positions
+                       SET shares=?, avg_price=?, total_cost_usdc=?, updated_at=?,
+                           asset_id=?, outcome=?
+                       WHERE market_id=? AND paper=? AND algo=?""",
+                    (
+                        new_shares, new_avg, new_cost, now,
+                        trade.asset_id, trade.outcome,
+                        trade.market_id, int(paper), self.algo,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO positions
+                       (market_id, paper, algo, asset_id, question, outcome,
+                        shares, avg_price, total_cost_usdc, opened_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        trade.market_id, int(paper), self.algo, trade.asset_id,
+                        trade.question, trade.outcome, shares, fill_price,
+                        spent_usdc, now, now,
+                    ),
+                )
 
-        conn.execute(
-            """INSERT INTO trade_log
-               (market_id, asset_id, action, outcome, question, shares, price,
-                usdc_amount, fee_usdc, paper, algo, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                trade.market_id, trade.asset_id, "BUY", trade.outcome, trade.question,
-                shares, fill_price, spent_usdc, fee_usdc,
-                int(paper), self.algo, now,
-            ),
-        )
-        if paper:
-            # Inline the balance update so position + trade_log + balance
-            # all land in ONE transaction. Splitting would leave a half-
-            # recorded trade if the process dies mid-flight.
             conn.execute(
-                "UPDATE paper_account SET balance = balance - ?, updated_at = ? "
-                "WHERE algo=?",
-                (spent_usdc + fee_usdc, now, self.algo),
+                """INSERT INTO trade_log
+                   (market_id, asset_id, action, outcome, question, shares, price,
+                    usdc_amount, fee_usdc, paper, algo, ts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    trade.market_id, trade.asset_id, "BUY", trade.outcome, trade.question,
+                    shares, fill_price, spent_usdc, fee_usdc,
+                    int(paper), self.algo, now,
+                ),
             )
-        conn.commit()
+            if paper:
+                conn.execute(
+                    "UPDATE paper_account SET balance = balance - ?, updated_at = ? "
+                    "WHERE algo=?",
+                    (spent_usdc + fee_usdc, now, self.algo),
+                )
         logger.info(
             "%sBUY recorded: %.2f shares @ %.3f ($%.2f, fee $%.2f) | %s",
             "PAPER " if paper else "",
@@ -172,65 +171,74 @@ class Ledger:
         realized_pnl = 0.0
         now = int(time.time())
 
-        if existing and existing.shares > 0:
-            cost_basis_sold = existing.avg_price * shares
-            # Net proceeds (proceeds minus fee) minus cost basis = realized P&L.
-            realized_pnl = (proceeds_usdc - fee_usdc) - cost_basis_sold
+        # One transaction — see record_buy for why.
+        with conn:
+            if existing and existing.shares > 0:
+                cost_basis_sold = existing.avg_price * shares
+                # Net proceeds (proceeds minus fee) minus cost basis = realized P&L.
+                realized_pnl = (proceeds_usdc - fee_usdc) - cost_basis_sold
 
-            new_shares = max(existing.shares - shares, 0.0)
-            # Total cost scales linearly; avg_price is preserved.
-            new_cost = new_shares * existing.avg_price
+                new_shares = max(existing.shares - shares, 0.0)
+                # Total cost scales linearly; avg_price is preserved.
+                new_cost = new_shares * existing.avg_price
 
-            if new_shares <= 0.0001:
-                conn.execute(
-                    "DELETE FROM positions WHERE market_id=? AND paper=? AND algo=?",
-                    (trade.market_id, int(paper), self.algo),
-                )
-            else:
-                conn.execute(
-                    """UPDATE positions
-                       SET shares=?, total_cost_usdc=?, updated_at=?
-                       WHERE market_id=? AND paper=? AND algo=?""",
-                    (
-                        new_shares, new_cost, now,
-                        trade.market_id, int(paper), self.algo,
-                    ),
-                )
+                if new_shares <= 0.0001:
+                    conn.execute(
+                        "DELETE FROM positions WHERE market_id=? AND paper=? AND algo=?",
+                        (trade.market_id, int(paper), self.algo),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE positions
+                           SET shares=?, total_cost_usdc=?, updated_at=?
+                           WHERE market_id=? AND paper=? AND algo=?""",
+                        (
+                            new_shares, new_cost, now,
+                            trade.market_id, int(paper), self.algo,
+                        ),
+                    )
 
-        conn.execute(
-            """INSERT INTO trade_log
-               (market_id, asset_id, action, outcome, question, shares, price,
-                usdc_amount, fee_usdc, realized_pnl, paper, algo, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                trade.market_id, trade.asset_id, trade.action, trade.outcome,
-                trade.question, shares, fill_price, proceeds_usdc, fee_usdc,
-                realized_pnl, int(paper), self.algo, now,
-            ),
-        )
-
-        today = date.today().isoformat()
-        conn.execute(
-            """INSERT INTO daily_stats (date, algo, realized_pnl_usdc)
-               VALUES (?, ?, ?)
-               ON CONFLICT(date, algo) DO UPDATE SET
-                 realized_pnl_usdc = realized_pnl_usdc + excluded.realized_pnl_usdc""",
-            (today, self.algo, realized_pnl),
-        )
-        if paper:
-            # Inline for atomicity — see record_buy for the rationale.
             conn.execute(
-                "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
-                "WHERE algo=?",
-                (proceeds_usdc - fee_usdc, now, self.algo),
+                """INSERT INTO trade_log
+                   (market_id, asset_id, action, outcome, question, shares, price,
+                    usdc_amount, fee_usdc, realized_pnl, paper, algo, ts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    trade.market_id, trade.asset_id, trade.action, trade.outcome,
+                    trade.question, shares, fill_price, proceeds_usdc, fee_usdc,
+                    realized_pnl, int(paper), self.algo, now,
+                ),
             )
-        conn.commit()
+
+            today = date.today().isoformat()
+            conn.execute(
+                """INSERT INTO daily_stats (date, algo, realized_pnl_usdc)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(date, algo) DO UPDATE SET
+                     realized_pnl_usdc = realized_pnl_usdc + excluded.realized_pnl_usdc""",
+                (today, self.algo, realized_pnl),
+            )
+            if paper:
+                conn.execute(
+                    "UPDATE paper_account SET balance = balance + ?, updated_at = ? "
+                    "WHERE algo=?",
+                    (proceeds_usdc - fee_usdc, now, self.algo),
+                )
         logger.info(
             "%s%s recorded: %.2f shares @ %.3f | P&L $%.2f | %s",
             "PAPER " if paper else "",
             trade.action,
             shares, fill_price, realized_pnl, trade.question[:50],
         )
+
+    @staticmethod
+    def _paper_filter(paper: Optional[bool]) -> tuple[str, tuple]:
+        """SQL fragment + params for an optional paper/live filter.
+
+        `paper=None` means "both pools" — used by the Discord commands, which
+        report across modes.
+        """
+        return ("", ()) if paper is None else (" AND paper=?", (int(paper),))
 
     def get(self, market_id: str, paper: bool = False) -> Optional["Position"]:
         row = db.get().execute(
@@ -240,53 +248,32 @@ class Ledger:
         return _row_to_position(row) if row else None
 
     def all_open(self, paper: Optional[bool] = None) -> list["Position"]:
-        conn = db.get()
-        if paper is None:
-            rows = conn.execute(
-                "SELECT * FROM positions WHERE shares > 0 AND algo=? "
-                "ORDER BY opened_at DESC",
-                (self.algo,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM positions WHERE shares > 0 AND paper=? AND algo=? "
-                "ORDER BY opened_at DESC",
-                (int(paper), self.algo),
-            ).fetchall()
+        where, args = self._paper_filter(paper)
+        rows = db.get().execute(
+            f"SELECT * FROM positions WHERE shares > 0 AND algo=?{where} "
+            "ORDER BY opened_at DESC",
+            (self.algo, *args),
+        ).fetchall()
         return [_row_to_position(r) for r in rows]
 
     def total_exposure_usdc(self, paper: Optional[bool] = None) -> float:
-        conn = db.get()
-        if paper is None:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions "
-                "WHERE shares > 0 AND algo=?",
-                (self.algo,),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions "
-                "WHERE shares > 0 AND paper=? AND algo=?",
-                (int(paper), self.algo),
-            ).fetchone()
+        where, args = self._paper_filter(paper)
+        row = db.get().execute(
+            "SELECT COALESCE(SUM(total_cost_usdc), 0) FROM positions "
+            f"WHERE shares > 0 AND algo=?{where}",
+            (self.algo, *args),
+        ).fetchone()
         return float(row[0])
 
     def today_pnl_usdc(self, paper: Optional[bool] = None) -> float:
         """Realized P&L for today. Filter by paper-flag if provided."""
         today = date.today().isoformat()
-        conn = db.get()
-        if paper is None:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
-                "WHERE algo=? AND date(ts,'unixepoch','localtime') = ?",
-                (self.algo, today),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
-                "WHERE paper=? AND algo=? AND date(ts,'unixepoch','localtime') = ?",
-                (int(paper), self.algo, today),
-            ).fetchone()
+        where, args = self._paper_filter(paper)
+        row = db.get().execute(
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_log "
+            f"WHERE algo=?{where} AND date(ts,'unixepoch','localtime') = ?",
+            (self.algo, *args, today),
+        ).fetchone()
         return float(row[0]) if row else 0.0
 
     def print_summary(self, paper: Optional[bool] = None) -> None:

@@ -87,8 +87,7 @@ def test_buy_blocked_by_total_exposure(risk, ledger, default_params, monkeypatch
 
 def test_buy_blocked_by_paper_balance(risk, default_config):
     t = make_trade(action="BUY")
-    # _adjust_paper_balance now commits internally — no manual commit needed.
-    risk.ledger._adjust_paper_balance(-(10_000.0 - 5.0))   # leave 5
+    risk.ledger.adjust_paper_balance(-(10_000.0 - 5.0))   # leave 5
     ok, reason = risk.check(t, 6.0, paper=True)
     assert not ok
     assert "Insufficient paper balance" in reason
@@ -97,7 +96,7 @@ def test_buy_blocked_by_paper_balance(risk, default_config):
 def test_paper_balance_not_checked_in_live(risk, default_config):
     """Live mode delegates balance enforcement to the exchange."""
     t = make_trade(action="BUY")
-    risk.ledger._adjust_paper_balance(-10_000.0)
+    risk.ledger.adjust_paper_balance(-10_000.0)
     ok, _ = risk.check(t, 5.0, paper=False)
     assert ok
 

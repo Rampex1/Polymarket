@@ -47,33 +47,34 @@ def record(
         # value must degrade to a string, never to a lost row.
         features_json = json.dumps(getattr(intent, "features", {}) or {}, default=str)
 
-        db.get().execute(
-            """
-            INSERT INTO signals
-                (signal_id, algo, paper, ts, market_id, asset_id, question,
-                 signal_price, usdc_amount, features, executed, skip_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(signal_id, algo) DO UPDATE SET
-                executed = excluded.executed,
-                skip_reason = excluded.skip_reason,
-                features = excluded.features
-            """,
-            (
-                signal_id,
-                algo_name,
-                1 if paper else 0,
-                int(time.time()),
-                getattr(intent, "market_id", ""),
-                getattr(intent, "asset_id", "") or "",
-                getattr(intent, "question", ""),
-                float(getattr(intent, "signal_price", 0.0) or 0.0),
-                float(getattr(intent, "usdc_amount", 0.0) or 0.0),
-                features_json,
-                1 if executed else 0,
-                skip_reason,
-            ),
-        )
-        db.get().commit()
+        conn = db.get()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO signals
+                    (signal_id, algo, paper, ts, market_id, asset_id, question,
+                     signal_price, usdc_amount, features, executed, skip_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(signal_id, algo) DO UPDATE SET
+                    executed = excluded.executed,
+                    skip_reason = excluded.skip_reason,
+                    features = excluded.features
+                """,
+                (
+                    signal_id,
+                    algo_name,
+                    1 if paper else 0,
+                    int(time.time()),
+                    getattr(intent, "market_id", ""),
+                    getattr(intent, "asset_id", "") or "",
+                    getattr(intent, "question", ""),
+                    float(getattr(intent, "signal_price", 0.0) or 0.0),
+                    float(getattr(intent, "usdc_amount", 0.0) or 0.0),
+                    features_json,
+                    1 if executed else 0,
+                    skip_reason,
+                ),
+            )
     except Exception:
         logger.exception("[%s] Failed to record signal — continuing", algo_name)
 
@@ -91,22 +92,23 @@ def label_outcomes(
     or replay can't overwrite the original label. Returns rows labeled.
     """
     try:
-        cur = db.get().execute(
-            """
-            UPDATE signals
-            SET outcome = ?, outcome_ts = ?, pnl_usdc = ?
-            WHERE algo = ? AND market_id = ? AND paper = ? AND outcome IS NULL
-            """,
-            (
-                float(close_price),
-                int(time.time()),
-                float(pnl_usdc),
-                algo_name,
-                market_id,
-                1 if paper else 0,
-            ),
-        )
-        db.get().commit()
+        conn = db.get()
+        with conn:
+            cur = conn.execute(
+                """
+                UPDATE signals
+                SET outcome = ?, outcome_ts = ?, pnl_usdc = ?
+                WHERE algo = ? AND market_id = ? AND paper = ? AND outcome IS NULL
+                """,
+                (
+                    float(close_price),
+                    int(time.time()),
+                    float(pnl_usdc),
+                    algo_name,
+                    market_id,
+                    1 if paper else 0,
+                ),
+            )
         return cur.rowcount
     except Exception:
         logger.exception("[%s] Failed to label signal outcomes — continuing", algo_name)

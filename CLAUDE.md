@@ -61,6 +61,13 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
 - **The loader fails fast** on unknown keys, omitted keys, duplicate names,
   bad modes, and `validate()` violations. A typo in a TOML key must crash, never silently
   no-op — preserve that property when touching `profile_loader.py`.
+- **Every ledger write goes inside `with conn:`.** Recording a trade touches
+  positions, trade_log, and (in paper) paper_account; they must land together.
+  The connection is thread-local and reused, and `main.py`'s poll loop
+  swallows exceptions and keeps running — so without the context manager an
+  exception mid-write leaves statements pending and the *next* trade's commit
+  flushes a half-recorded one (a position with no trade_log row and no cash
+  debit). `with conn` rolls back instead. Never add a bare `conn.commit()`.
 - **Both order legs must poll a `delayed` response.** The CLOB matching
   engine is async: a small order returns `status='delayed'` with empty
   amounts and resolves seconds later. Parsing that as-is reports a no-fill —

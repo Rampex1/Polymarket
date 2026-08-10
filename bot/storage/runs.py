@@ -40,11 +40,11 @@ def record_run(params, profile: str) -> None:
     try:
         mode = getattr(params.mode, "value", str(params.mode))
         conn = db.get()
-        conn.execute(
-            "INSERT INTO runs (algo, mode, profile, git_sha, params_json, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (params.name, mode, profile, _git_sha(), _params_json(params), int(time.time())),
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "INSERT INTO runs (algo, mode, profile, git_sha, params_json, started_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (params.name, mode, profile, _git_sha(), _params_json(params), int(time.time())),
+            )
     except Exception:
         logger.exception("[%s] failed to record run row (continuing)", getattr(params, "name", "?"))
