@@ -1,14 +1,10 @@
 """
-Fetcher tests.
+Polymarket API tests.
 
-The HTTP boundary (requests.Session) is stubbed — this is the only place
-in the codebase where we have to stub because we obviously can't make
-real Polymarket API calls in tests. Everything else (parsing, dedupe,
-poll loop) runs the real code paths.
+The HTTP boundary (requests.Session) is stubbed — we obviously can't make
+real Polymarket calls in tests. Everything else (parsing, retry semantics,
+finality predicates) runs the real code paths.
 """
-
-import threading
-
 
 
 # ---------------------------------------------------------------------------
@@ -117,79 +113,6 @@ def test_parse_trade_malformed_returns_none():
     assert _parse_trade({"type": "TRADE", "side": "BUY"}) is None
 
 
-# ---------------------------------------------------------------------------
-# Bounded seen_ids LRU
-# ---------------------------------------------------------------------------
-
-
-def test_poll_loop_dedupes_each_trade_exactly_once(monkeypatch):
-    """Re-fetching the same trades must not double-process."""
-    from bot.polymarket import api
-
-    next_id = [0]
-
-    def fake_fetch(address, limit=100):
-        new = next_id[0]
-        next_id[0] += 1
-        return [_fake_trade(f"id{i}") for i in range(max(0, new - 3), new + 1)]
-
-    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
-
-    stop = threading.Event()
-    seen_handled = []
-
-    def on_trade(t):
-        seen_handled.append(t.id)
-        if len(seen_handled) >= 8:
-            stop.set()
-
-    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
-                 poll_interval_seconds=0)
-
-    assert len(seen_handled) == len(set(seen_handled))
-    assert len(seen_handled) >= 8
-
-
-def test_seen_ids_lru_actually_evicts_oldest(monkeypatch):
-    """Stronger than the dedupe test: forces the LRU to overflow with brand-
-    new IDs every cycle and verifies that an *old* ID re-appearing AFTER the
-    set has rolled past it triggers re-execution (proving the oldest entries
-    are actually being evicted, not just held forever)."""
-    from bot.polymarket import api
-
-    # Tight cap so we can prove eviction in a few iterations.
-    monkeypatch.setattr(api, "SEEN_IDS_MAX", 3)
-
-    # Seed phase: poll 1 returns id0; then we'll force-evict id0 by feeding
-    # 3 distinct new IDs (so the ring is full of ids 1,2,3) and re-present id0.
-    timeline = [
-        [_fake_trade("id0")],         # seed at startup
-        [_fake_trade("id1")],         # poll 1
-        [_fake_trade("id2")],         # poll 2
-        [_fake_trade("id3")],         # poll 3 — ring is now {id1,id2,id3}; id0 evicted
-        [_fake_trade("id0")],         # poll 4 — should re-execute id0
-    ]
-
-    def fake_fetch(address, limit=100):
-        return timeline.pop(0) if timeline else []
-
-    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
-
-    stop = threading.Event()
-    handled = []
-
-    def on_trade(t):
-        handled.append(t.id)
-        if not timeline:
-            stop.set()
-
-    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
-                 poll_interval_seconds=0)
-
-    # id0 was seeded (not handled), then evicted, then handled on re-appearance.
-    assert "id0" in handled, "id0 should have been re-executed after eviction"
-
-
 def _fake_trade(tx_id):
     from bot.domain.records import Trade
     return Trade(
@@ -201,43 +124,6 @@ def _fake_trade(tx_id):
 
 # ---------------------------------------------------------------------------
 # Poll loop tolerates handler exceptions
-# ---------------------------------------------------------------------------
-
-
-def test_poll_loop_swallows_handler_exceptions(monkeypatch):
-    """One bad on_trade call must not kill the loop."""
-    from bot.polymarket import api
-
-    counter = {"n": 0}
-
-    def fake_fetch(address, limit=100):
-        counter["n"] += 1
-        # Always returns ONE new trade per cycle.
-        return [_fake_trade(f"id{counter['n']}")]
-
-    monkeypatch.setattr(api, "fetch_recent_trades", fake_fetch)
-
-    stop = threading.Event()
-    invocations = []
-
-    def on_trade(t):
-        invocations.append(t.id)
-        if len(invocations) == 1:
-            raise RuntimeError("boom")
-        if len(invocations) >= 3:
-            stop.set()
-
-    # Should not raise.
-    api.poll("0xtarget", on_trade=on_trade, stop_event=stop,
-                 poll_interval_seconds=0)
-    assert len(invocations) >= 3
-
-
-# ---------------------------------------------------------------------------
-# fetch_target_position_value — retry-until-consistent semantics
-# ---------------------------------------------------------------------------
-
-
 def test_fetch_target_position_retries_until_expected_min(monkeypatch):
     """When expected_min is set, the function should re-query if the API
     hasn't caught up yet (eventual consistency)."""

@@ -5,19 +5,16 @@ Polymarket HTTP reads — wallet lookup, trades, positions, prices, resolution.
 All requests share one retrying session so transient 429/5xx don't drop trades.
 """
 
-import collections
 import json
 import logging
-import threading
 import time
-from typing import Callable, Optional
+from typing import Optional
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .. import config
-from ..caches import SEEN_IDS_MAX, SeenRing, TargetHoldingCache  # noqa: F401  (re-exported for now)
 from ..domain.records import GlobalTrade, Trade
 
 logger = logging.getLogger(__name__)
@@ -573,59 +570,3 @@ def fetch_top_markets(
         logger.warning("Could not fetch top markets: %s", e)
         return []
 
-
-# ---------------------------------------------------------------------------
-# Polling loop
-# ---------------------------------------------------------------------------
-
-# Bound on the dedupe ring. Sized for ~weeks of an active trader's history;
-# tune up if monitoring a high-frequency target.
-
-
-def poll(
-    address: str,
-    on_trade: Callable[[Trade], None] = None,
-    stop_event=None,
-    poll_interval_seconds: int = 20,
-) -> None:
-    """Continuously poll for new trades and invoke on_trade for each one.
-
-    Now a *utility* — production runs use per-algorithm worker threads
-    in main.py rather than this single-target loop. Still useful for
-    backfilling, scripts, and the dedup tests.
-
-    `stop_event` (a threading.Event) lets the caller cleanly interrupt
-    the sleep instead of relying on signal-driven sys.exit.
-    """
-    # Read SEEN_IDS_MAX at call time so tests can shrink the ring.
-    seen_ids = SeenRing(SEEN_IDS_MAX)
-
-    for t in fetch_recent_trades(address):
-        seen_ids.mark(t.id)
-    logger.info(
-        "Seeded with %d existing trades. Watching for new ones...", len(seen_ids),
-    )
-
-    while True:
-        if stop_event is not None:
-            if stop_event.wait(poll_interval_seconds):
-                logger.info("Poll loop received stop signal, exiting.")
-                return
-        else:
-            time.sleep(poll_interval_seconds)
-
-        trades = fetch_recent_trades(address)
-        new_trades = [t for t in trades if t.id and t.id not in seen_ids]
-
-        for trade in sorted(new_trades, key=lambda t: t.timestamp):
-            seen_ids.mark(trade.id)
-            logger.info("New trade detected: %s", trade)
-            if on_trade:
-                try:
-                    on_trade(trade)
-                except Exception:
-                    # One bad trade must not kill the loop.
-                    logger.exception("on_trade handler raised for %s", trade.id)
-
-        if not new_trades:
-            logger.debug("No new trades found.")
