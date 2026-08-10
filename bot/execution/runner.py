@@ -31,7 +31,7 @@ from py_clob_client_v2.constants import POLYGON
 from .. import config
 from ..storage import signals
 from ..discord import alerts
-from . import lots as copy_lots
+from . import lots
 from ..domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 from .fills import FillResult, simulate_buy as _simulate_buy, simulate_sell as _simulate_sell
 from .pricing import current_price as _get_current_price, slippage_ok as _slippage_ok
@@ -195,10 +195,10 @@ def _handle_open(
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
-    if intent.leader_wallet:
-        copy_lots.record_open(
-            algo.name, intent.market_id, trade.asset_id or "", intent.leader_wallet,
-            intent.leader_event_id or intent.signal_id, fill.shares, fill.amount_usdc,
+    if intent.source:
+        lots.record_open(
+            algo.name, intent.market_id, trade.asset_id or "", intent.source,
+            intent.source_event_id or intent.signal_id, fill.shares, fill.amount_usdc,
         )
     alerts.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
     ledger.print_summary(paper=paper)
@@ -270,9 +270,9 @@ def _handle_close(
         paper=paper,
         fee_usdc=fill.fee_usdc,
     )
-    if intent.leader_wallet:
-        copy_lots.close_for_leader(
-            algo.name, intent.market_id, intent.leader_wallet, fill.shares,
+    if intent.source:
+        lots.close_for_source(
+            algo.name, intent.market_id, intent.source, fill.shares,
         )
     alerts.on_sell_executed(trade, fill.shares, pnl, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
     ledger.print_summary(paper=paper)
@@ -327,7 +327,7 @@ def _handle_settle(
     # Backfill the outcome label on this market's signal rows — settlement
     # is the moment a logged signal becomes a labeled training example.
     signals.label_outcomes(algo.name, intent.market_id, close_price, pnl, paper)
-    copy_lots.close_market(algo.name, intent.market_id)
+    lots.close_market(algo.name, intent.market_id)
     ledger.print_summary(paper=paper)
 
     alerts.on_settle_executed(

@@ -114,22 +114,27 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_signals_market
             ON signals(algo, market_id);
 
-        CREATE TABLE IF NOT EXISTS copy_lots (
+        -- Superseded by position_lots (attribution generalised beyond copy
+        -- trading). Dropped on connect; the schema is assumed current and
+        -- there is no migration path.
+        DROP TABLE IF EXISTS copy_lots;
+
+        CREATE TABLE IF NOT EXISTS position_lots (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             algo             TEXT NOT NULL,
             market_id        TEXT NOT NULL,
             asset_id         TEXT NOT NULL,
-            leader_wallet    TEXT NOT NULL,
-            leader_event_id  TEXT NOT NULL,
+            source           TEXT NOT NULL,
+            source_event_id  TEXT NOT NULL,
             shares           REAL NOT NULL,
             cost_usdc        REAL NOT NULL,
             remaining_shares REAL NOT NULL,
             opened_at        INTEGER NOT NULL,
             closed_at        INTEGER,
-            UNIQUE(algo, leader_event_id)
+            UNIQUE(algo, source_event_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_copy_lots_open
-            ON copy_lots(algo, market_id, leader_wallet, remaining_shares);
+        CREATE INDEX IF NOT EXISTS idx_position_lots_open
+            ON position_lots(algo, market_id, source, remaining_shares);
 
         CREATE TABLE IF NOT EXISTS runs (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

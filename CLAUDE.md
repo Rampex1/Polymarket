@@ -98,7 +98,7 @@ bot/
     fills.py              # Paper-exchange fills — no DB, notification, or strategy imports
     pricing.py            # Current price + the slippage gate
     settlement.py         # Resolved-market sweep + canonical close price; refuses anything still trading
-    lots.py               # Leader-attributed lots — one leader's exit unwinds only its share
+    lots.py               # Attributed lots — closing one source unwinds only its share
   polymarket/             # Everything that talks to Polymarket
     api.py                # Raw HTTP reads — wallet lookup, trades, positions, prices, resolution
     gateway.py            # The boundary strategies depend on instead of the transport
@@ -228,7 +228,7 @@ column so multiple algorithms share one DB without collisions.
 - `trade_log` — all executed trades (BUY/SELL/REDEEM), tagged with `algo`
 - `daily_stats` — per-`(date, algo)` realized P&L
 - `paper_account` — virtual cash balance, PK `algo`
-- `copy_lots` — leader-attributed fills behind an aggregated position
+- `position_lots` — attributed fills behind an aggregated position; `source` is an opaque key (copy_trade passes a leader wallet)
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
 - `runs` — one row per worker boot: resolved params JSON, profile, git sha. Written on every boot; nothing reads it yet. Kept so the config behind a stretch of results stays recoverable after the fact.

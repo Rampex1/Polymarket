@@ -221,25 +221,25 @@ def test_dispatch_open_records_leader_attributed_lot(
 ):
     """A multi-leader fill creates an exit-attributable lot after it fills."""
     from bot.execution import runner
-    from bot.execution import lots as copy_lots
+    from bot.execution import lots
 
     stub_price(0.50)
     intent = OpenIntent(
         market_id="m1", asset_id="a1", usdc_amount=1.0, signal_price=0.50,
-        signal_id="leader-event", leader_wallet="0xleader",
-        leader_event_id="0xleader:leader-event",
+        signal_id="leader-event", source="0xleader",
+        source_event_id="0xleader:leader-event",
     )
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
 
-    assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 2.0
+    assert lots.remaining_shares("copy_trade", "m1", "0xleader") == 2.0
 
     runner.dispatch(
         CloseIntent(
             market_id="m1", fraction=1.0, signal_price=0.5,
-            leader_wallet="0xleader", leader_event_id="0xleader:leader-sell",
+            source="0xleader", source_event_id="0xleader:leader-sell",
         ), algo, ledger, risk, client=None, paper=True,
     )
-    assert copy_lots.remaining_shares("copy_trade", "m1", "0xleader") == 0.0
+    assert lots.remaining_shares("copy_trade", "m1", "0xleader") == 0.0
 
 
 def test_dispatch_open_skipped_by_slippage(ledger, risk, algo, default_params, stub_price):

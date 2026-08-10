@@ -4,7 +4,7 @@ import time
 from typing import Callable, Iterator
 
 from bot.polymarket import api
-from bot.execution import lots as copy_lots
+from bot.execution import lots
 from bot.domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
 
 
@@ -116,14 +116,14 @@ class MultiLeaderCopyEngine:
         yield OpenIntent(
             market_id=trade.market_id, asset_id=trade.asset_id or "", usdc_amount=amount,
             signal_price=trade.price, question=trade.question, outcome=trade.outcome,
-            signal_id=f"{wallet}:{trade.id}", leader_wallet=wallet, leader_event_id=f"{wallet}:{trade.id}",
+            signal_id=f"{wallet}:{trade.id}", source=wallet, source_event_id=f"{wallet}:{trade.id}",
             reason=f"watchlist leader {wallet[:6]}… ({len(leaders)}-leader consensus)",
             features={"leader_wallet": wallet, "consensus_leaders": len(leaders), "leader_holding_usdc": holding},
         )
 
     def _close(self, wallet: str, trade, forced: bool) -> Iterator[CloseIntent]:
         position = self._ledger.get(trade.market_id, self._paper)
-        leader_shares = copy_lots.remaining_shares(self.params.name, trade.market_id, wallet)
+        leader_shares = lots.remaining_shares(self.params.name, trade.market_id, wallet)
         if position is None or position.shares <= 0 or leader_shares <= 0:
             return
         cache = self._holdings.setdefault(wallet, api.TargetHoldingCache())
@@ -141,6 +141,6 @@ class MultiLeaderCopyEngine:
             market_id=trade.market_id, fraction=shares / position.shares,
             signal_price=0.0 if forced else trade.price, question=trade.question,
             outcome=trade.outcome, signal_id=f"{wallet}:{trade.id}",
-            leader_wallet=wallet, leader_event_id=f"{wallet}:{trade.id}",
+            source=wallet, source_event_id=f"{wallet}:{trade.id}",
             reason=f"leader {wallet[:6]}… {'merged' if forced else 'sold'}",
         )

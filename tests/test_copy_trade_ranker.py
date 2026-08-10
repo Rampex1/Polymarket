@@ -2,7 +2,7 @@
 
 from algorithms.copy_trade.ranker import ResolvedBet, rank_wallets
 from algorithms.copy_trade.watchlist import WatchlistRepository
-from bot.execution import lots as copy_lots
+from bot.execution import lots
 from tests.conftest import make_trade
 
 
@@ -46,12 +46,12 @@ def test_watchlist_activates_best_eligible_wallet(fresh_db):
 
 
 def test_leader_close_consumes_only_that_leaders_lots(fresh_db):
-    copy_lots.record_open("copy", "m1", "asset", "0xa", "a1", 10, 5)
-    copy_lots.record_open("copy", "m1", "asset", "0xb", "b1", 20, 10)
+    lots.record_open("copy", "m1", "asset", "0xa", "a1", 10, 5)
+    lots.record_open("copy", "m1", "asset", "0xb", "b1", 20, 10)
 
-    assert copy_lots.close_for_leader("copy", "m1", "0xa", 7) == 7
-    assert copy_lots.remaining_shares("copy", "m1", "0xa") == 3
-    assert copy_lots.remaining_shares("copy", "m1", "0xb") == 20
+    assert lots.close_for_source("copy", "m1", "0xa", 7) == 7
+    assert lots.remaining_shares("copy", "m1", "0xa") == 3
+    assert lots.remaining_shares("copy", "m1", "0xb") == 20
 
 
 def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, ledger):
@@ -102,5 +102,5 @@ def test_multi_leader_mode_emits_attributed_open_intent(fresh_db, ledger):
 
     assert len(intents) == 1
     intent = intents[0]
-    assert intent.leader_wallet == "0xa"
-    assert intent.leader_event_id == "0xa:leader-buy"
+    assert intent.source == "0xa"
+    assert intent.source_event_id == "0xa:leader-buy"

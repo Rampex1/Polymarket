@@ -21,10 +21,11 @@ class OpenIntent:
     signal_id: str = ""
     reason: str = ""
     features: dict = field(default_factory=dict)
-    # Optional leader attribution.  Generic strategies leave these blank;
-    # watchlist copy trading uses them to mirror that leader's later exit.
-    leader_wallet: str = ""
-    leader_event_id: str = ""
+    # Optional attribution: what caused this fill, as an opaque key. Blank
+    # means the position is undivided. Execution records it as a lot so a
+    # later close for the same source unwinds only that source's share.
+    source: str = ""
+    source_event_id: str = ""
 
 
 @dataclass
@@ -38,8 +39,8 @@ class CloseIntent:
     outcome: str = ""
     signal_id: str = ""
     reason: str = ""
-    leader_wallet: str = ""
-    leader_event_id: str = ""
+    source: str = ""
+    source_event_id: str = ""
 
 
 @dataclass
