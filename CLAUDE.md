@@ -43,8 +43,7 @@ python -m algorithms.insider_flow.archive --loop --every 3600
   `pricing`/`settlement` take an optional `market_data=` defaulting to
   `DEFAULT_MARKET_DATA`. That keeps the external dependency visible in a
   signature and swappable without monkeypatching. `insider_flow/archive.py`
-  and `copy_trade/public_history.py` are deliberately outside it: offline
-  jobs that hit unwrapped endpoints and inject their own session.
+  is deliberately outside it: an offline job with its own database.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only.
 - **Knob values live only in `algorithms/<type>/params.py`.** One source of
@@ -132,7 +131,6 @@ algorithms/
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
     research/             # Dune query behind the ranked-wallet workflow
-    public_history.py     # Public-API ingestion for the ranked-copy history store (offline job)
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
@@ -142,7 +140,6 @@ scripts/
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
   import_wallet_history.py            # Dune CSV → normalized resolved-bet history
-  import_polymarket_wallet_history.py # Public-API seed for the same store (weaker, paper only)
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
 
