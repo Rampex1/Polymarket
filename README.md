@@ -122,8 +122,8 @@ pytest tests/test_copy_trade.py
 Runs on a VPS as plain Python processes under tmux.
 
 ```bash
-bash scripts/ssh_vm.sh                       # opc@148.116.94.154, ~/Polymarket
-cd ~/Polymarket && bash scripts/setup_vm.sh  # full redeploy
+ssh <vps> && cd ~/Polymarket
+bash scripts/setup_vm.sh                     # full redeploy
 ```
 
 `setup_vm.sh` is the entire deploy: git pull, venv + deps, `data/` layout,

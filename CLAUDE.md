@@ -140,12 +140,10 @@ algorithms/
     research/             # Plans and notes behind this strategy
 scripts/
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
-  ssh_vm.sh               # SSH into the VPS
   run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
   import_wallet_history.py            # Dune CSV → normalized resolved-bet history
   import_polymarket_wallet_history.py # Public-API seed for the same store (weaker, paper only)
   reset_paper_trade_db.py             # Wipe and reset paper trading state
-  trading_account_summary.py          # Portfolio snapshot
 ```
 
 ## Runtime wiring
