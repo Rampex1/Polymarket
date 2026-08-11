@@ -130,7 +130,7 @@ algorithms/
     multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
-    research/             # Dune query behind the ranked-wallet workflow
+    research/             # Dune query behind the ranked-wallet workflow (its header documents the CSV → wallet_resolved_bets load)
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
@@ -139,7 +139,6 @@ algorithms/
 scripts/
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
-  import_wallet_history.py            # Dune CSV → normalized resolved-bet history
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
 

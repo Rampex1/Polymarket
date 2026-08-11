@@ -1,7 +1,16 @@
 -- Export normalized resolved BUYs for the ranked copy-trade workflow.
 --
--- Run in Dune, export CSV, then import with:
---   PROFILE=ranked_paper python scripts/import_wallet_history.py result.csv
+-- Run in Dune, export CSV, then load it into `wallet_resolved_bets` in
+-- data/positions.db — the table algorithms/copy_trade/ranker.py scores
+-- candidate wallets against:
+--
+--   INSERT OR REPLACE INTO wallet_resolved_bets
+--     (wallet, entry_price, outcome, resolved_at, copyability_score)
+--
+-- wallet lowercased, outcome is 0.0 or 1.0, resolved_at epoch seconds,
+-- copyability_score defaults to 1.0. The PK is
+-- (wallet, resolved_at, entry_price, outcome), so re-importing an
+-- overlapping export is idempotent.
 --
 -- The query uses Dune's curated Polymarket tables. Keep the block-time
 -- predicate: market_trades is partitioned by block_month.
