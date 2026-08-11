@@ -1,10 +1,6 @@
-# Experimental profile — paper algorithms under test. PROFILE=experimental.
-# Never sets allow_live, so a mode="live" block here is rejected at boot.
-#
-# Declares only what runs. Knob values live in algorithms/<type>/params.py;
-# an [algorithm.params] block here is a boot error.
+# Paper algorithms under test. Never sets allow_live, so a live block here
+# is rejected at boot. Knob values: algorithms/<type>/params.py.
 
-# Copies large long-odds BUYs from young wallets — the insider fingerprint.
 [[algorithm]]
 type = "insider_flow"
 name = "insider_flow_paper"

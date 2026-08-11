@@ -1,10 +1,4 @@
-# Prod profile — REAL MONEY. PROFILE=prod. Behavior only; POLY_* creds
-# come from the shared .env.
+# REAL MONEY. `allow_live` is the gate — no other profile sets it.
+# No [[algorithm]] blocks: prod is paused, and booting it fails fast.
 
-# The real-money gate: the loader rejects mode="live" in any profile
-# without this. Only prod sets it.
 allow_live = true
-
-# No [[algorithm]] blocks — prod is paused. Booting it fails fast by
-# design, so an accidental restart can't succeed into running nothing.
-# To resume: add a block and run scripts/setup_vm.sh.
