@@ -1,8 +1,12 @@
-# Template for ranked multi-leader copy trading. Copy to <name>.toml and
-# set PROFILE=<name>. Every knob must be stated; omissions are a boot error.
-# See algorithms/copy_trade/params.py for what each means.
+# What a profile file looks like. Copy to <name>.toml and set PROFILE=<name>.
+# A profile lists one or more [[algorithm]] blocks; each states every knob
+# for its type (omissions are a boot error) — see algorithms/<type>/params.py.
+# Add `allow_live = true` at the top level before any mode = "live" block.
 #
-# Seed leader history first:
+# The block below runs copy_trade in ranked multi-leader mode. See
+# experimental.toml for an insider_flow block.
+#
+# Ranked mode needs leader history seeded first:
 #   python scripts/import_polymarket_wallet_history.py --max-wallets 25
 #   python scripts/import_wallet_history.py <dune_export>.csv   # stronger
 
