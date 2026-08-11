@@ -12,8 +12,8 @@ must never contend with live trading writes). Snapshots are idempotent
 upserts, so running it as often as you like only ever adds points.
 
 Usage:
-    python -m discovery.archive --once            # cron-friendly single pass
-    python -m discovery.archive --loop --every 3600
+    python -m algorithms.insider_flow.archive --once
+    python -m algorithms.insider_flow.archive --loop --every 3600
 """
 
 import argparse

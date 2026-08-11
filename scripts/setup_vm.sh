@@ -10,7 +10,7 @@
 #   prod    — PROFILE=prod         python main.py   (REAL MONEY)
 #             only started if config/prod.toml has [[algorithm]] blocks —
 #             an intentionally empty prod (paused) is not an error
-#   archive — python -m discovery.archive --loop --every 3600
+#   archive — python -m algorithms.insider_flow.archive --loop --every 3600
 #   discord — python scripts/run_discord_bot.py  (slash commands, all profiles)
 set -euo pipefail
 
@@ -105,7 +105,7 @@ else
     tmux kill-session -t prod 2>/dev/null || true
     echo "  [prod] no [[algorithm]] blocks configured — session not started"
 fi
-start_session archive "python -m discovery.archive --loop --every 3600"
+start_session archive "python -m algorithms.insider_flow.archive --loop --every 3600"
 start_session discord "python scripts/run_discord_bot.py"
 
 echo "==> Verifying (give workers a moment to boot)"

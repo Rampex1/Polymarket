@@ -21,8 +21,8 @@ only here:
 
 ```bash
 PROFILE=<name> python main.py                   # run one profile's workers
-python -m discovery.archive --once              # archiver: one pass (cron-friendly)
-python -m discovery.archive --loop --every 3600 # archiver: long-running
+python -m algorithms.insider_flow.archive --once            # archiver: one pass
+python -m algorithms.insider_flow.archive --loop --every 3600
 ```
 
 ## Invariants — don't break these
@@ -42,9 +42,9 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
   `polymarket.api` directly — strategies take one in their constructor,
   `pricing`/`settlement` take an optional `market_data=` defaulting to
   `DEFAULT_MARKET_DATA`. That keeps the external dependency visible in a
-  signature and swappable without monkeypatching. `discovery/archive.py` and
-  `copy_trade/public_history.py` are deliberately outside it: separate jobs
-  that hit unwrapped endpoints and inject their own session.
+  signature and swappable without monkeypatching. `insider_flow/archive.py`
+  and `copy_trade/public_history.py` are deliberately outside it: offline
+  jobs that hit unwrapped endpoints and inject their own session.
 - **Algorithm params are never read from env.** Env holds secrets and infra
   only.
 - **Knob values live only in `algorithms/<type>/params.py`.** One source of
@@ -131,11 +131,13 @@ algorithms/
     multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
+    research/             # Dune query behind the ranked-wallet workflow
     public_history.py     # Public-API ingestion for the ranked-copy history store (offline job)
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
-discovery/archive.py      # Price-history archiver (CLOB drops history at resolution — hoard it)
+    archive.py            # Price-history archiver (CLOB drops history at resolution — hoard it); own DB, own process
+    research/             # Plans and notes behind this strategy
 scripts/
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   ssh_vm.sh               # SSH into the VPS

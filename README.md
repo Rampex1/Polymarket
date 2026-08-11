@@ -28,7 +28,7 @@ flowchart TB
         Sched["heartbeat — liveness only"]
     end
 
-    subgraph archiver["discovery.archive — separate process"]
+    subgraph archiver["insider_flow.archive — separate process"]
         Snap["price-history snapshots"]
     end
 
@@ -77,12 +77,10 @@ flowchart TB
 ```
 main.py        entry point — one worker thread per enabled algorithm
 bot/           shared infra — domain/, storage/, execution/, polymarket/, discord/, logs/
-algorithms/    strategies — copy_trade/, insider_flow/
+algorithms/    strategies — copy_trade/, insider_flow/ (each with its own research/ notes)
 config/        profile TOMLs (which algorithms run) + webhooks.toml (Discord routing)
-discovery/     price-history archiver
 scripts/       deploy, wallet-history importers, DB reset, account summary
 tests/         pytest suite
-research/      strategy plans and paper-phase notes
 data/          SQLite files — gitignored
 ```
 
@@ -139,7 +137,7 @@ non-zero if a session dies at boot and prints that session's last output.
 |---|---|
 | `paper` | `PROFILE=experimental python main.py` |
 | `prod` | `PROFILE=prod python main.py` — started only if `config/prod.toml` declares `[[algorithm]]` blocks |
-| `archive` | `python -m discovery.archive --loop --every 3600` |
+| `archive` | `python -m algorithms.insider_flow.archive --loop --every 3600` |
 | `discord` | `python scripts/run_discord_bot.py` — one bot, all profiles |
 
 `tmux attach -t <name>` to view, `Ctrl-b d` to detach without killing.

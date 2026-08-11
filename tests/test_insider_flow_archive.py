@@ -15,7 +15,7 @@ from tests.conftest import make_global_trade
 
 @pytest.fixture
 def conn(tmp_path):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     c = archive.connect(str(tmp_path / "arch.db"))
     yield c
@@ -28,7 +28,7 @@ def conn(tmp_path):
 
 
 def test_connect_creates_missing_parent_dirs(tmp_path):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     nested = tmp_path / "data" / "deep" / "arch.db"
     c = archive.connect(str(nested))
@@ -41,7 +41,7 @@ def test_connect_creates_missing_parent_dirs(tmp_path):
 def test_default_db_path_prefers_data_dir(tmp_path, monkeypatch):
     import os
 
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DISCOVERY_ARCHIVE_DB", raising=False)
@@ -49,7 +49,7 @@ def test_default_db_path_prefers_data_dir(tmp_path, monkeypatch):
 
 
 def test_default_db_path_legacy_fallback(tmp_path, monkeypatch):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DISCOVERY_ARCHIVE_DB", raising=False)
@@ -58,7 +58,7 @@ def test_default_db_path_legacy_fallback(tmp_path, monkeypatch):
 
 
 def test_default_db_path_env_override_wins(tmp_path, monkeypatch):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DISCOVERY_ARCHIVE_DB", "/elsewhere/a.db")
@@ -71,7 +71,7 @@ def test_default_db_path_env_override_wins(tmp_path, monkeypatch):
 
 
 def test_upsert_history_is_idempotent(conn):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     pts = [{"t": 1, "p": 0.5}, {"t": 2, "p": 0.6}]
     assert archive.upsert_history(conn, "tok1", 60, pts) == 2
@@ -84,7 +84,7 @@ def test_upsert_history_is_idempotent(conn):
 
 
 def test_track_market_registers_once_and_keeps_first_source(conn):
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     market = {
         "conditionId": "0xc1",
@@ -110,7 +110,7 @@ def test_track_market_registers_once_and_keeps_first_source(conn):
 
 def test_collect_universe_unions_and_dedupes_sources(conn, monkeypatch):
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     active = [
         {"conditionId": "0xa", "question": "A?", "clobTokenIds": '["ta1","ta2"]'},
@@ -154,7 +154,7 @@ def test_collect_universe_whale_flow_falls_back_to_traded_token(
     """Gamma lookup failure must not drop the market — half a price series
     beats none."""
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     monkeypatch.setattr(api, "fetch_top_markets", lambda *a, **kw: [])
     monkeypatch.setattr(
@@ -175,7 +175,7 @@ def test_collect_universe_skips_gamma_lookup_for_tracked_markets(
     """An already-tracked whale market must not cost a Gamma round-trip on
     every pass — the firehose repeats hot markets constantly."""
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     archive.track_market(
         conn,
@@ -205,7 +205,7 @@ def test_collect_universe_skips_gamma_lookup_for_tracked_markets(
 
 def test_snapshot_all_stores_points_and_skips_failures(conn, monkeypatch):
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     archive.track_market(
         conn,
@@ -245,7 +245,7 @@ def test_snapshot_all_uses_delta_fetch_after_first_pass(conn, monkeypatch):
     window since last_snapshot, or bandwidth grows without bound as the
     archive ages."""
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     archive.track_market(
         conn,
@@ -279,7 +279,7 @@ def test_snapshot_all_uses_delta_fetch_after_first_pass(conn, monkeypatch):
 
 def test_run_once_smoke(tmp_path, monkeypatch):
     from bot.polymarket import api
-    from discovery import archive
+    from algorithms.insider_flow import archive
 
     monkeypatch.setattr(
         api, "fetch_top_markets",
