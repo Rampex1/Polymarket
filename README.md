@@ -78,7 +78,7 @@ flowchart TB
 main.py        entry point — one worker thread per enabled algorithm
 bot/           shared infra — domain/, storage/, execution/, polymarket/, discord/, logs/
 algorithms/    strategies — copy_trade/, insider_flow/
-config/        profile TOMLs (behavior) + webhooks.toml (Discord routing)
+config/        profile TOMLs (which algorithms run) + webhooks.toml (Discord routing)
 discovery/     price-history archiver
 scripts/       deploy, wallet-history importers, DB reset, account summary
 tests/         pytest suite
@@ -102,7 +102,8 @@ Configuration lives in three files, split by kind:
 
 | File | Holds |
 |---|---|
-| `config/<profile>.toml` | *Behavior* — which algorithms run, mode, targets, tiers, risk caps |
+| `config/<profile>.toml` | *What runs* — which algorithms, under which name, in which mode |
+| `algorithms/<type>/params.py` | *Behavior* — every knob: targets, tiers, risk caps, webhook |
 | `config/webhooks.toml` | *Discord routing* — which channel each profile's summaries go to |
 | `.env` | *Secrets only* — the five `POLY_*` creds, Discord bot token |
 

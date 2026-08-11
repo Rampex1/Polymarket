@@ -62,7 +62,7 @@ def test_display_name_falls_back_to_short_address():
 
 def test_display_name_is_bare_name_when_no_target():
     """No target configured (e.g. pre-setup) → no trailing arrow."""
-    a = _algo(copy_trade_params())
+    a = _algo(copy_trade_params(target_address="", target_username=""))
     assert a.display_name == "copy_trade"
 
 

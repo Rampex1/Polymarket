@@ -851,15 +851,17 @@ def test_params_overrides():
     assert p.mode == Mode.LIVE
 
 
-def test_schema_has_no_defaults():
-    """Every knob is required — nothing can be half-configured in code."""
+def test_schema_carries_every_value():
+    """The schema is the single source of truth: a bare params object is
+    fully configured, so a profile only has to name the algorithm."""
     from dataclasses import MISSING, fields
 
     from algorithms.insider_flow.params import InsiderFlowParams
 
-    with pytest.raises(TypeError, match="required positional argument"):
-        InsiderFlowParams()
+    p = InsiderFlowParams()
+    assert p.min_cash_size_usdc > 0 and p.bet_size_usdc > 0
+    assert p.webhook_url, "validate() requires it, so the schema must ship one"
     assert all(
-        f.default is MISSING and f.default_factory is MISSING
+        f.default is not MISSING or f.default_factory is not MISSING
         for f in fields(InsiderFlowParams)
     )

@@ -82,32 +82,21 @@ def _toml(v) -> str:
     return f'"{v}"'
 
 
-_BASELINE = {"copy_trade": copy_trade_params, "insider_flow": insider_flow_params}
+def _block(algo_type: str, name: str, mode: str) -> str:
+    """An [[algorithm]] block — type, name, mode and nothing else.
 
-
-def _block(algo_type: str, name: str, mode: str, **overrides) -> str:
-    """An [[algorithm]] block naming *every* knob — the loader requires it.
-
-    Built from the conftest test baseline, so adding a knob to a schema
-    breaks these once (in conftest) rather than in every fixture here.
+    Knob values come from algorithms/<type>/params.py; the loader rejects a
+    params table outright.
     """
-    _, params_cls = REGISTRY[algo_type]
-    baseline = _BASELINE[algo_type]()
-    lines = [
-        f"{f.name} = {_toml(overrides.get(f.name, getattr(baseline, f.name)))}"
-        for f in fields(params_cls) if f.name not in ("name", "mode")
-    ]
     return (
         f'[[algorithm]]\ntype = "{algo_type}"\nname = "{name}"\n'
-        f'mode = "{mode}"\n[algorithm.params]\n' + "\n".join(lines) + "\n"
+        f'mode = "{mode}"\n'
     )
 
 
-VALID = _block("copy_trade", "ct", "paper",
-               target_address="0xabc", webhook_url="http://hook")
+VALID = _block("insider_flow", "if_paper", "paper")
 
-LIVE_BLOCK = _block("copy_trade", "ct_live", "live",
-                    target_address="0xabc", webhook_url="http://hook")
+LIVE_BLOCK = _block("insider_flow", "if_live", "live")
 
 
 def test_live_mode_requires_allow_live_opt_in(tmp_path):
@@ -123,12 +112,15 @@ def test_allow_live_unlocks_live_mode(tmp_path):
 
 
 def test_valid_minimal_profile(tmp_path):
+    """type/name/mode is a complete block; every knob comes from the schema."""
+    from algorithms.insider_flow import InsiderFlowAlgorithm, InsiderFlowParams
+
     name, d = _write_profile(tmp_path, VALID)
     (algo,) = load_profile(name, REGISTRY, config_dir=d)
-    assert isinstance(algo, CopyTradeAlgorithm)
-    assert algo.params.name == "ct"
-    assert algo.params.mode == Mode.PAPER
-    assert algo.params.target_address == "0xabc"
+    assert isinstance(algo, InsiderFlowAlgorithm)
+    assert algo.params.name == "if_paper"          # from the block
+    assert algo.params.mode == Mode.PAPER          # from the block
+    assert algo.params.max_entry_odds == InsiderFlowParams().max_entry_odds
 
 
 def test_missing_profile_lists_available(tmp_path):
@@ -171,50 +163,47 @@ def test_bad_mode_rejected(tmp_path):
         load_profile(name, REGISTRY, config_dir=d)
 
 
-def test_unknown_param_key_rejected(tmp_path):
-    body = VALID + "\ntier1_sze = 5.0\n"  # typo inside [algorithm.params]
+def test_params_block_rejected(tmp_path):
+    """Knob values live in Python. A params table here is a mistake, and
+    silently ignoring it would be worse — the operator would believe the
+    value took effect."""
+    body = VALID + "[algorithm.params]\nmax_entry_odds = 0.9\n"
     name, d = _write_profile(tmp_path, body)
-    with pytest.raises(ProfileError, match="tier1_sze"):
+    with pytest.raises(ProfileError, match=r"\[algorithm.params\] is not accepted"):
         load_profile(name, REGISTRY, config_dir=d)
 
 
 def test_duplicate_names_rejected(tmp_path):
     name, d = _write_profile(tmp_path, VALID + VALID)
-    with pytest.raises(ProfileError, match="duplicate name 'ct'"):
+    with pytest.raises(ProfileError, match="duplicate name 'if_paper'"):
         load_profile(name, REGISTRY, config_dir=d)
 
 
 def test_copy_trade_without_target_rejected(tmp_path):
-    name, d = _write_profile(
-        tmp_path, _block("copy_trade", "x", "paper", webhook_url="http://hook"))
+    """copy_trade's schema ships no target, so it must refuse to boot until
+    one is set in algorithms/copy_trade/params.py."""
+    name, d = _write_profile(tmp_path, _block("copy_trade", "x", "paper"))
     with pytest.raises(ProfileError, match="target"):
         load_profile(name, REGISTRY, config_dir=d)
 
 
-def test_omitted_param_rejected(tmp_path):
-    """A profile must state every knob — there is nothing to inherit."""
-    body = "\n".join(
-        line for line in VALID.splitlines() if not line.startswith("max_slippage")
-    )
-    name, d = _write_profile(tmp_path, body)
-    with pytest.raises(ProfileError, match="missing 1 required param.*max_slippage"):
-        load_profile(name, REGISTRY, config_dir=d)
+def test_params_validate_failure_names_block(tmp_path, monkeypatch):
+    """A schema that violates its own validate() fails at boot, naming the
+    block it came from."""
+    from algorithms.insider_flow.params import InsiderFlowParams
 
+    original = InsiderFlowParams.validate
 
-def test_toml_list_coerced_to_tuple(tmp_path):
-    name, d = _write_profile(tmp_path, _block(
-        "insider_flow", "if", "paper",
-        exclude_title_patterns=["foo", "bar"], webhook_url="http://hook"))
-    (algo,) = load_profile(name, REGISTRY, config_dir=d)
-    assert algo.params.exclude_title_patterns == ("foo", "bar")
+    def boom(self):
+        raise ValueError("max_entry_odds must be in (0, 1], got 1.5")
 
-
-def test_params_validate_failure_names_block(tmp_path):
-    name, d = _write_profile(tmp_path, _block(
-        "insider_flow", "if", "paper",
-        max_entry_odds=1.5, webhook_url="http://hook"))
-    with pytest.raises(ProfileError, match="max_entry_odds"):
-        load_profile(name, REGISTRY, config_dir=d)
+    monkeypatch.setattr(InsiderFlowParams, "validate", boom)
+    try:
+        name, d = _write_profile(tmp_path, _block("insider_flow", "if", "paper"))
+        with pytest.raises(ProfileError, match="max_entry_odds"):
+            load_profile(name, REGISTRY, config_dir=d)
+    finally:
+        monkeypatch.setattr(InsiderFlowParams, "validate", original)
 
 
 # ---------------------------------------------------------------------------
@@ -222,14 +211,15 @@ def test_params_validate_failure_names_block(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_schema_has_no_defaults():
-    """Every knob is required, so nothing can be half-configured in code."""
+def test_schema_carries_every_value():
+    """The schema is the single source of truth, so a bare params object is
+    fully configured — the loader only supplies name and mode."""
     from dataclasses import MISSING
 
-    with pytest.raises(TypeError, match="required positional argument"):
-        CopyTradeParams()
+    p = CopyTradeParams()
+    assert p.tier1_min > 0 and p.max_slippage > 0
     assert all(
-        f.default is MISSING and f.default_factory is MISSING
+        f.default is not MISSING or f.default_factory is not MISSING
         for f in fields(CopyTradeParams)
     )
 

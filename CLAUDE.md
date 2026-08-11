@@ -35,9 +35,9 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
   `mode = "live"` block in a profile without it; only `prod.toml` sets it.
 - **`name` is the DB partition key.** Renaming an algorithm orphans its
   bankroll and history. Keep it stable once set.
-- **Knob schemas live in `algorithms/<type>/params.py`** — names, types,
-  docs, and boot-time `validate()`. Never enumerate knobs in prose docs;
-  they go stale. The dataclass is the source of truth.
+- **`algorithms/<type>/params.py` is the whole config surface** — names,
+  types, values, docs, and boot-time `validate()`. Never enumerate knobs in
+  prose docs; they go stale. The dataclass is the source of truth.
 - **The trading path reads Polymarket through `MarketDataGateway`,** never
   `polymarket.api` directly — strategies take one in their constructor,
   `pricing`/`settlement` take an optional `market_data=` defaulting to
@@ -46,14 +46,13 @@ python -m discovery.archive --loop --every 3600 # archiver: long-running
   `copy_trade/public_history.py` are deliberately outside it: separate jobs
   that hit unwrapped endpoints and inject their own session.
 - **Algorithm params are never read from env.** Env holds secrets and infra
-  only. Behavior changes are TOML edits.
-- **The params schemas carry no defaults.** Every field is required, so a
-  profile block states every knob and an algorithm can never be half
-  configured — `CopyTradeAlgorithm()` is a `TypeError`, and the loader
-  rejects a block that omits a knob, naming what's missing. A block is
-  therefore the complete answer to "what is this algorithm running?".
-  Tests get their values from `copy_trade_params()` / `insider_flow_params()`
-  in `tests/conftest.py`, deliberately separate from production.
+  only.
+- **Knob values live only in `algorithms/<type>/params.py`.** One source of
+  truth per knob. A profile TOML declares *what runs* — `type`, `name`,
+  `mode` — and nothing else; an `[algorithm.params]` block is a boot error,
+  not a silent no-op. Tuning is therefore a code edit and a redeploy, and
+  two blocks of the same type inside one profile cannot differ. That is the
+  accepted trade for having exactly one place to look.
 - **One `.env`, shared by every profile.** Per-profile env files are not
   read and `setup_vm.sh` deletes any it finds. Don't reintroduce a
   `.env.<profile>` fallback: paper's safety comes from the `allow_live`
@@ -203,7 +202,7 @@ Survivors are buffered for a window, ranked by conviction score, and only
 the top N are copied. Exits at market resolution via a periodic Gamma
 sweep. Its `max_slippage` default (0.10) is deliberately wider than
 copy_trade's — these signals move fast. Defaults are sized for a **~$20
-prod bankroll**; scale via the profile TOML when capital grows.
+prod bankroll**; scale in `algorithms/insider_flow/params.py` when capital grows.
 
 ## Environment variables (`bot/config.py`)
 
@@ -222,8 +221,8 @@ prod bankroll**; scale via the profile TOML when capital grows.
 Two independent paths, no global fallback between them:
 
 - **Trade alerts** come from each algorithm's own `webhook_url` param in
-  the profile TOML, which `validate()` requires — a block without one is a
-  boot-time `ProfileError`, not a silently muted algorithm.
+  `algorithms/<type>/params.py`, which `validate()` requires — an empty one
+  is a boot-time `ProfileError`, not a silently muted algorithm.
 - **Profile-level messages** (heartbeat, `/summary`) come from
   `config/webhooks.toml` via `resolve_summary_webhook(profile)`, matching a
   block with `type = "summary"` and `profile = "<name>"`.

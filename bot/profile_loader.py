@@ -2,10 +2,8 @@
 Declarative profile loader — config/<profile>.toml → list of Algorithms.
 
 A profile file declares *what runs*: which algorithm types, under which
-names, in which mode, with which params. Python code declares *what's
-possible* (the params dataclasses are the schema). Tuning, promoting to
-prod, and spinning up A/B variants are all edits to a TOML file — never
-to code.
+names, in which mode. How each is tuned lives in Python, in that type's
+params dataclass — one source of truth per knob.
 
 File shape:
 
@@ -18,19 +16,16 @@ File shape:
     name = "copy_trade_prod"   # DB partition key — keep stable once set
     mode = "live"              # "paper" or "live"; always explicit
 
-    [algorithm.params]         # every knob, explicitly — nothing is inherited
-    target_address = "0x..."
-    tier1_size = 1.0
+Knob values are NOT here — they live in algorithms/<type>/params.py. A
+profile declares only what runs; an [algorithm.params] block is rejected.
 
-Validation is fail-fast and boot-time: unknown param keys, omitted param
-keys, duplicate names, bad modes, and per-algorithm `validate()` failures
-all raise ProfileError with the offending file and block named — a typo
-can never silently no-op the way a misspelled env var did.
+Validation is fail-fast and boot-time: unknown keys, duplicate names, bad
+modes, a params block, and per-algorithm `validate()` failures all raise
+ProfileError naming the file and block — a typo can never silently no-op.
 """
 
 import os
 import tomllib
-from dataclasses import fields
 
 from bot.domain.mode import Mode
 
@@ -61,15 +56,6 @@ def available_profiles(config_dir: str = CONFIG_DIR) -> list[str]:
         except (OSError, tomllib.TOMLDecodeError):
             continue
     return names
-
-
-def _coerce(params_cls, kwargs: dict) -> dict:
-    """TOML arrays arrive as lists; tuple-typed fields want tuples."""
-    tuple_fields = {f.name for f in fields(params_cls) if f.type in ("tuple", tuple)}
-    return {
-        k: tuple(v) if k in tuple_fields and isinstance(v, list) else v
-        for k, v in kwargs.items()
-    }
 
 
 def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> list:
@@ -133,29 +119,18 @@ def load_profile(profile: str, registry: dict, config_dir: str = CONFIG_DIR) -> 
             )
 
         algo_cls, params_cls = registry[algo_type]
-        param_kwargs = block.get("params", {})
-        valid_keys = {f.name for f in fields(params_cls)} - {"name", "mode"}
-        unknown = set(param_kwargs) - valid_keys
-        if unknown:
+
+        # Knob values live in algorithms/<type>/params.py, full stop. A
+        # profile declares *what runs*, never how it is tuned — so a params
+        # block here is a mistake, and a silently ignored one would be worse.
+        if "params" in block:
             raise ProfileError(
-                f"{where}: unknown param(s) {sorted(unknown)} for type "
-                f"'{algo_type}'. See algorithms/{algo_type}/params.py "
-                f"for the valid knobs."
+                f"{where}: [algorithm.params] is not accepted. Knob values "
+                f"live in algorithms/{algo_type}/params.py; a profile only "
+                f"declares type, name, and mode."
             )
 
-        # The schemas carry no defaults — a block states every knob, so what
-        # an algorithm runs is readable in one file.
-        missing = valid_keys - set(param_kwargs)
-        if missing:
-            raise ProfileError(
-                f"{where}: '{name}' is missing {len(missing)} required "
-                f"param(s): {', '.join(sorted(missing))}. See "
-                f"algorithms/{algo_type}/params.py for the full list."
-            )
-
-        params = params_cls(
-            name=name, mode=mode, **_coerce(params_cls, param_kwargs)
-        )
+        params = params_cls(name=name, mode=mode)
         validate = getattr(params, "validate", None)
         if validate is not None:
             try:
