@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-Standalone Discord bot — serves all profiles from one process.
+__main__.py
 
-Loads every available profile TOML, registers all algorithms, and starts
-the bot. Runs in its own tmux session (discord) separate from the trading
-workers so it stays up even if a worker crashes, and a single bot token
-covers all profiles.
+Entry point for the Discord bot: `python -m bot.discord`.
 
-Usage:
-    source .venv/bin/activate
-    python scripts/run_discord_bot.py
+Serves every profile from one process, in its own tmux session, separate
+from the trading workers — a worker crash leaves the bot answering, and a
+bot crash leaves the workers trading. One token covers all profiles.
 """
 
 import logging
-import os
 import signal
-import sys
 import threading
 
-# Run from repo root so config/ and bot/ are importable.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from algorithms import REGISTRY
+from bot.discord import discord_bot
+from bot.domain.mode import Mode
+from bot.profile_loader import ProfileError, available_profiles, load_profile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,11 +24,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
-from algorithms import REGISTRY
-from bot.discord import discord_bot
-from bot.domain.mode import Mode
-from bot.profile_loader import ProfileError, available_profiles, load_profile
 
 algo_infos = []
 for profile_name in available_profiles():
@@ -48,8 +40,7 @@ for profile_name in available_profiles():
         logger.warning("Skipping profile %s: %s", profile_name, e)
 
 if not algo_infos:
-    logger.error("No algorithms found across any profile — nothing to serve.")
-    sys.exit(1)
+    raise SystemExit("No algorithms found across any profile — nothing to serve.")
 
 discord_bot.start_standalone(algo_infos)
 

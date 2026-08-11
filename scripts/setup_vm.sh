@@ -11,7 +11,7 @@
 #             only started if config/prod.toml has [[algorithm]] blocks —
 #             an intentionally empty prod (paused) is not an error
 #   archive — python -m algorithms.insider_flow.archive --loop --every 3600
-#   discord — python scripts/run_discord_bot.py  (slash commands, all profiles)
+#   discord — python -m bot.discord  (slash commands, all profiles)
 set -euo pipefail
 
 # Absolute path to this script, resolved before any cd so the re-exec below
@@ -106,7 +106,7 @@ else
     echo "  [prod] no [[algorithm]] blocks configured — session not started"
 fi
 start_session archive "python -m algorithms.insider_flow.archive --loop --every 3600"
-start_session discord "python scripts/run_discord_bot.py"
+start_session discord "python -m bot.discord"
 
 echo "==> Verifying (give workers a moment to boot)"
 sleep 8

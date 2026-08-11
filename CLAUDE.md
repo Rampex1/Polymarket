@@ -120,7 +120,8 @@ bot/
     heartbeat.py          # The only scheduled message — liveness ping, no portfolio data
     messages.py           # Message rendering — markdown escaping, market URLs, feature lines
     threads.py            # Thread registry + lifecycle — (market_id, algo, paper) → thread_id, so a market's updates nest
-    discord_bot.py        # Slash commands — a text builder per command, plus the gateway wiring (own process)
+    discord_bot.py        # Slash commands — a text builder per command, plus the gateway wiring
+    __main__.py           # `python -m bot.discord` — loads every profile, one token, own process
   logs.py                 # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
 algorithms/
   __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
@@ -138,7 +139,6 @@ algorithms/
     research/             # Plans and notes behind this strategy
 scripts/
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
-  run_discord_bot.py      # Standalone Discord bot — loads every profile, one token
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
 
@@ -267,7 +267,7 @@ sqlite3 discovery_archive.db "
 
 ## Discord bot
 
-Runs as a **standalone process** (`scripts/run_discord_bot.py`, tmux
+Runs as a **standalone process** (`python -m bot.discord`, tmux
 session `discord`) — *not* a thread inside `main.py`. It loads every
 available profile, so one bot and one token cover all of them. If a worker
 crashes the bot stays up; if the bot crashes the workers keep trading.
