@@ -1,14 +1,10 @@
-# Experimental profile — paper-mode algorithms being tuned or A/B tested.
-# Loaded with PROFILE=experimental. Nothing here can touch real money: this
-# profile never sets allow_live, so the loader rejects any mode = "live"
-# block outright — the guarantee is in config, not in which .env is loaded.
+# Experimental profile — paper algorithms under test. PROFILE=experimental.
+# Never sets allow_live, so a mode="live" block here is rejected at boot.
 #
-# Every knob must be stated explicitly; the loader rejects a block that
-# omits any. See algorithms/<type>/params.py for what each one means.
+# Every knob must be stated; omissions are a boot error. See
+# algorithms/<type>/params.py for what each means.
 
-# Fresh-wallet suspicious-flow detector — paper validation phase. Copies
-# large long-odds BUYs from young wallets (the documented insider
-# fingerprint).
+# Copies large long-odds BUYs from young wallets — the insider fingerprint.
 [[algorithm]]
 type = "insider_flow"
 name = "insider_flow_paper"

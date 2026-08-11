@@ -2,10 +2,10 @@
 url = "https://discord.com/api/webhooks/1515201934989201529/vHLKKcHC9XPWzxc7Ldefwivf37EuuVLOz3LV_gxCBipFd4QzjMXixozGDoYmjRd7G9zR"
 type = "summary"
 profile = "experimental"
-notes = "Daily summary for all paper/testing bots."
+notes = "Heartbeat + /summary for paper bots."
 
 [prod_summary]
 url = "https://discord.com/api/webhooks/1515202356206112852/5C_bw3X_xkJH6If3esqi8oxqvpc9kdimq1FrD0nl9LJcFLlpslSdHX5rNUTdKsOKzd75"
 type = "summary"
 profile = "prod"
-notes = "Daily summary for all live prod bots."
+notes = "Heartbeat + /summary for live bots."

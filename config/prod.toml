@@ -1,16 +1,10 @@
-# Prod profile — REAL MONEY. Loaded with PROFILE=prod (POLY_* creds come
-# from the single shared .env; this file holds behavior only — never secrets).
-#
-# Keep this list short and conservative. Mode must be explicit on every
-# block; promote a paper variant by copying its block from
-# experimental.toml and flipping mode to "live".
+# Prod profile — REAL MONEY. PROFILE=prod. Behavior only; POLY_* creds
+# come from the shared .env.
 
-# Real-money opt-in: the loader rejects any mode="live" block in a profile
-# that doesn't set this. Only prod should ever set it.
+# The real-money gate: the loader rejects mode="live" in any profile
+# without this. Only prod sets it.
 allow_live = true
 
-# Intentionally no [[algorithm]] blocks — prod is paused, no live trading.
-# The loader fails fast (ProfileError) if PROFILE=prod is booted in this
-# state, by design: a typo or accidental restart can never "succeed" into
-# silently running nothing. To resume, add a block back (e.g. copy_trade)
-# and run scripts/setup_vm.sh.
+# No [[algorithm]] blocks — prod is paused. Booting it fails fast by
+# design, so an accidental restart can't succeed into running nothing.
+# To resume: add a block and run scripts/setup_vm.sh.

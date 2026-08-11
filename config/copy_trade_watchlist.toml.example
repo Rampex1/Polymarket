@@ -1,12 +1,10 @@
-# Copy this to a profile file, then set PROFILE to that profile name.
-# Before running a paper test, seed conservative history from the public
-# Polymarket APIs (use the Dune CSV path for research/live review):
-# python scripts/import_polymarket_wallet_history.py --max-wallets 25
-# Or import a normalized Dune CSV:
-# python scripts/import_wallet_history.py /path/to/resolved_bets.csv
+# Template for ranked multi-leader copy trading. Copy to <name>.toml and
+# set PROFILE=<name>. Every knob must be stated; omissions are a boot error.
+# See algorithms/copy_trade/params.py for what each means.
 #
-# Every knob must be stated explicitly; the loader rejects a block that
-# omits any. See algorithms/copy_trade/params.py for what each one means.
+# Seed leader history first:
+#   python scripts/import_polymarket_wallet_history.py --max-wallets 25
+#   python scripts/import_wallet_history.py <dune_export>.csv   # stronger
 
 [[algorithm]]
 type = "copy_trade"
@@ -14,7 +12,7 @@ name = "ranked_copy_paper"
 mode = "paper"
 
 [algorithm.params]
-# Target — leave both empty when using the ranked watchlist below
+# Target — leave empty when using the watchlist
 target_address = ""
 target_username = ""
 
@@ -37,7 +35,7 @@ poll_interval_seconds = 20
 min_trade_size_usdc = 0.0
 settle_check_every = 45
 
-# Tier sizing — our stake by the target's total holding in the market
+# Tier sizing — our stake, by the target's total holding
 tier1_min = 80000.0
 tier1_max = 150000.0
 tier1_size = 1.0
@@ -57,5 +55,5 @@ order_type = "market"
 paper_starting_balance = 10000.0
 paper_fee_bps = 0.0
 
-# Required — no global fallback, so an algorithm without one never notifies
+# Required — no global fallback; without it the block fails to boot
 webhook_url = "https://discord.com/api/webhooks/REPLACE_ME"
