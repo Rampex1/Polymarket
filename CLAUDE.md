@@ -125,10 +125,11 @@ bot/
   logs.py                 # Console at INFO + cumulative logs/<profile>/{debug,info,warn,error}.log, rotated daily, 14 kept
 algorithms/
   __init__.py             # REGISTRY (type → classes) + lazy ENABLED via profile_loader (PEP 562)
-  copy_trade/             # Mirror one target wallet, or a ranked cohort
+  copy_trade/             # Mirror one target wallet, or trade a cohort's consensus
     algorithm.py          # CopyTradeAlgorithm: poll → tier sizing → emit intents
     params.py             # CopyTradeParams — pure schema
-    multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
+    consensus.py          # Pure grouping: cohort positions → markets they agree on. No I/O, so thresholds sweep offline
+    engine.py             # ConsensusEngine — snapshots the cohort, screens, emits intents
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
@@ -137,6 +138,7 @@ algorithms/
     archive.py            # Price-history archiver (CLOB drops history at resolution — hoard it); own DB, own process
     research/             # Plans and notes behind this strategy
 scripts/
+  consensus_report.py     # Read-only cohort-consensus report; bootstraps a cohort from the firehose. Places no orders
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
@@ -164,9 +166,38 @@ silence in the channel is the only signal it sends. Portfolio state is
 answered on demand by the slash commands; `/summary` is the sole entry
 point for a full summary, and it composes the text itself.
 
+### copy_trade consensus mode
+
+A non-empty `watchlist_candidate_wallets` swaps `CopyTradeAlgorithm`'s
+single-target feed for `ConsensusEngine`. Every
+`snapshot_interval_seconds` it pulls each cohort wallet's standing positions
+(one call per wallet, threaded), groups them by `(market, outcome)` via
+`consensus.find_consensus`, and opens where support minus opposition clears
+the bar. Consensus is read off *standing positions*, not entry events, so
+agreement accumulated days apart still counts and a missed poll costs
+nothing.
+
+Non-obvious behavior:
+
+- **Group by `asset_id`, never by market.** Five wallets on YES plus five on
+  NO is maximum disagreement; grouping by market alone scores it as ten-way
+  consensus. Only the winning side is ever opened, which preserves the
+  `positions` PK assumption below.
+- **Both price ends are dead ends.** `consensus_max_price` drops finished
+  markets still sitting at 1.00 with `redeemable` false;
+  `consensus_min_price` drops the fossils — a cohort down 98% is holding a
+  position nobody bothered to sell, not an opinion.
+- **`consensus_max_drift` is the adverse-selection gate.** The cohort's edge
+  is in their entry price; once a market has run well past their cost basis,
+  copying it buys their exit liquidity.
+- **Being at tier is the dedupe.** A fully-sized market yields nothing on
+  every later snapshot, so there is no `SeenRing`.
+- Exits are v1 hold-to-resolution via the shared settle sweep. Exiting when
+  the cohort walks away needs snapshot-over-snapshot diffing.
+
 ### Trade lifecycle
 
-`poll()` classifies target activity into BUY → `OpenIntent` (top up to the
+Single-target mode. `poll()` classifies target activity into BUY → `OpenIntent` (top up to the
 tier implied by the target's *total* holding), SELL → `CloseIntent` (resize
 to the post-sell tier), MERGE → `CloseIntent(fraction=1.0)` (no slippage
 gate), REDEEM → `SettleIntent`. `runner.dispatch()` then does risk check →

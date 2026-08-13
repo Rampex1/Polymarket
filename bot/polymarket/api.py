@@ -8,6 +8,7 @@ All requests share one retrying session so transient 429/5xx don't drop trades.
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -323,6 +324,79 @@ def _flag_true(val) -> bool:
     if isinstance(val, bool):
         return val
     return isinstance(val, str) and val.lower() in ("true", "1", "yes")
+
+
+_EVENT_TAG_CACHE: dict[str, list[str]] = {}
+
+
+def _event_tags(event: dict) -> list[str]:
+    """Tag labels for one Gamma event.
+
+    The `events` embedded in a `/markets` row carry no `tags` key — they are
+    only populated on `/events`. Reading the embedded copy silently yields
+    zero labels, which reads identically to "this market has no category" and
+    quietly disables any screen built on it. So fall back to the second call,
+    cached by event id (tags don't change, and one negative-risk event backs
+    dozens of markets).
+    """
+    tags = event.get("tags")
+    if tags is None:
+        event_id = str(event.get("id") or "")
+        if not event_id:
+            return []
+        if event_id in _EVENT_TAG_CACHE:
+            return _EVENT_TAG_CACHE[event_id]
+        try:
+            resp = SESSION.get(f"{config.GAMMA_API}/events", params={"id": event_id}, timeout=8)
+            resp.raise_for_status()
+            data = resp.json()
+            rows = data if isinstance(data, list) else [data]
+            tags = rows[0].get("tags") or [] if rows else []
+        except Exception as e:
+            logger.debug("Gamma event tag lookup failed for %s: %s", event_id, e)
+            return []          # not cached — the next lookup retries
+        if len(_EVENT_TAG_CACHE) > 2000:
+            _EVENT_TAG_CACHE.clear()
+        _EVENT_TAG_CACHE[event_id] = tags
+    return tags
+
+
+def market_labels(market: dict) -> str:
+    """Gamma category + event tags → lowercased comma-joined labels.
+
+    The authoritative category screen: title patterns miss formats like
+    "Will <team> win on <date>?", Gamma tags don't. Empty string when Gamma
+    carries no labels — callers decide whether that fails open or closed.
+    """
+    labels = []
+    if market.get("category"):
+        labels.append(str(market["category"]))
+    for event in market.get("events") or []:
+        for tag in _event_tags(event):
+            for key in ("label", "slug"):
+                if tag.get(key):
+                    labels.append(str(tag[key]))
+    return ",".join(dict.fromkeys(l.lower() for l in labels))
+
+
+def market_end_ts(market: dict) -> Optional[float]:
+    """Gamma end date (ISO-8601, sometimes date-only `endDateIso`) → unix ts.
+
+    Unparseable → None. Callers fail closed on that: an unknown resolution
+    date can't be time-value gated.
+    """
+    for key in ("endDate", "endDateIso"):
+        raw = market.get(key)
+        if not raw or not isinstance(raw, str):
+            continue
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    return None
 
 
 def market_is_resolved(market: dict) -> bool:

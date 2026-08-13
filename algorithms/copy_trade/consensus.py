@@ -88,7 +88,7 @@ def parse_positions(wallet: str, rows: list[dict]) -> list[Holding]:
 
 def find_consensus(
     holdings: list[Holding], *, min_support: int = 3, min_margin: int = 2,
-    min_conviction: float = 0.0, max_price: float = 0.97,
+    min_conviction: float = 0.0, max_price: float = 0.97, min_price: float = 0.05,
 ) -> list[Consensus]:
     """Markets where enough of the cohort holds the same side.
 
@@ -96,9 +96,11 @@ def find_consensus(
     market alone would read five wallets on YES plus five on NO as ten-way
     agreement when it is maximum disagreement.
 
-    `max_price` drops the decided-but-not-yet-resolved: a finished match sits
-    at 1.000 with `redeemable` still false, and would otherwise top the
-    ranking with a consensus that has nothing left to pay out.
+    `max_price`/`min_price` drop the decided-but-not-yet-resolved at either
+    end. A finished match sits at 1.000 with `redeemable` still false and
+    would otherwise top the ranking with nothing left to pay out; at the other
+    end, a cohort sitting on a position down 98% is a fossil nobody bothered
+    to sell, not a live opinion worth copying.
 
     ponytail: opposition only looks at the direct `oppositeAsset`. In a
     negative-risk event (one market per team) a wallet holding a rival's YES
@@ -131,7 +133,7 @@ def find_consensus(
             continue
         cost = sum(h.cost_usdc for h in hs)
         price = max(h.current_price for h in hs)
-        if price > max_price:
+        if not (min_price <= price <= max_price):
             continue
         out.append(Consensus(
             asset_id=asset_id,

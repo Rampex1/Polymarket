@@ -24,20 +24,28 @@ class CopyTradeParams:
     target_address: str = _doc("", "Target's proxy wallet (from their Polymarket profile URL). Preferred over username.")
     target_username: str = _doc("", "Target's username — resolved to a wallet via Gamma /profiles at startup.")
 
-    # ── Ranked multi-leader mode ────────────────────────────────────────────
-    # ``watchlist_size=0`` preserves the original single-target behavior.
-    # A positive value activates the scorer-backed watchlist instead of the
-    # static target fields above.
-    watchlist_size: int = _doc(0, "Top ranked wallets to watch; 0 keeps legacy single-target mode.")
-    watchlist_candidate_wallets: tuple = _doc((), "Candidate proxy-wallet addresses supplied to the offline/history source.")
+    # ── Snapshot-consensus mode ─────────────────────────────────────────────
+    # A non-empty ``watchlist_candidate_wallets`` activates the cohort engine
+    # instead of the static target fields above. Consensus is read off the
+    # cohort's *standing positions* each snapshot, not off a window of entry
+    # events, so agreement accumulated days apart still counts.
+    watchlist_candidate_wallets: tuple = _doc((), "Cohort proxy-wallet addresses. Non-empty activates consensus mode. Bootstrap with scripts/consensus_report.py.")
+    watchlist_size: int = _doc(0, "Rank the cohort down to this many wallets; 0 uses the candidate list as given.")
     watchlist_refresh_seconds: int = _doc(86_400, "How often to rescore and atomically replace the active wallet cohort.")
     watchlist_min_resolved_bets: int = _doc(50, "Minimum resolved bets before a wallet is eligible.")
     watchlist_confidence_z: float = _doc(1.645, "One-sided confidence multiplier used for the edge lower bound.")
     watchlist_min_copyability_score: float = _doc(0.0, "Reject wallets below this historical copyability score (0..1).")
-    consensus_window_seconds: int = _doc(1_800, "Time window in which distinct leader entries form a consensus.")
-    consensus_min_leaders: int = _doc(2, "Distinct active leaders required for consensus sizing.")
-    consensus_size_multiplier: float = _doc(2.0, "Multiplier applied to a tier target after consensus, capped by max position size.")
-    max_concurrent_positions: int = _doc(8, "Hard cap on simultaneously open markets for ranked multi-leader mode.")
+
+    snapshot_interval_seconds: int = _doc(300, "Seconds between cohort position snapshots — one API call per wallet, and standing positions don't move fast.")
+    consensus_min_leaders: int = _doc(4, "Distinct cohort wallets holding the same side before it counts as consensus.")
+    consensus_min_margin: int = _doc(3, "Support minus opposition. Five on YES against five on NO is disagreement, not a signal.")
+    consensus_min_conviction: float = _doc(0.0, "Ignore a wallet's vote below this fraction of its own deployed capital. 0 = count every position.")
+    consensus_max_price: float = _doc(0.97, "Skip markets already priced as decided — a finished match sits at 1.00 with nothing left to pay out.")
+    consensus_min_price: float = _doc(0.05, "Skip markets priced as already lost. A cohort down 98% is holding a fossil, not an opinion.")
+    consensus_max_drift: float = _doc(0.25, "Skip if price has run this far past the cohort's cost basis. Their edge is in the entry; past it you are their exit liquidity.")
+    exclude_categories: tuple = _doc(("sports",), "Gamma category/tag substrings to skip. Sports are the most efficiently priced markets on the platform.")
+    min_hours_to_resolution: float = _doc(24.0, "Skip markets resolving sooner than this — a coin flip with minutes left is not a copyable edge.")
+    max_concurrent_positions: int = _doc(8, "Hard cap on simultaneously open markets for consensus mode.")
 
     # ── Polling ──────────────────────────────────────────────────────────────
     poll_interval_seconds: int = _doc(20, "Seconds between polls of the target's activity feed.")
@@ -77,21 +85,23 @@ class CopyTradeParams:
         """Boot-time sanity checks — called by the profile loader."""
         if self.watchlist_size < 0:
             raise ValueError("watchlist_size must be zero or positive.")
-        if self.watchlist_size == 0 and not (self.target_address or self.target_username):
+        if not self.watchlist_candidate_wallets and not (self.target_address or self.target_username):
             raise ValueError(
-                "copy_trade needs a target, or set watchlist_size > 0 for "
-                "ranked multi-leader mode."
+                "copy_trade needs a target, or watchlist_candidate_wallets "
+                "for consensus mode."
             )
         if self.order_type not in ("market", "limit"):
             raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
         if not (0 < self.tier1_min <= self.tier1_max <= self.tier2_max):
             raise ValueError("tiers must satisfy 0 < tier1_min <= tier1_max <= tier2_max.")
-        if self.watchlist_size > 0 and not self.watchlist_candidate_wallets:
-            raise ValueError("ranked multi-leader mode needs watchlist_candidate_wallets.")
-        if self.watchlist_refresh_seconds <= 0 or self.consensus_window_seconds <= 0:
-            raise ValueError("watchlist_refresh_seconds and consensus_window_seconds must be positive.")
-        if self.consensus_min_leaders < 2 or self.consensus_size_multiplier < 1:
-            raise ValueError("consensus requires at least two leaders and a multiplier of at least one.")
+        if self.watchlist_refresh_seconds <= 0 or self.snapshot_interval_seconds <= 0:
+            raise ValueError("watchlist_refresh_seconds and snapshot_interval_seconds must be positive.")
+        if self.consensus_min_leaders < 2:
+            raise ValueError("consensus requires at least two leaders.")
+        if self.consensus_min_margin > self.consensus_min_leaders:
+            raise ValueError("consensus_min_margin above consensus_min_leaders can never be satisfied.")
+        if not (0 <= self.consensus_min_price < self.consensus_max_price <= 1):
+            raise ValueError("prices must satisfy 0 <= consensus_min_price < consensus_max_price <= 1.")
         if self.max_concurrent_positions <= 0:
             raise ValueError("max_concurrent_positions must be positive.")
         if not self.webhook_url:

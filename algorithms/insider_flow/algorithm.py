@@ -46,7 +46,6 @@ before resolution.
 import logging
 import math
 import time
-from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 from bot.caches import SeenRing
@@ -364,40 +363,14 @@ class InsiderFlowAlgorithm(Algorithm):
         if market is None:
             return None
 
-        labels = []
-        if market.get("category"):
-            labels.append(str(market["category"]))
-        for event in market.get("events") or []:
-            for tag in event.get("tags") or []:
-                for key in ("label", "slug"):
-                    if tag.get(key):
-                        labels.append(str(tag[key]))
-
         info = {
-            "cats": ",".join(dict.fromkeys(l.lower() for l in labels)),
-            "end_ts": self._parse_end_ts(market),
+            "cats": self._market_data.market_labels(market),
+            "end_ts": self._market_data.market_end_ts(market),
         }
         if len(self._market_info_cache) > 2000:
             self._market_info_cache.clear()
         self._market_info_cache[market_id] = info
         return info
-
-    @staticmethod
-    def _parse_end_ts(market: dict) -> Optional[float]:
-        """Gamma end date (ISO-8601, sometimes date-only `endDateIso`) →
-        unix timestamp. Unparseable → None (caller fails closed)."""
-        for key in ("endDate", "endDateIso"):
-            raw = market.get(key)
-            if not raw or not isinstance(raw, str):
-                continue
-            try:
-                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        return None
 
     def _features_for(
         self, row: GlobalTrade, stats: dict, cats: Optional[str],

@@ -46,6 +46,14 @@ class MarketDataGateway:
         return api.fetch_wallet_value(address)
 
     @staticmethod
+    def market_labels(market: dict) -> str:
+        return api.market_labels(market)
+
+    @staticmethod
+    def market_end_ts(market: dict) -> Optional[float]:
+        return api.market_end_ts(market)
+
+    @staticmethod
     def market_is_resolved(market: dict) -> bool:
         return api.market_is_resolved(market)
 

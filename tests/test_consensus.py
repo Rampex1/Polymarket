@@ -64,3 +64,14 @@ def test_entry_is_cost_weighted_and_drift_measures_the_run():
     (c,) = find_consensus(snapshot(spec), min_support=3, min_margin=1)
     assert round(c.avg_entry, 4) == 0.1727      # not the 0.367 an unweighted mean gives
     assert round(c.drift, 2) == 1.89            # price nearly tripled their basis
+
+
+def test_decided_markets_are_dropped_at_both_ends():
+    def cohort(cur):
+        return snapshot({f"0x{i}": [row("yes", "no", "Yes", 100, avg=0.40, cur=cur)]
+                         for i in range(4)})
+    # Already won: a finished match sits at 1.00 with nothing left to pay out.
+    assert find_consensus(cohort(1.0), min_support=3, min_margin=1) == []
+    # Already lost: a cohort down 98% is holding a fossil, not an opinion.
+    assert find_consensus(cohort(0.01), min_support=3, min_margin=1) == []
+    assert len(find_consensus(cohort(0.45), min_support=3, min_margin=1)) == 1

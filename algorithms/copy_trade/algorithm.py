@@ -1,8 +1,16 @@
 """
 Copy-trade algorithm — mirrors a Polymarket wallet's activity.
 
-How it works
-------------
+Two modes, chosen by whether `watchlist_candidate_wallets` is set:
+
+  * Single target (empty)  — everything documented below: follow one wallet's
+    trade feed, tier off its holding.
+  * Consensus (non-empty)  — hand off to `ConsensusEngine`, which snapshots a
+    whole cohort's standing positions and trades where they agree. Entries
+    come from the engine; exits are the same settle sweep used below.
+
+How single-target mode works
+----------------------------
 Polls the Polymarket activity API for new trades by `params.target_address`,
 classifies each row into one of {BUY, SELL, MERGE, REDEEM}, and yields the
 corresponding Intent for the shared runner to execute.
@@ -43,8 +51,7 @@ from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 
 from .params import CopyTradeParams
-from .multi_leader import MultiLeaderCopyEngine
-from .ranker import SQLiteResolvedBetSource
+from .engine import ConsensusEngine
 from .watchlist import WatchlistRepository
 
 logger = logging.getLogger(__name__)
@@ -68,7 +75,6 @@ class CopyTradeAlgorithm(Algorithm):
         self,
         params: CopyTradeParams,
         market_data: Optional[MarketDataGateway] = None,
-        ranker_source=None,
         watchlist: Optional[WatchlistRepository] = None,
     ) -> None:
         """Create a copy-trade worker.
@@ -82,11 +88,9 @@ class CopyTradeAlgorithm(Algorithm):
 
         self._market_data = market_data or DEFAULT_MARKET_DATA
         self._watchlist = watchlist or WatchlistRepository()
-        self._multi = MultiLeaderCopyEngine(
-            self.params, self._market_data, self._watchlist,
-            ranker_source or SQLiteResolvedBetSource(),
-            self._tier_for_holding,
-        ) if self.params.watchlist_size > 0 else None
+        self._multi = ConsensusEngine(
+            self.params, self._market_data, self._watchlist, self._tier_for_holding,
+        ) if self.params.watchlist_candidate_wallets else None
 
         self._address: str = ""
         self._ledger = None        # Ledger, set in setup()
@@ -103,7 +107,7 @@ class CopyTradeAlgorithm(Algorithm):
         address if only the wallet was supplied.
         """
         if self._multi is not None:
-            return f"{self.name} → ranked top {self.params.watchlist_size} wallets"
+            return f"{self.name} → {len(self.params.watchlist_candidate_wallets)}-wallet consensus"
         target = self.params.target_username
         if not target:
             addr = self.params.target_address
@@ -119,7 +123,6 @@ class CopyTradeAlgorithm(Algorithm):
 
         if self._multi is not None:
             self._multi.setup(ledger, self._paper)
-            logger.info("[%s] Ranked multi-leader watcher initialized.", self.params.name)
             return
 
         if self.params.target_address:

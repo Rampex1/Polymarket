@@ -56,6 +56,8 @@ def main() -> int:
                    help="position must be this fraction of the wallet's deployed capital")
     p.add_argument("--max-price", type=float, default=0.97,
                    help="drop markets already priced as decided (default 0.97)")
+    p.add_argument("--min-price", type=float, default=0.05,
+                   help="drop markets priced as already lost (default 0.05)")
     p.add_argument("--exclude", metavar="REGEX", default="",
                    help="drop markets whose title matches, e.g. 'FIFA|NBA|vs\\.'")
     p.add_argument("-v", "--verbose", action="store_true", help="list the wallets behind each row")
@@ -91,6 +93,7 @@ def main() -> int:
     rows = find_consensus(
         holdings, min_support=args.min_support, min_margin=args.min_margin,
         min_conviction=args.min_conviction, max_price=args.max_price,
+        min_price=args.min_price,
     )
     if args.exclude:
         pattern = re.compile(args.exclude, re.I)
