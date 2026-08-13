@@ -337,22 +337,31 @@ def fetch_market_resolution(market_id: str) -> Optional[dict]:
         # Try both the plural and singular forms — Gamma's parameter naming
         # has varied across versions; whichever matches will return the row.
         for param in ("condition_ids", "condition_id"):
-            resp = SESSION.get(
-                f"{config.GAMMA_API}/markets",
-                params={param: market_id},
-                timeout=8,
-            )
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            rows = data if isinstance(data, list) else [data]
-            # Gamma responds 200 with an unfiltered first page for an
-            # unrecognised parameter spelling.  Never treat that arbitrary
-            # market as this market's resolution — it can settle the wrong
-            # token.  Try the fallback spelling instead.
-            for row in rows:
-                if str(row.get("conditionId") or "").lower() == market_id.lower():
-                    return row
+            # `/markets` hides closed markets by default, so the unqualified
+            # query returns nothing for exactly the markets that have
+            # resolved — which is what this function exists to find. Without
+            # the `closed=true` retry the settle sweep sees None for every
+            # resolved market and never settles anything: positions stay open
+            # forever, P&L is never booked, and signals.outcome is never
+            # labelled. Open markets are tried first because they are the
+            # common case (every sweep re-checks positions still trading).
+            for extra in ({}, {"closed": "true"}):
+                resp = SESSION.get(
+                    f"{config.GAMMA_API}/markets",
+                    params={param: market_id, **extra},
+                    timeout=8,
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                rows = data if isinstance(data, list) else [data]
+                # Gamma responds 200 with an unfiltered first page for an
+                # unrecognised parameter spelling.  Never treat that arbitrary
+                # market as this market's resolution — it can settle the wrong
+                # token.  Try the fallback spelling instead.
+                for row in rows:
+                    if str(row.get("conditionId") or "").lower() == market_id.lower():
+                        return row
     except Exception as e:
         logger.debug("Gamma market lookup failed for %s: %s", market_id, e)
     return None
