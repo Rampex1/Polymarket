@@ -84,3 +84,29 @@ def test_a_failed_page_is_not_an_exhausted_history(monkeypatch):
 
     _, truncated = rw.ingest("0xA", max_pages=4)
     assert truncated is True
+
+
+def open_pos(cid="m1", idx=0):
+    return {"conditionId": cid, "outcomeIndex": idx, "redeemable": False,
+            "avgPrice": 0.4, "curPrice": 0.4, "endDate": "2027-01-01"}
+
+
+def test_copyability_is_the_share_of_bets_held_to_resolution():
+    # Three concluded: one resolved, two sold out before resolution.
+    activity = [buy(cid="held"), redeem(cid="held"), buy(cid="dumped1"), buy(cid="dumped2")]
+    (bet,) = resolved_bets_from("0xA", activity, [])
+    assert round(bet.copyability_score, 3) == round(1 / 3, 3)
+
+
+def test_open_positions_do_not_count_as_exits():
+    # Holding a live bet is not selling out; a wallet with a book must not be
+    # punished for having one.
+    activity = [buy(cid="held"), redeem(cid="held"), buy(cid="live")]
+    (bet,) = resolved_bets_from("0xA", activity, [open_pos(cid="live")])
+    assert bet.copyability_score == 1.0
+
+
+def test_a_wallet_that_holds_everything_scores_one():
+    activity = [buy(cid="w"), redeem(cid="w"), buy(cid="l")]
+    bets = resolved_bets_from("0xA", activity, [settled(cid="l")])
+    assert {b.copyability_score for b in bets} == {1.0}

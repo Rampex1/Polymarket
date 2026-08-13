@@ -22,7 +22,8 @@ pass produced wallets at 100-0 and 1266-1. Anchoring both outcomes to the BUY
 that opened the bet keeps a single clock and needs no windowing at all.
 
 A bet still open, or sold off before it resolved, appears in neither branch,
-which is correct — an exit is a trade, not a verdict.
+which is correct — an exit is a trade, not a verdict. How often a wallet ends
+a bet that way is itself the signal `copyability_score` carries.
 """
 
 from bot.polymarket.api import market_end_ts
@@ -81,28 +82,47 @@ def _verdicts(positions: list[dict]) -> dict[tuple, tuple[float, int]]:
     return out
 
 
+def _still_open(positions: list[dict]) -> set[tuple]:
+    """Bets whose market has not resolved — pending, not concluded."""
+    return {_key(row) for row in positions if not row.get("redeemable")}
+
+
 def resolved_bets_from(
     wallet: str, activity: list[dict], positions: list[dict],
-    copyability_score: float = 1.0,
 ) -> list[ResolvedBet]:
-    """Every bet of `wallet`'s, in the activity window, whose outcome is known."""
+    """Every bet of `wallet`'s, in the activity window, whose outcome is known.
+
+    Each bet carries the wallet's **copyability score**: the share of its
+    *concluded* bets that concluded at resolution rather than by selling out.
+    That is the correction for this reconstruction's built-in flattery — only
+    bets held to resolution get a verdict, so a wallet that cuts its losers
+    early shows a win rate that no one mirroring it could reproduce. Open
+    positions are excluded from the ratio entirely: holding a live bet is not
+    an exit, and counting it as one would punish anyone with a book.
+    """
     basis = _cost_basis(activity)
     redeemed = _redemptions(activity)
     settled = _verdicts(positions)
+    pending = _still_open(positions)
 
-    bets = []
+    graded: list[tuple[float, float, int]] = []
+    exited = 0
     for key, (shares, paid) in basis.items():
         entry = paid / shares if shares > 0 else 0.0
         if not 0 < entry < 1:
             continue
         if key in redeemed:
-            outcome, resolved_at = 1.0, redeemed[key]
+            graded.append((entry, 1.0, redeemed[key]))
         elif key in settled:
             outcome, resolved_at = settled[key]
+            graded.append((entry, outcome, resolved_at))
+        elif key in pending:
+            continue          # market still live — no verdict either way yet
         else:
-            continue      # still trading, or they sold out before resolution
-        bets.append(ResolvedBet(
-            wallet=wallet.lower(), entry_price=entry, outcome=outcome,
-            resolved_at=resolved_at, copyability_score=copyability_score,
-        ))
-    return bets
+            exited += 1       # sold out before it resolved
+
+    concluded = len(graded) + exited
+    score = len(graded) / concluded if concluded else 0.0
+    return [ResolvedBet(wallet=wallet.lower(), entry_price=entry, outcome=outcome,
+                        resolved_at=resolved_at, copyability_score=score)
+            for entry, outcome, resolved_at in graded]
