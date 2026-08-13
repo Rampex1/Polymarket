@@ -10,7 +10,7 @@
 #   prod    — PROFILE=prod         python main.py   (REAL MONEY)
 #             only started if config/prod.toml has [[algorithm]] blocks —
 #             an intentionally empty prod (paused) is not an error
-#   archive — python -m algorithms.insider_flow.archive --loop --every 3600
+#   archive — python -m algorithms.insider_flow.archive --loop --every 3600 --fidelity 1
 #   discord — python -m bot.discord  (slash commands, all profiles)
 set -euo pipefail
 
@@ -105,7 +105,13 @@ else
     tmux kill-session -t prod 2>/dev/null || true
     echo "  [prod] no [[algorithm]] blocks configured — session not started"
 fi
-start_session archive "python -m algorithms.insider_flow.archive --loop --every 3600"
+# --fidelity 1 is not optional. The default is 60, which stores hourly bars:
+# a football match becomes two data points, and resolution_carry's whole
+# calibration question — how a price behaves on its way into settlement —
+# becomes unanswerable. Every deploy restarts this session, so dropping the
+# flag here silently blinds the dataset from that moment on, and the CLOB
+# does not re-serve history once a market resolves.
+start_session archive "python -m algorithms.insider_flow.archive --loop --every 3600 --fidelity 1"
 start_session discord "python -m bot.discord"
 
 echo "==> Verifying (give workers a moment to boot)"
