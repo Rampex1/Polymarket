@@ -349,6 +349,12 @@ Non-obvious behavior, all deliberate:
   edge; here efficiency is the product, and sports supplies objective
   resolution, independent events, and the short horizons that make 2% worth
   having.
+- **`min_hours_to_resolution = 0`, unlike every sibling.** The trade is a
+  match decided on the pitch sitting at 0.97 while it waits to settle —
+  minutes out, not hours. A 6h floor excluded exactly that and left a
+  universe of one sports market. The gate still rejects a market past its
+  end date (a dead book with no carry left), and `validate()` refuses a
+  negative value.
 - **`poll_interval_seconds = 60`, from a measurement.** p95 drift on a
   market already at 0.95+ is 0.0185 over five minutes — the entire return of
   a 0.98 entry. 300 would systematically fill only the trades that moved

@@ -69,7 +69,7 @@ def test_clean_row_becomes_a_candidate():
     (market(bestAsk="0.80"),  2,  "out of band"),   # forecasting, not carrying
     (market(bestBid="0.90"),  2,  "spread"),        # no real price
     (market(liquidityClob="100"), 2, "illiquid"),
-    (market(),                0.1, "resolves too soon"),
+    (market(),               -0.1, "past end date"),
     (market(),                90,  "resolves too far out"),
     (market(bestAsk="0.975", bestBid="0.97"), 40, "not worth the wait"),
     (market(clobTokenIds="[]"), 2, "no token id"),
@@ -81,6 +81,27 @@ def test_gates_reject_with_a_reason(row, days, reason):
 def test_unknown_end_date_fails_closed():
     """An un-priceable wait cannot clear a time-value hurdle."""
     assert screen.evaluate(market(), None, NOW, _params()) == "no end date"
+
+
+def test_a_market_minutes_from_settling_is_tradeable():
+    """The whole thesis: a game decided on the pitch, sitting at 0.97 while
+    it waits to settle. A floor in hours would exclude exactly this."""
+    cand = screen.evaluate(market(), end_ts(10 / 1440), NOW, _params())
+    assert isinstance(cand, screen.Candidate)
+    # Annualising floors the horizon at a day, so a 10-minute wait is not
+    # reported as a four-figure return.
+    assert cand.annualized == pytest.approx((0.03 / 0.97) * 365, rel=1e-6)
+
+
+def test_an_hours_floor_still_applies_when_set():
+    p = _params(min_hours_to_resolution=6.0)
+    assert screen.evaluate(market(), end_ts(0.1), NOW, p) == "resolves too soon"
+
+
+def test_validate_refuses_a_negative_hours_floor():
+    """Negative would buy markets past their end date — a dead book."""
+    with pytest.raises(ValueError):
+        _params(min_hours_to_resolution=-1.0).validate()
 
 
 def test_sports_is_required_not_excluded():

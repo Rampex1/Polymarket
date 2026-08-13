@@ -28,7 +28,17 @@ class ResolutionCarryParams:
     # and worse than cash over 180. Unknown end date fails closed.
     max_days_to_resolution: float = _doc(45.0, "Capital lockup ceiling, in days.")
     min_annualized_return: float = _doc(0.25, "Win-case return annualized over the wait must beat this (0.25 = +25%/yr).")
-    min_hours_to_resolution: float = _doc(6.0, "Skip markets settling sooner than this — stale books and settling-right-now noise.")
+    # 0, not 6: a floor in hours is a floor on the whole thesis. The trade
+    # this strategy exists to take is a game decided on the pitch and sitting
+    # at 0.97 while it waits to settle, which is minutes from resolution, not
+    # hours. A 6h floor excluded exactly that and left a universe of one
+    # sports market (measured across all 2,100 Gamma will serve).
+    #
+    # At 0 the gate still rejects a market whose end date has *passed* —
+    # trading has effectively stopped, there is no carry left to earn, and
+    # the quoted price is a dead book rather than an opinion. That is the
+    # part worth keeping, so validate() refuses a negative value.
+    min_hours_to_resolution: float = _doc(0.0, "Skip markets settling sooner than this. 0 still rejects markets already past their end date.")
 
     # ── Liquidity ────────────────────────────────────────────────────────────
     min_market_liquidity_usdc: float = _doc(5_000.0, "Gamma `liquidityClob` floor — a depth proxy, not a measurement.")
@@ -97,6 +107,12 @@ class ResolutionCarryParams:
             raise ValueError(
                 f"bet_size_usdc ${self.bet_size_usdc} exceeds max_position_size_usdc "
                 f"${self.max_position_size_usdc} — every buy would fail the risk check."
+            )
+        if self.min_hours_to_resolution < 0:
+            raise ValueError(
+                "min_hours_to_resolution must be >= 0 — a negative floor buys "
+                "markets whose end date has passed, where the quoted price is "
+                "a dead book and there is no carry left to earn."
             )
         if self.max_positions_per_event < 1 or self.max_positions_per_category < 1:
             raise ValueError("Per-event and per-category caps must be at least 1.")

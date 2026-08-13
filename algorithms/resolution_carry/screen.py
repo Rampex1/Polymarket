@@ -66,6 +66,12 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
     if end_ts is None:
         return "no end date"
     hours = (end_ts - now) / 3_600.0
+    # Past its end date is not "nearly settled", it is settled: trading has
+    # effectively stopped, so the quote is a dead book and there is no carry
+    # left to earn. Kept separate from the floor below so the funnel says
+    # which one fired.
+    if hours < 0:
+        return "past end date"
     if hours < p.min_hours_to_resolution:
         return "resolves too soon"
     days = hours / 24.0

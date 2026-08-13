@@ -196,7 +196,7 @@ max_ask                 0.985  # above this the residual cannot cover the tail
 # ── Time value ──────────────────────────────────────────────────────────
 max_days_to_resolution  45     # capital lockup ceiling
 min_annualized_return   0.25   # the real hurdle: 2% in 30d passes, 2% in 180d does not
-min_hours_to_resolution 6      # avoid settling-right-now noise and stale books
+min_hours_to_resolution 0      # was 6; see below — it excluded the thesis
 
 # ── Liquidity ───────────────────────────────────────────────────────────
 min_market_liquidity_usdc  5000   # Gamma `liquidityClob`, proxy for depth
@@ -224,7 +224,25 @@ poll_interval_seconds   60       # set by the staleness measurement, not taste
 settle_check_every      12
 ```
 
-Two defaults that differ from the other strategies, both deliberate:
+Three defaults worth explaining, all deliberate:
+
+**`min_hours_to_resolution = 0`, changed from 6 after the first live scan.**
+The 6-hour floor was written to avoid stale books and settling-right-now
+noise, and it quietly excluded the strategy's whole reason to exist. The
+trade described in the Universe section — a match decided on the pitch,
+sitting at 0.97 while it waits to settle — is *minutes* from resolution, not
+hours. Six hours before a game nobody knows who wins, so the price is not in
+the band yet. Measured across all 2,100 markets Gamma will serve: 46 in band
+with a usable spread, exactly **one** of them sports, and that one 31 days
+out. The floor and the sports-primary universe could not both hold.
+
+At 0 the gate still rejects a market whose end date has *passed*, which is
+the part that was actually load-bearing: trading has effectively stopped,
+so the quote is a dead book and there is no carry left to earn. `validate()`
+refuses a negative value for that reason. Annualisation still floors the
+horizon at one day, so a ten-minute wait is not reported as a four-figure
+return.
+
 
 **`order_type = "limit"`.** At 2% gross, one tick of slippage is a quarter of
 the return and two ticks is half. A market/FOK order that fills at 0.99
@@ -269,10 +287,10 @@ win_return = (1 - ask) / ask
 annualised = win_return * 365 / max(days, 1)
 ```
 
-Reject if `days > max_days_to_resolution`, `hours < min_hours_to_resolution`,
-or `annualised < min_annualized_return`. **Unknown end date fails closed** —
-an un-priceable wait cannot clear a time-value hurdle. Use
-`api.market_end_ts`.
+Reject if `days > max_days_to_resolution`, the end date has already passed,
+`hours < min_hours_to_resolution` (0 by default — see above), or
+`annualised < min_annualized_return`. **Unknown end date fails closed** — an
+un-priceable wait cannot clear a time-value hurdle. Use `api.market_end_ts`.
 
 ### 3. Diversification gate
 
