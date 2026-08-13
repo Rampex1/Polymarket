@@ -20,10 +20,7 @@ type = "copy_trade"
 name = "copy_trade_sports_paper"
 mode = "paper"
 
-# Uncomment once resolution_carry's webhook_url is filled in — validate()
-# rejects an empty one, and that ProfileError would take the whole profile
-# down, not just this block.
-# [[algorithm]]
-# type = "resolution_carry"
-# name = "resolution_carry_paper"
-# mode = "paper"
+[[algorithm]]
+type = "resolution_carry"
+name = "resolution_carry_paper"
+mode = "paper"

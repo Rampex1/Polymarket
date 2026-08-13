@@ -1,10 +1,10 @@
 # resolution_carry — implementation plan
 
-**Status: built and registered. Not yet running** — the profile block in
-`config/experimental.toml` is commented out until `webhook_url` is set in
-`params.py`. Everything below the Module layout section is the design that
-was implemented; read it as the rationale behind the code, not as pending
-work. Phase A (calibration) and Phase B (paper) are still open.
+**Status: built, registered, and running in `experimental.toml` as
+`resolution_carry_paper`.** Everything below the Module layout section is
+the design that was implemented; read it as the rationale behind the code,
+not as pending work. Phase A (calibration) and Phase B (paper) are still
+open.
 
 ## Thesis
 
@@ -180,13 +180,9 @@ not expose: `MarketDataGateway.top_markets` and an `offset` argument on
 
 Registration:
 
-1. `algorithms/__init__.py` → `"resolution_carry"` in `REGISTRY`. **Done.**
-2. `config/experimental.toml` → a `[[algorithm]]` block, `mode = "paper"`.
-   **Present but commented out** — see 3.
-3. `params.py` → a real `webhook_url`. **Still empty.** `validate()` rejects
-   an empty one, and that ProfileError takes down the whole profile, so the
-   TOML block stays commented until it is filled in. Do not reuse
-   insider_flow's; this one will be chatty.
+All three done: `"resolution_carry"` in `REGISTRY`, a `mode = "paper"` block
+in `config/experimental.toml`, and its own `webhook_url` (not insider_flow's
+— this one is chatty).
 
 ## Parameter surface
 

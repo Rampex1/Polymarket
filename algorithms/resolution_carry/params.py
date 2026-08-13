@@ -77,7 +77,7 @@ class ResolutionCarryParams:
 
     # ── Notifications ────────────────────────────────────────────────────────
     webhook_url: str = _doc(
-        "",
+        "https://discord.com/api/webhooks/1537542638591410239/Cm8imiHekuEMjqj_EXRfamB61RkmHazqIQRVXqTTzK_fvdN7ScijyupxDONtTDQTqgAQ",
         "Discord webhook for this algorithm's trade alerts. Required — there is no global fallback.",
     )
 
