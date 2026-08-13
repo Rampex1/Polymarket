@@ -205,7 +205,7 @@ max_ask_spread             0.02   # bestAsk - bestBid; a wide book means no real
 # ── Diversification (the load-bearing risk control) ─────────────────────
 max_concurrent_positions   20
 max_positions_per_event     1     # one leg per Gamma eventId
-max_positions_per_category  5     # cap correlated themes
+max_positions_per_category 20     # inert under require_sports — see below
 
 # ── Sizing ──────────────────────────────────────────────────────────────
 bet_size_usdc              1.0
@@ -317,7 +317,10 @@ size. Before opening:
 - reject if we already hold a position in this `eventId`
   (`market["events"][0]["id"]`);
 - reject if positions sharing this market's primary Gamma category already
-  number `max_positions_per_category` (use `api.market_labels`).
+  number `max_positions_per_category` (use `api.market_labels`). Note this
+  cap is inert while `require_sports` is on: every sports market's primary
+  label is `sports`, so a real value here caps total positions rather than
+  capping a theme. The per-event cap is what actually diversifies this arm.
 
 ### 4. Ranking and sizing
 

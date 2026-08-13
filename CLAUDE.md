@@ -363,10 +363,12 @@ Non-obvious behavior, all deliberate:
 - **`order_type = "limit"`.** One tick of slippage is a quarter of the
   return. Non-fills are the accepted cost; whether a GTC at the ask reliably
   fills is the open question paper exists to answer.
-- **The per-event and per-category caps are the risk control**, not tidiness.
-  At 0.98 the loss is 49× the win, so twenty legs of one event is one
-  position with twenty times the size. `screen.select` applies the caps to a
-  single poll's own picks as well as to open positions.
+- **The per-event cap is the risk control**, not tidiness. At 0.98 the loss
+  is 49× the win, so twenty legs of one event is one position with twenty
+  times the size. `screen.select` applies it to a single poll's own picks as
+  well as to open positions. `max_positions_per_category` is deliberately
+  inert (20): every sports market's primary Gamma label is `sports`, so a
+  real value there caps total positions rather than capping a theme.
 - **Being at size is the dedupe.** A held market yields nothing on later
   scans, so there is no `SeenRing`.
 - **No stop-loss.** A stop realises exactly the losses the strategy exists to

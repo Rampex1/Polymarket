@@ -52,7 +52,14 @@ class ResolutionCarryParams:
     # position at 0.98 with twenty times the size.
     max_concurrent_positions: int = _doc(20, "Hard cap on simultaneously open markets.")
     max_positions_per_event: int = _doc(1, "Legs per Gamma eventId.")
-    max_positions_per_category: int = _doc(5, "Positions sharing a primary Gamma category.")
+    # 20, i.e. inert, because the primary Gamma label of every sports market
+    # is "sports" — at 5 this silently capped the strategy at five positions
+    # and made max_concurrent_positions decorative. The cap was written for
+    # "twenty political markets that are really one election"; within sports
+    # it does not do that job, since two games are not a shared theme and the
+    # per-event cap already blocks two legs of the same one. Restore a real
+    # value if the non-sports arm ever runs.
+    max_positions_per_category: int = _doc(20, "Positions sharing a primary Gamma category.")
 
     # ── Sizing ───────────────────────────────────────────────────────────────
     # Flat size: conviction sizing makes no sense when the thesis is "the
