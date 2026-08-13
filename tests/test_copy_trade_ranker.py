@@ -153,3 +153,60 @@ def test_consensus_mode_snapshot_interval_throttles_the_api(fresh_db, ledger):
     # Second poll is inside snapshot_interval_seconds — no snapshot, no intent,
     # and crucially no N-wallet API sweep on every 20s worker tick.
     assert list(algo.poll()) == []
+
+
+def _hold(ledger, asset="yes", market="m1", cost=1.0):
+    """Put a consensus-shaped position on the books."""
+    from tests.conftest import make_trade
+
+    trade = make_trade(market_id=market, asset_id=asset, price=0.40, size_usdc=cost,
+                       question="Will the Fed hold rates?")
+    ledger.record_buy(trade, spent_usdc=cost, shares=cost / 0.40,
+                      fill_price=0.40, paper=True)
+
+
+def test_decay_exit_closes_when_the_cohort_walks_away(fresh_db, ledger):
+    # Two of four wallets left; the exit floor is 2.
+    cohort = {w: [_position()] for w in ("0xa", "0xb")}
+    cohort.update({w: [_position(asset="other", opposite="x")] for w in ("0xc", "0xd")})
+    algo = _consensus_algo(FakeCohortData(cohort, end_ts=time.time() + 30 * 86_400))
+    algo.setup(ledger)
+    _hold(ledger)
+
+    closes = [i for i in algo.poll() if hasattr(i, "fraction")]
+
+    assert len(closes) == 1
+    assert closes[0].market_id == "m1"
+    assert closes[0].fraction == 1.0
+    assert closes[0].signal_price == 0.0        # forced exit, no slippage gate
+
+
+def test_decay_exit_has_a_hysteresis_band(fresh_db, ledger):
+    # Three left: below the entry bar of 4, above the exit floor of 2. Hold.
+    cohort = {w: [_position()] for w in ("0xa", "0xb", "0xc")}
+    cohort["0xd"] = [_position(asset="other", opposite="x")]
+    algo = _consensus_algo(FakeCohortData(cohort, end_ts=time.time() + 30 * 86_400))
+    algo.setup(ledger)
+    _hold(ledger)
+
+    assert list(algo.poll()) == []
+
+
+def test_an_api_blackout_does_not_dump_the_book(fresh_db, ledger):
+    # Every wallet returns [] — indistinguishable from a failed fetch.
+    algo = _consensus_algo(FakeCohortData({}, end_ts=time.time() + 30 * 86_400))
+    algo.setup(ledger)
+    _hold(ledger)
+
+    assert list(algo.poll()) == []
+
+
+def test_resolving_markets_are_left_to_the_settle_sweep(fresh_db, ledger):
+    # Cohort rows go `redeemable` at resolution, so support reads zero for a
+    # market that is merely past its end date. Selling into that is wrong.
+    cohort = {w: [_position()] for w in ("0xa", "0xb", "0xc", "0xd")}
+    algo = _consensus_algo(FakeCohortData(cohort, end_ts=time.time() - 3600))
+    algo.setup(ledger)
+    _hold(ledger, asset="gone")
+
+    assert list(algo.poll()) == []

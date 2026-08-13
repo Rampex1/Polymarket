@@ -86,6 +86,23 @@ def parse_positions(wallet: str, rows: list[dict]) -> list[Holding]:
     return out
 
 
+def support_by_asset(holdings: list[Holding]) -> dict[str, int]:
+    """Distinct cohort wallets holding each asset, with no gates applied.
+
+    Exit checks need the raw count. A market that fell below `min_support`
+    drops out of `find_consensus` entirely, which is indistinguishable from a
+    market the cohort never touched — so decay can't be read off that output.
+
+    Deliberately ignores `min_conviction`: a leader who trimmed to a sliver
+    still counts as present. Enter on strong evidence, leave only on strong
+    evidence of abandonment.
+    """
+    holders: dict[str, set[str]] = {}
+    for h in holdings:
+        holders.setdefault(h.asset_id, set()).add(h.wallet)
+    return {asset: len(wallets) for asset, wallets in holders.items()}
+
+
 def find_consensus(
     holdings: list[Holding], *, min_support: int = 3, min_margin: int = 2,
     min_conviction: float = 0.0, max_price: float = 0.97, min_price: float = 0.05,

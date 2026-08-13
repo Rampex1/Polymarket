@@ -192,8 +192,26 @@ Non-obvious behavior:
   copying it buys their exit liquidity.
 - **Being at tier is the dedupe.** A fully-sized market yields nothing on
   every later snapshot, so there is no `SeenRing`.
-- Exits are v1 hold-to-resolution via the shared settle sweep. Exiting when
-  the cohort walks away needs snapshot-over-snapshot diffing.
+
+Exits are decay-first, settlement-second. When support for a held asset falls
+to `consensus_exit_leaders` or below, the position is fully closed with
+`signal_price=0` (gate off, as on a MERGE — the reason to hold is gone and a
+slippage check could only strand us). Anything the cohort holds to the end is
+closed by the shared settle sweep instead. Three guards that look optional and
+are not:
+
+- **`consensus_exit_leaders` must sit below `consensus_min_leaders`.** Without
+  the band a position churns open and closed on one leader trimming.
+  `validate()` enforces it.
+- **`snapshot_min_responders` is data-loss protection.** `user_positions`
+  returns `[]` on a failed fetch by design, so a Data-API wobble reads as the
+  whole cohort abandoning everything at once. Below that fraction of
+  responders, decay exits are skipped entirely for the snapshot.
+- **A market past its end date is settlement's, not decay's.** Cohort rows go
+  `redeemable` at resolution and drop out of the snapshot, so support reads
+  zero for a market that is merely resolving — selling into that books P&L off
+  a dead price. Positions with no `asset_id`, or whose Gamma lookup failed,
+  are skipped for the same reason: never act on an unverifiable reading.
 
 ### Trade lifecycle
 

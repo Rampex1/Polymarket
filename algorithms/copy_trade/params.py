@@ -38,6 +38,8 @@ class CopyTradeParams:
 
     snapshot_interval_seconds: int = _doc(300, "Seconds between cohort position snapshots — one API call per wallet, and standing positions don't move fast.")
     consensus_min_leaders: int = _doc(4, "Distinct cohort wallets holding the same side before it counts as consensus.")
+    consensus_exit_leaders: int = _doc(2, "Close when cohort support falls to this many wallets or fewer. Must sit below consensus_min_leaders or entries and exits fight; 0 disables decay exits.")
+    snapshot_min_responders: float = _doc(0.6, "Fraction of the cohort that must return positions before a decay signal is trusted — a Data-API wobble reads as universal abandonment.")
     consensus_min_margin: int = _doc(3, "Support minus opposition. Five on YES against five on NO is disagreement, not a signal.")
     consensus_min_conviction: float = _doc(0.0, "Ignore a wallet's vote below this fraction of its own deployed capital. 0 = count every position.")
     consensus_max_price: float = _doc(0.97, "Skip markets already priced as decided — a finished match sits at 1.00 with nothing left to pay out.")
@@ -100,6 +102,14 @@ class CopyTradeParams:
             raise ValueError("consensus requires at least two leaders.")
         if self.consensus_min_margin > self.consensus_min_leaders:
             raise ValueError("consensus_min_margin above consensus_min_leaders can never be satisfied.")
+        if self.consensus_exit_leaders >= self.consensus_min_leaders:
+            raise ValueError(
+                "consensus_exit_leaders must sit below consensus_min_leaders — "
+                "without a hysteresis band a position churns open/closed on one "
+                "leader trimming."
+            )
+        if not (0 <= self.snapshot_min_responders <= 1):
+            raise ValueError("snapshot_min_responders is a fraction in [0, 1].")
         if not (0 <= self.consensus_min_price < self.consensus_max_price <= 1):
             raise ValueError("prices must satisfy 0 <= consensus_min_price < consensus_max_price <= 1.")
         if self.max_concurrent_positions <= 0:
