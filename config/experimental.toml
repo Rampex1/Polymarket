@@ -1,24 +1,20 @@
 # Paper algorithms under test. Never sets allow_live, so a live block here
 # is rejected at boot. Knob values: algorithms/<type>/params.py.
-
-[[algorithm]]
-type = "insider_flow"
-name = "insider_flow_paper"
-mode = "paper"
-
-# A/B on the sports screen. Identical cohort and sizing; the only difference
-# is exclude_categories, set per-name in algorithms/copy_trade/params.py
-# VARIANTS. Split realized P&L by the signals table's market_category to
-# settle whether excluding sports helps or just starves the strategy.
-[[algorithm]]
-type = "copy_trade"
-name = "copy_trade_paper"
-mode = "paper"
-
-[[algorithm]]
-type = "copy_trade"
-name = "copy_trade_sports_paper"
-mode = "paper"
+#
+# resolution_carry only, deliberately. insider_flow and both arms of the
+# copy_trade sports A/B were removed rather than paused — a block is the only
+# thing that makes an algorithm run, so deleting it stops the worker while
+# leaving every row it wrote in place, partitioned by `algo`. Restoring any of
+# them is re-adding the three lines; the names are the DB partition keys, so
+# they must come back spelled exactly as they were:
+#
+#   insider_flow / insider_flow_paper
+#   copy_trade   / copy_trade_paper          (sports excluded — control)
+#   copy_trade   / copy_trade_sports_paper   (sports kept — treatment)
+#
+# Note that their open positions stop being swept while they are out, so
+# anything they still hold will not settle and its signals rows will not be
+# outcome-labeled until the block returns.
 
 [[algorithm]]
 type = "resolution_carry"
