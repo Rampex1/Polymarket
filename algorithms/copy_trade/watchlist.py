@@ -55,11 +55,12 @@ class WatchlistRepository:
     def refresh(
         self, algo: str, bets: Iterable[ResolvedBet], *, watchlist_size: int,
         min_resolved_bets: int, confidence_z: float, min_copyability_score: float,
-        persistence_passed: bool,
+        persistence_passed: bool, min_edge_stdev: float = 0.0,
     ) -> list[WalletScore]:
         """Store a scored batch and atomically replace the active cohort."""
         self._init()
-        scores = rank_wallets(bets, min_resolved_bets, confidence_z, min_copyability_score)
+        scores = rank_wallets(bets, min_resolved_bets, confidence_z,
+                              min_copyability_score, min_edge_stdev)
         now = int(time.time())
         conn = db.get()
         cur = conn.execute(

@@ -32,6 +32,13 @@ class WalletScore:
     sample_size: int
     mean_edge: float
     standard_error: float
+    # Per-bet spread of outcomes. Separates forecasters from spread-earners:
+    # a wallet betting at price p has edge variance p(1-p), so sigma below
+    # 0.15 means habitually betting at ~0.98 or ~0.02 — near-certainties with
+    # no forecast in them, where the profit comes from spread capture and
+    # inventory, not from being right. That edge is not positional and cannot
+    # be copied by holding the same token.
+    edge_stdev: float
     edge_lower_bound: float
     copyability_score: float
     last_resolved_at: int
@@ -120,11 +127,12 @@ def score_wallet(wallet: str, bets: list[ResolvedBet], confidence_z: float) -> W
     mean = sum(edges) / n
     # One result has no sample variance; assigning infinite uncertainty keeps
     # it from ever passing a positive lower-bound gate.
-    se = stdev(edges) / sqrt(n) if n > 1 else float("inf")
+    sigma = stdev(edges) if n > 1 else 0.0
+    se = sigma / sqrt(n) if n > 1 else float("inf")
     lower = mean - confidence_z * se
     return WalletScore(
         wallet=wallet.lower(), sample_size=n, mean_edge=mean,
-        standard_error=se, edge_lower_bound=lower,
+        standard_error=se, edge_stdev=sigma, edge_lower_bound=lower,
         copyability_score=sum(b.copyability_score for b in valid) / n,
         last_resolved_at=max(b.resolved_at for b in valid),
     )
@@ -132,14 +140,15 @@ def score_wallet(wallet: str, bets: list[ResolvedBet], confidence_z: float) -> W
 
 def rank_wallets(
     bets: Iterable[ResolvedBet], min_resolved_bets: int, confidence_z: float,
-    min_copyability_score: float,
+    min_copyability_score: float, min_edge_stdev: float = 0.0,
 ) -> list[WalletScore]:
     grouped: dict[str, list[ResolvedBet]] = {}
     for bet in bets:
         grouped.setdefault(bet.wallet.lower(), []).append(bet)
     scores = [score_wallet(wallet, rows, confidence_z) for wallet, rows in grouped.items()]
     eligible = [s for s in scores if s and s.sample_size >= min_resolved_bets
-                and s.copyability_score >= min_copyability_score]
+                and s.copyability_score >= min_copyability_score
+                and s.edge_stdev >= min_edge_stdev]
     return sorted(eligible, key=lambda s: (s.edge_lower_bound, s.copyability_score), reverse=True)
 
 
@@ -186,7 +195,7 @@ def _spearman(xs: list[float], ys: list[float]) -> float:
 def holdout_report(
     bets: Iterable[ResolvedBet], *, split_at: int, min_resolved_bets: int,
     confidence_z: float, min_copyability_score: float, top_n: int,
-    min_holdout_bets: int = 20,
+    min_holdout_bets: int = 20, min_edge_stdev: float = 0.0,
 ) -> Optional[HoldoutResult]:
     """Rank on bets before `split_at`, then score the picks on bets after it.
 
@@ -210,7 +219,7 @@ def holdout_report(
 
     judgeable = {w for w, rs in later.items() if len(rs) >= min_holdout_bets}
     ranked = [s for s in rank_wallets(train, min_resolved_bets, confidence_z,
-                                      min_copyability_score)
+                                      min_copyability_score, min_edge_stdev)
               if s.wallet in judgeable]
     if len(ranked) < 2:
         return None
@@ -237,14 +246,15 @@ def holdout_report(
 
 def persistence_passes(
     bets: Iterable[ResolvedBet], min_resolved_bets: int, confidence_z: float,
-    min_copyability_score: float, top_n: int,
+    min_copyability_score: float, top_n: int, min_edge_stdev: float = 0.0,
 ) -> bool:
     """Require the early-period winners to retain positive late-period edge."""
     rows = sorted(bets, key=lambda b: b.resolved_at)
     if len(rows) < 2:
         return False
     split = len(rows) // 2
-    early = rank_wallets(rows[:split], min_resolved_bets, confidence_z, min_copyability_score)
+    early = rank_wallets(rows[:split], min_resolved_bets, confidence_z,
+                         min_copyability_score, min_edge_stdev)
     leaders = {s.wallet for s in early[:top_n]}
     if not leaders:
         return False

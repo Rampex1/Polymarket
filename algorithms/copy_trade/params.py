@@ -88,6 +88,7 @@ class CopyTradeParams:
     watchlist_min_resolved_bets: int = _doc(50, "Minimum resolved bets before a wallet is eligible.")
     watchlist_confidence_z: float = _doc(1.645, "One-sided confidence multiplier used for the edge lower bound.")
     watchlist_min_copyability_score: float = _doc(0.0, "Reject wallets below this historical copyability score (0..1).")
+    watchlist_min_edge_stdev: float = _doc(0.15, "Reject wallets whose per-bet outcome spread is below this. Edge variance is p(1-p), so 0.15 means habitually betting at ~0.98 — spread capture, not forecasting, and not copyable by holding the same token.")
 
     snapshot_interval_seconds: int = _doc(300, "Seconds between cohort position snapshots — one API call per wallet, and standing positions don't move fast.")
     consensus_min_leaders: int = _doc(3, "Distinct cohort wallets holding the same side before it counts as consensus. Measured over a 21-wallet vetted cohort, 4 never fired and 3 is already rare.")

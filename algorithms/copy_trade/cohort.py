@@ -96,7 +96,7 @@ def _holdout(bets, args) -> int:
     result = holdout_report(
         bets, split_at=split, min_resolved_bets=args.min_bets,
         confidence_z=args.confidence_z, min_copyability_score=args.min_copyability,
-        top_n=args.top,
+        top_n=args.top, min_edge_stdev=args.min_edge_stdev,
     )
     if result is None:
         print(f"Split at {when} leaves too little on one side to judge. "
@@ -132,6 +132,8 @@ def main() -> int:
     p.add_argument("--min-bets", type=int, default=d.watchlist_min_resolved_bets)
     p.add_argument("--confidence-z", type=float, default=d.watchlist_confidence_z)
     p.add_argument("--min-copyability", type=float, default=d.watchlist_min_copyability_score)
+    p.add_argument("--min-edge-stdev", type=float, default=d.watchlist_min_edge_stdev,
+                   help="drop spread-earners: minimum per-bet outcome spread")
     p.add_argument("--top", type=int, default=20, help="cohort size to report and activate")
     p.add_argument("--activate", metavar="ALGO", help="write the cohort to this algorithm's watchlist")
     p.add_argument("--holdout", action="store_true",
@@ -163,9 +165,10 @@ def main() -> int:
         return 1
 
     bets = SQLiteResolvedBetSource().resolved_bets(pool)
-    scores = rank_wallets(bets, args.min_bets, args.confidence_z, args.min_copyability)
+    scores = rank_wallets(bets, args.min_bets, args.confidence_z,
+                          args.min_copyability, args.min_edge_stdev)
     passed = persistence_passes(bets, args.min_bets, args.confidence_z,
-                                args.min_copyability, args.top)
+                                args.min_copyability, args.top, args.min_edge_stdev)
 
     print(f"Pool: {len(pool)} wallets, {len(bets)} resolved bets. "
           f"{len(scores)} clear the {args.min_bets}-bet bar.")
@@ -173,10 +176,11 @@ def main() -> int:
           f"{'PASS' if passed else 'FAIL'}\n")
 
     if scores:
-        print(f"{'N':>4} {'MEAN EDGE':>10} {'LOWER':>8}  WALLET")
-        print("-" * 52)
+        print(f"{'N':>4} {'MEAN EDGE':>10} {'LOWER':>8} {'SIGMA':>7}  WALLET")
+        print("-" * 60)
         for s in scores[:args.top]:
-            print(f"{s.sample_size:>4} {s.mean_edge:>+10.3f} {s.edge_lower_bound:>+8.3f}  {s.wallet}")
+            print(f"{s.sample_size:>4} {s.mean_edge:>+10.3f} {s.edge_lower_bound:>+8.3f} "
+                  f"{s.edge_stdev:>7.3f}  {s.wallet}")
         print("\nLOWER is the confidence-bound edge — the number to rank on. A big "
               "MEAN on a small N is mostly luck.")
 
@@ -188,7 +192,7 @@ def main() -> int:
         repo.refresh(args.activate, bets, watchlist_size=args.top,
                      min_resolved_bets=args.min_bets, confidence_z=args.confidence_z,
                      min_copyability_score=args.min_copyability,
-                     persistence_passed=passed)
+                     min_edge_stdev=args.min_edge_stdev, persistence_passed=passed)
         active = repo.active_wallets(args.activate)
         print(f"\nActivated {len(active)} wallets for '{args.activate}'."
               if active else
