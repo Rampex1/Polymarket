@@ -150,7 +150,12 @@ algorithms/
     history.py            # Pure reconstruction of a wallet's resolved bets from /activity + /positions
     ranker.py             # Offline-testable confidence-adjusted wallet ranking; reads/writes wallet_resolved_bets
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
-  resolution_carry/       # DESIGN ONLY, not registered — buy near-certain outcomes, hold to resolution, collect the residual. See its PLAN.md
+  resolution_carry/       # Buy near-certain outcomes, hold to resolution, collect the residual. Registered; its profile block waits on a webhook_url. See PLAN.md
+    algorithm.py          # ResolutionCarryAlgorithm: paged Gamma scan → screen → OpenIntent; settle sweep for exits
+    params.py             # ResolutionCarryParams — pure schema
+    screen.py             # Pure: market rows → ranked, diversified candidates. No I/O, so the funnel sweeps offline
+    seed.py               # `python -m` job: seed the price archive with markets resolving soon
+    calibration.py        # `python -m` backtest of the calibration curve against discovery_archive.db
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
@@ -327,6 +332,39 @@ the top N are copied. Exits at market resolution via a periodic Gamma
 sweep. Its `max_slippage` default (0.10) is deliberately wider than
 copy_trade's — these signals move fast. Defaults are sized for a **~$20
 prod bankroll**; scale in `algorithms/insider_flow/params.py` when capital grows.
+
+### resolution_carry
+
+Buys the top of the book (`bestAsk` in 0.93–0.985) and holds to settlement,
+so the premise is that the price is *correct* — not that we know better.
+Each poll pages Gamma's volume-ordered open markets inside the resolution
+window, screens on price band → spread/liquidity → time value → category →
+diversification, ranks survivors by annualised return, and opens a flat
+stake. Exits are the shared settle sweep only.
+
+Non-obvious behavior, all deliberate:
+
+- **Sports is *required*, not excluded** (`require_sports`). Every other
+  strategy screens sports out because efficient pricing kills a forecasting
+  edge; here efficiency is the product, and sports supplies objective
+  resolution, independent events, and the short horizons that make 2% worth
+  having.
+- **`poll_interval_seconds = 60`, from a measurement.** p95 drift on a
+  market already at 0.95+ is 0.0185 over five minutes — the entire return of
+  a 0.98 entry. 300 would systematically fill only the trades that moved
+  against us.
+- **`order_type = "limit"`.** One tick of slippage is a quarter of the
+  return. Non-fills are the accepted cost; whether a GTC at the ask reliably
+  fills is the open question paper exists to answer.
+- **The per-event and per-category caps are the risk control**, not tidiness.
+  At 0.98 the loss is 49× the win, so twenty legs of one event is one
+  position with twenty times the size. `screen.select` applies the caps to a
+  single poll's own picks as well as to open positions.
+- **Being at size is the dedupe.** A held market yields nothing on later
+  scans, so there is no `SeenRing`.
+- **No stop-loss.** A stop realises exactly the losses the strategy exists to
+  absorb. New lows are logged (`_note_lows`) so the question can be settled
+  with data instead of intuition.
 
 ## Environment variables (`bot/config.py`)
 

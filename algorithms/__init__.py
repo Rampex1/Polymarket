@@ -29,11 +29,13 @@ from bot.profile_loader import ProfileError, available_profiles, load_profile
 
 from .copy_trade import CopyTradeAlgorithm, CopyTradeParams
 from .insider_flow import InsiderFlowAlgorithm, InsiderFlowParams
+from .resolution_carry import ResolutionCarryAlgorithm, ResolutionCarryParams
 
 # type string (used in config TOML) → (AlgorithmCls, ParamsCls)
 REGISTRY = {
     "copy_trade": (CopyTradeAlgorithm, CopyTradeParams),
     "insider_flow": (InsiderFlowAlgorithm, InsiderFlowParams),
+    "resolution_carry": (ResolutionCarryAlgorithm, ResolutionCarryParams),
 }
 
 PROFILE = os.getenv("PROFILE")
@@ -58,4 +60,7 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["ENABLED", "REGISTRY", "CopyTradeAlgorithm", "InsiderFlowAlgorithm"]
+__all__ = [
+    "ENABLED", "REGISTRY",
+    "CopyTradeAlgorithm", "InsiderFlowAlgorithm", "ResolutionCarryAlgorithm",
+]

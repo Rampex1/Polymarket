@@ -1,6 +1,10 @@
 # resolution_carry — implementation plan
 
-**Status: design only. No code, not registered, does not run.**
+**Status: built and registered. Not yet running** — the profile block in
+`config/experimental.toml` is commented out until `webhook_url` is set in
+`params.py`. Everything below the Module layout section is the design that
+was implemented; read it as the rationale behind the code, not as pending
+work. Phase A (calibration) and Phase B (paper) are still open.
 
 ## Thesis
 
@@ -165,17 +169,24 @@ algorithms/resolution_carry/
   algorithm.py      # poll → screen → OpenIntent; settle sweep for exits
   params.py         # ResolutionCarryParams — pure schema + validate()
   screen.py         # pure: market rows → ranked candidates. No I/O.
-  seed.py           # `python -m` job: seed the archive with markets resolving soon  [BUILT]
-  calibration.py    # `python -m` backtest against discovery_archive.db          [BUILT]
+  seed.py           # `python -m` job: seed the archive with markets resolving soon
+  calibration.py    # `python -m` backtest against discovery_archive.db
   PLAN.md           # this file
 ```
 
-Registration, once the code exists:
+Discovery needed a paged Gamma `/markets` scan, which the read gateway did
+not expose: `MarketDataGateway.top_markets` and an `offset` argument on
+`api.fetch_top_markets` were added for it. Nothing else in `bot/` changed.
 
-1. `algorithms/__init__.py` → add `"resolution_carry"` to `REGISTRY`.
+Registration:
+
+1. `algorithms/__init__.py` → `"resolution_carry"` in `REGISTRY`. **Done.**
 2. `config/experimental.toml` → a `[[algorithm]]` block, `mode = "paper"`.
-3. `params.py` → a real `webhook_url` (`validate()` rejects an empty one;
-   do not reuse insider_flow's, this one will be chatty).
+   **Present but commented out** — see 3.
+3. `params.py` → a real `webhook_url`. **Still empty.** `validate()` rejects
+   an empty one, and that ProfileError takes down the whole profile, so the
+   TOML block stays commented until it is filled in. Do not reuse
+   insider_flow's; this one will be chatty.
 
 ## Parameter surface
 

@@ -669,17 +669,22 @@ def fetch_top_markets(
     limit: int = 50,
     end_date_min: Optional[str] = None,
     end_date_max: Optional[str] = None,
+    offset: int = 0,
 ) -> list[dict]:
     """Top markets by volume from Gamma (universe selection for discovery).
 
     Note: `order=volumeNum` — Gamma's `order=volume` sorts the *string* field
     and returns garbage. Booleans must be lowercase strings. Failure → [].
+
+    Gamma caps a page at 100 rows regardless of `limit`, so wider coverage
+    means paging on `offset`.
     """
     params: dict = {
         "closed": "true" if closed else "false",
         "order": "volumeNum",
         "ascending": "false",
         "limit": limit,
+        "offset": offset,
     }
     if end_date_min:
         params["end_date_min"] = end_date_min

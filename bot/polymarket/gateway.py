@@ -36,6 +36,16 @@ class MarketDataGateway:
     def market(self, market_id: str) -> Optional[dict]:
         return api.fetch_market_resolution(market_id)
 
+    def top_markets(
+        self,
+        closed: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+        end_date_min: Optional[str] = None,
+        end_date_max: Optional[str] = None,
+    ) -> list[dict]:
+        return api.fetch_top_markets(closed, limit, end_date_min, end_date_max, offset)
+
     def price(self, asset_id: str) -> Optional[float]:
         return api.fetch_resolution_price(asset_id)
 
