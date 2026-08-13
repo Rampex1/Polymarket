@@ -22,8 +22,8 @@ class MarketDataGateway:
     def recent_trades(self, address: str, limit: int = 100) -> list[Trade]:
         return api.fetch_recent_trades(address, limit)
 
-    def user_positions(self, address: str) -> list[dict]:
-        return api.fetch_user_positions(address)
+    def user_positions(self, address: str, limit: int = 500) -> list[dict]:
+        return api.fetch_user_positions(address, limit)
 
     def target_position_value(
         self, address: str, market_id: str, expected_min: float = 0.0,

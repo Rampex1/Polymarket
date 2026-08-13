@@ -204,17 +204,20 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         return None
 
 
-def fetch_user_positions(address: str) -> list[dict]:
+def fetch_user_positions(address: str, limit: int = 500) -> list[dict]:
     """All open positions for `address`, as raw rows from the Data API.
 
     Used by copy_trade to size against the target wallet's holdings.
     Returns an empty list on failure — callers treat that as "couldn't check
     this tick" rather than "no positions".
+
+    `limit` is passed explicitly: the endpoint silently truncates at 100, so
+    an active wallet's tail of positions would vanish without a word.
     """
     try:
         resp = SESSION.get(
             f"{config.DATA_API}/positions",
-            params={"user": address},
+            params={"user": address, "limit": limit},
             timeout=10,
         )
         resp.raise_for_status()
