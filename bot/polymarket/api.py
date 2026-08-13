@@ -205,12 +205,22 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         return None
 
 
-def fetch_activity(address: str, limit: int = 500, offset: int = 0) -> list[dict]:
-    """One raw page of `/activity`.
+# The endpoint 400s once offset + limit passes this, so a wallet's readable
+# history stops here no matter how many pages you ask for.
+ACTIVITY_MAX_ROWS = 5500
+
+
+def fetch_activity(address: str, limit: int = 500, offset: int = 0) -> Optional[list[dict]]:
+    """One raw page of `/activity`, or None if the page could not be read.
 
     `fetch_recent_trades` parses this endpoint into `Trade` for the trading
     path; the offline history job needs the untouched rows — REDEEM `usdcSize`
     and `outcomeIndex` in particular, which the Trade shape drops.
+
+    Unlike the rest of this module a failure is None, not `[]`. The caller
+    walks pages until one comes back short, so a failure flattened to `[]`
+    would read as "history exhausted" and silently drop the guard that keeps
+    a wallet's lifetime losses from being scored against a few days of wins.
     """
     try:
         resp = SESSION.get(
@@ -223,23 +233,31 @@ def fetch_activity(address: str, limit: int = 500, offset: int = 0) -> list[dict
         return data if isinstance(data, list) else data.get("data", [])
     except Exception as e:
         logger.warning("Could not fetch activity for %s: %s", address, e)
-        return []
+        return None
 
 
-def fetch_user_positions(address: str, limit: int = 500) -> list[dict]:
-    """All open positions for `address`, as raw rows from the Data API.
+def fetch_user_positions(address: str, limit: int = 500, offset: int = 0) -> list[dict]:
+    """Positions for `address`, largest first, as raw rows from the Data API.
 
-    Used by copy_trade to size against the target wallet's holdings.
+    Used by copy_trade to size against a wallet's holdings.
     Returns an empty list on failure — callers treat that as "couldn't check
     this tick" rather than "no positions".
 
-    `limit` is passed explicitly: the endpoint silently truncates at 100, so
-    an active wallet's tail of positions would vanish without a word.
+    Two non-obvious query params, both load-bearing:
+
+    * `limit` — the endpoint silently truncates at 100 without it, and caps at
+      500 rows however much more you ask for. Use `offset` to go past that.
+    * `sortBy=CURRENT` — the default ordering buries live positions under
+      years of worthless unredeemed losers, which never leave a wallet because
+      there is nothing to claim. Measured on one heavy wallet: 2 live rows in
+      the default first page against 40 when sorted by value. Anything reading
+      one page of positions to see what a wallet *holds* needs this.
     """
     try:
         resp = SESSION.get(
             f"{config.DATA_API}/positions",
-            params={"user": address, "limit": limit},
+            params={"user": address, "limit": limit, "offset": offset,
+                    "sortBy": "CURRENT", "sortDirection": "DESC"},
             timeout=10,
         )
         resp.raise_for_status()

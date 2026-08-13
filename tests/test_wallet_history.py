@@ -13,11 +13,12 @@ def redeem(cid="m1", idx=0, usdc=100.0, ts=500):
             "usdcSize": usdc, "size": usdc, "timestamp": ts}
 
 
-def lost(entry=0.30, cur=0.0, end="2026-07-20"):
-    return {"redeemable": True, "avgPrice": entry, "curPrice": cur, "endDate": end}
+def settled(cid="m1", idx=0, entry=0.30, cur=0.0, end="2026-07-20"):
+    return {"conditionId": cid, "outcomeIndex": idx, "redeemable": True,
+            "avgPrice": entry, "curPrice": cur, "endDate": end}
 
 
-def test_redeemed_bet_is_a_win_priced_at_its_fee_inclusive_basis():
+def test_a_redeemed_bet_is_a_win_at_its_fee_inclusive_basis():
     (bet,) = resolved_bets_from("0xA", [buy(usdc=44.0), redeem()], [])
     assert bet.outcome == 1.0
     assert bet.entry_price == 0.44        # usdcSize/shares, not the quoted price
@@ -25,26 +26,39 @@ def test_redeemed_bet_is_a_win_priced_at_its_fee_inclusive_basis():
     assert bet.wallet == "0xa"
 
 
-def test_unredeemed_resolved_position_is_a_loss():
-    (bet,) = resolved_bets_from("0xA", [], [lost()])
-    assert (bet.outcome, bet.entry_price) == (0.0, 0.30)
+def test_an_unredeemed_settled_bet_is_a_loss():
+    (bet,) = resolved_bets_from("0xA", [buy()], [settled()])
+    assert (bet.outcome, bet.entry_price) == (0.0, 0.40)
 
 
-def test_the_two_sources_together_are_not_all_losses():
-    # Either source alone is 100% skewed: winners get claimed and drop off
-    # /positions, losers never appear in REDEEM rows.
-    bets = resolved_bets_from("0xA", [buy(), redeem()], [lost(), lost(entry=0.6)])
-    assert sorted(b.outcome for b in bets) == [0.0, 0.0, 1.0]
+def test_an_unclaimed_winner_still_reads_as_a_win():
+    (bet,) = resolved_bets_from("0xA", [buy()], [settled(cur=1.0)])
+    assert bet.outcome == 1.0
 
 
-def test_a_sale_before_resolution_is_not_a_verdict():
-    # Bought and never redeemed, nothing left on the books — they traded out.
+def test_both_outcomes_are_anchored_to_a_buy_so_neither_source_dominates():
+    # Read as two independent sources these skew hard in opposite directions:
+    # /positions keeps only unclaimed losers, REDEEM rows only winners.
+    activity = [buy(cid="win"), redeem(cid="win"), buy(cid="lose")]
+    bets = resolved_bets_from("0xA", activity, [settled(cid="lose")])
+    assert sorted(b.outcome for b in bets) == [0.0, 1.0]
+
+
+def test_a_bet_with_no_verdict_yet_is_not_scored():
+    # Still trading, or sold off before it resolved. An exit is not a verdict.
     assert resolved_bets_from("0xA", [buy()], []) == []
 
 
-def test_a_redeem_whose_buys_fell_off_the_page_window_is_dropped():
-    # No entry price to score. A fabricated basis would be worse than a gap.
+def test_a_verdict_with_no_buy_in_the_window_is_not_scored():
+    # No entry price to score it against. A fabricated basis is worse than a gap.
     assert resolved_bets_from("0xA", [redeem()], []) == []
+    assert resolved_bets_from("0xA", [], [settled()]) == []
+
+
+def test_opposite_sides_of_one_market_are_separate_bets():
+    activity = [buy(idx=0), redeem(idx=0), buy(idx=1)]
+    bets = resolved_bets_from("0xA", activity, [settled(idx=1)])
+    assert sorted(b.outcome for b in bets) == [0.0, 1.0]
 
 
 def test_partial_redemptions_count_once():
@@ -52,26 +66,21 @@ def test_partial_redemptions_count_once():
     assert len(bets) == 1
 
 
-def test_an_unclaimed_winner_still_reads_as_a_win():
-    (bet,) = resolved_bets_from("0xA", [], [lost(entry=0.30, cur=1.0)])
-    assert bet.outcome == 1.0
-
-
 def test_undated_and_nonsense_rows_are_skipped():
-    rows = [lost(end=""), lost(entry=0.0), lost(entry=1.0)]
-    assert resolved_bets_from("0xA", [], rows) == []
+    assert resolved_bets_from("0xA", [buy()], [settled(end="")]) == []
+    assert resolved_bets_from("0xA", [buy(usdc=0.0)], [settled()]) == []
+    assert resolved_bets_from("0xA", [buy(usdc=100.0)], [settled()]) == []   # entry == 1.0
 
 
-def test_a_capped_crawl_clamps_losses_to_the_window_the_wins_cover():
-    # /positions keeps lifetime losers; a capped /activity crawl sees days.
-    # Scoring one against the other invents a hugely negative edge.
-    activity = [buy(), redeem(ts=1_000_000)]
-    positions = [lost(end="2026-08-10"), lost(end="2026-01-01")]
+def test_a_failed_page_is_not_an_exhausted_history(monkeypatch):
+    """A failed read must never be mistaken for the end of a wallet's record."""
+    import scripts.rank_wallets as rw
 
-    unclamped = resolved_bets_from("0xA", activity, positions)
-    clamped = resolved_bets_from("0xA", activity, positions,
-                                 since_ts=int(__import__("datetime").datetime(
-                                     2026, 6, 1).timestamp()))
+    pages = {0: [buy()] * 500, 500: None}          # page two fails
+    monkeypatch.setattr(rw.api, "fetch_activity",
+                        lambda w, limit, offset: pages.get(offset, []))
+    monkeypatch.setattr(rw.api, "fetch_user_positions", lambda w, limit, offset: [])
+    monkeypatch.setattr(rw, "store_resolved_bets", lambda bets: len(list(bets)))
 
-    assert sorted(b.outcome for b in unclamped) == [0.0, 0.0, 1.0]
-    assert sorted(b.outcome for b in clamped) == [0.0, 1.0]
+    _, truncated = rw.ingest("0xA", max_pages=4)
+    assert truncated is True

@@ -223,27 +223,38 @@ loop so a slow crawl can never delay a snapshot. The engine reads
 `active_wallets()` every snapshot, so `--activate` propagates within one
 snapshot interval with no redeploy and no refresh timer.
 
-Reconstructing a wallet's record needs **both** public sources, and either one
-alone is catastrophically skewed:
+Every bet is anchored to a BUY in the `/activity` window; `/positions` is only
+a lookup for "did this resolve, and which way". Reading them as two independent
+sources is what goes wrong, in two ways:
 
-- `/positions` keeps a resolved position only until it is redeemed. Winners
-  get claimed and vanish; losers have nothing to claim and sit forever.
-  Measured: 100% of `redeemable` rows on real wallets were losses (227/227,
-  498/498). Rank on this alone and nobody has ever won a bet.
-- `/activity` REDEEM rows are the mirror image — they exist only for positions
-  that paid out, so they are all winners.
+- **Each covers one outcome.** `/positions` keeps a resolved position only
+  until it is redeemed — winners get claimed and vanish, losers have nothing to
+  claim and sit forever (measured: 227/227 and 498/498 `redeemable` rows were
+  losses). REDEEM rows are the mirror image, all winners.
+- **They run on different clocks.** A REDEEM is stamped when the wallet got
+  round to claiming — often months later, usually in bursts — while a loss can
+  only be dated by its market's end. Reconciling that with a time window
+  overcorrects: one pass produced wallets at 100-0 and 1266-1.
 
-**The window trap.** `/positions` accumulates unredeemed losers for the
-wallet's whole life, while a capped `/activity` crawl sees only recent
-history. Measured on one wallet: 11 days of wins scored against 4 months of
-losses, producing a −0.42 "edge" that was pure artifact — and real wallets
-flipped sign (−0.086 → +0.166) once corrected. `resolved_bets_from(...,
-since_ts=)` clamps losses to the window the wins cover whenever the crawl hit
-its page cap. Raise `--max-pages` for heavy traders; the script reports how
-many wallets were capped.
+Three API shapes that bite, all verified against live data:
 
-A wallet that sold before resolution appears in neither source, which is
-correct — an exit is a trade, not a verdict.
+- `/activity` 400s past `offset + limit > 5500`, so a wallet's readable history
+  stops there. `fetch_activity` returns **None** on failure, not `[]` —
+  flattening the two lets a failed page read as "history exhausted".
+- `/positions` caps at 500 rows per page and **pages with `offset`**. Wins come
+  from up to 5500 activity rows, so reading one page of losses hands the ranker
+  a wallet that mostly wins.
+- `/positions` default ordering buries live positions under years of worthless
+  unredeemed losers — 2 live rows in the first page against 40 with
+  `sortBy=CURRENT&sortDirection=DESC`. `fetch_user_positions` always sorts, and
+  the consensus snapshot depends on it.
+
+**Known limitation:** a `ResolvedBet` only exists for a bet held to resolution,
+so the ranker sees 38–49% of a typical wallet's bets and systematically
+flatters anyone who exits losers early. Absolute edge numbers are optimistic;
+treat the ranking as relative order within the pool, not an expected return.
+Firehose discovery adds its own survivorship — wallets placing $20k tickets
+today are disproportionately ones that have been winning.
 
 `WatchlistRepository.refresh` activates nothing unless `persistence_passes`
 (early winners still winning late) **and** a wallet's `edge_lower_bound > 0`.

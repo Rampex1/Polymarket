@@ -34,6 +34,8 @@ from algorithms.copy_trade.watchlist import WatchlistRepository
 from bot.polymarket import api
 
 ACTIVITY_PAGE = 500
+POSITION_PAGE = 500
+POSITION_PAGES = 12       # 6000 positions; past that a wallet's tail is noise
 
 
 def discover(count: int, min_cash: float) -> list[str]:
@@ -56,21 +58,33 @@ def discover(count: int, min_cash: float) -> list[str]:
 def ingest(wallet: str, max_pages: int) -> tuple[int, bool]:
     """Reconstruct one wallet's resolved record.
 
-    Returns (rows written, whether the crawl hit the page cap). A capped crawl
-    clamps the loss side to the window the wins actually cover — without that,
-    lifetime losers are scored against a few days of winners.
+    Returns (rows written, whether the crawl hit the page cap). Every bet is
+    anchored to a BUY in the crawled window, so a capped crawl just means a
+    shorter sample — not a skewed one.
     """
     activity: list[dict] = []
     truncated = True
-    for page in range(max_pages):
+    for page in range(min(max_pages, api.ACTIVITY_MAX_ROWS // ACTIVITY_PAGE)):
         rows = api.fetch_activity(wallet, limit=ACTIVITY_PAGE, offset=page * ACTIVITY_PAGE)
+        # None is a failed read, not an empty tail — mistaking the two would
+        # report a partial crawl as a wallet's complete record.
+        if rows is None:
+            break
         activity.extend(rows)
         if len(rows) < ACTIVITY_PAGE:
             truncated = False
             break
-    since = min((int(r.get("timestamp") or 0) for r in activity), default=0) if truncated else None
-    bets = resolved_bets_from(wallet, activity, api.fetch_user_positions(wallet),
-                              since_ts=since)
+    # Positions cap at 500 a page. Wins come from up to 5500 activity rows, so
+    # reading one page of losses would hand the ranker a wallet that mostly
+    # wins — unredeemed losers are exactly what accumulates past the cap.
+    positions: list[dict] = []
+    for page in range(POSITION_PAGES):
+        rows = api.fetch_user_positions(wallet, limit=POSITION_PAGE, offset=page * POSITION_PAGE)
+        positions.extend(rows)
+        if len(rows) < POSITION_PAGE:
+            break
+
+    bets = resolved_bets_from(wallet, activity, positions)
     return store_resolved_bets(bets), truncated
 
 
@@ -79,7 +93,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--discover", type=int, metavar="N", help="pull N new candidates off the firehose first")
     p.add_argument("--discover-min-cash", type=float, default=5_000.0)
-    p.add_argument("--max-pages", type=int, default=6, help=f"activity pages per wallet (×{ACTIVITY_PAGE} rows)")
+    p.add_argument("--max-pages", type=int, default=11,
+                   help=f"activity pages per wallet (×{ACTIVITY_PAGE} rows); "
+                        f"the endpoint stops serving past {api.ACTIVITY_MAX_ROWS} rows")
     p.add_argument("--min-bets", type=int, default=d.watchlist_min_resolved_bets)
     p.add_argument("--confidence-z", type=float, default=d.watchlist_confidence_z)
     p.add_argument("--min-copyability", type=float, default=d.watchlist_min_copyability_score)
@@ -99,8 +115,9 @@ def main() -> int:
             print(f"Wrote {sum(n for n, _ in results)} resolved bets.")
             if capped:
                 print(f"NOTE: {capped}/{len(fresh)} wallets hit the {args.max_pages}-page "
-                      f"cap. Their history is clamped to the crawled window, which "
-                      f"shortens samples — raise --max-pages for the heaviest traders.")
+                      f"cap, so only their recent bets are sampled. The endpoint "
+                      f"stops at {api.ACTIVITY_MAX_ROWS} rows, so heavy traders are "
+                      f"capped no matter what.")
             print()
         pool = known_wallets()
 
