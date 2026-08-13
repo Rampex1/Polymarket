@@ -36,10 +36,10 @@ class CopyTradeParams:
     watchlist_min_copyability_score: float = _doc(0.0, "Reject wallets below this historical copyability score (0..1).")
 
     snapshot_interval_seconds: int = _doc(300, "Seconds between cohort position snapshots — one API call per wallet, and standing positions don't move fast.")
-    consensus_min_leaders: int = _doc(4, "Distinct cohort wallets holding the same side before it counts as consensus.")
-    consensus_exit_leaders: int = _doc(2, "Close when cohort support falls to this many wallets or fewer. Must sit below consensus_min_leaders or entries and exits fight; 0 disables decay exits.")
+    consensus_min_leaders: int = _doc(3, "Distinct cohort wallets holding the same side before it counts as consensus. Measured over a 21-wallet vetted cohort, 4 never fired and 3 is already rare.")
+    consensus_exit_leaders: int = _doc(1, "Close when cohort support falls to this many wallets or fewer. Must sit below consensus_min_leaders or entries and exits fight; 0 disables decay exits.")
     snapshot_min_responders: float = _doc(0.6, "Fraction of the cohort that must return positions before a decay signal is trusted — a Data-API wobble reads as universal abandonment.")
-    consensus_min_margin: int = _doc(3, "Support minus opposition. Five on YES against five on NO is disagreement, not a signal.")
+    consensus_min_margin: int = _doc(2, "Support minus opposition. Five on YES against five on NO is disagreement, not a signal. Held one below consensus_min_leaders so a lone dissenter does not veto.")
     consensus_min_conviction: float = _doc(0.0, "Ignore a wallet's vote below this fraction of its own deployed capital. 0 = count every position.")
     consensus_max_price: float = _doc(0.97, "Skip markets already priced as decided — a finished match sits at 1.00 with nothing left to pay out.")
     consensus_min_price: float = _doc(0.05, "Skip markets priced as already lost. A cohort down 98% is holding a fossil, not an opinion.")

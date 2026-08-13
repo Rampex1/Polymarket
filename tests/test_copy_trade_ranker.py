@@ -97,8 +97,8 @@ def _consensus_algo(data, **overrides):
     return CopyTradeAlgorithm(
         params=copy_trade_params(
             name="consensus", watchlist_candidate_wallets=("0xa", "0xb", "0xc", "0xd"),
-            consensus_min_leaders=4, consensus_min_margin=3, tier1_size=1.0,
-            max_position_size_usdc=3.0, **overrides,
+            consensus_min_leaders=4, consensus_min_margin=3, consensus_exit_leaders=2,
+            tier1_size=1.0, max_position_size_usdc=3.0, **overrides,
         ),
         market_data=data, watchlist=WatchlistRepository(),
     )
