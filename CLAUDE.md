@@ -150,6 +150,7 @@ algorithms/
     history.py            # Pure reconstruction of a wallet's resolved bets from /activity + /positions
     ranker.py             # Offline-testable confidence-adjusted wallet ranking; reads/writes wallet_resolved_bets
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
+  resolution_carry/       # DESIGN ONLY, not registered — buy near-certain outcomes, hold to resolution, collect the residual. See its PLAN.md
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
