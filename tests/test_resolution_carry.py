@@ -34,7 +34,7 @@ def _params(**overrides):
 
 
 def market(**overrides) -> dict:
-    """A Gamma row that clears every gate: sports, 0.97 ask, 2 days out."""
+    """A Gamma row that clears every gate: sports, 0.97 ask, 12 hours out."""
     row = {
         "conditionId": "0xm1",
         "clobTokenIds": '["tok_yes", "tok_no"]',
@@ -56,23 +56,22 @@ def end_ts(days: float) -> float:
 # ── The funnel ───────────────────────────────────────────────────────────────
 
 def test_clean_row_becomes_a_candidate():
-    cand = screen.evaluate(market(), end_ts(2), NOW, _params())
+    cand = screen.evaluate(market(), end_ts(0.5), NOW, _params())
     assert isinstance(cand, screen.Candidate)
     assert (cand.market_id, cand.asset_id, cand.outcome) == ("0xm1", "tok_yes", "Yes")
     assert cand.event_id == "ev1"
-    # (1-0.97)/0.97 over 2 days, annualised against a 1-day floor.
-    assert cand.annualized == pytest.approx((0.03 / 0.97) * 365 / 2, rel=1e-6)
+    # (1-0.97)/0.97, annualised against the 1-day floor.
+    assert cand.annualized == pytest.approx((0.03 / 0.97) * 365, rel=1e-6)
 
 
 @pytest.mark.parametrize("row, days, reason", [
-    (market(bestAsk="0.99"),  2,  "out of band"),   # residual too thin
-    (market(bestAsk="0.80"),  2,  "out of band"),   # forecasting, not carrying
-    (market(bestBid="0.90"),  2,  "spread"),        # no real price
-    (market(liquidityClob="100"), 2, "illiquid"),
+    (market(bestAsk="0.99"),  0.5, "out of band"),  # residual too thin
+    (market(bestAsk="0.94"),  0.5, "out of band"),  # forecasting, not carrying
+    (market(bestBid="0.90"),  0.5, "spread"),       # no real price
+    (market(liquidityClob="100"), 0.5, "illiquid"),
+    (market(clobTokenIds="[]"),   0.5, "no token id"),
     (market(),               -0.1, "past end date"),
-    (market(),                90,  "resolves too far out"),
-    (market(bestAsk="0.975", bestBid="0.97"), 40, "not worth the wait"),
-    (market(clobTokenIds="[]"), 2, "no token id"),
+    (market(),                3,   "resolves too far out"),
 ])
 def test_gates_reject_with_a_reason(row, days, reason):
     assert screen.evaluate(row, end_ts(days), NOW, _params()) == reason
@@ -91,6 +90,15 @@ def test_a_market_minutes_from_settling_is_tradeable():
     # Annualising floors the horizon at a day, so a 10-minute wait is not
     # reported as a four-figure return.
     assert cand.annualized == pytest.approx((0.03 / 0.97) * 365, rel=1e-6)
+
+
+def test_the_annualized_hurdle_still_bites_on_a_wider_window():
+    """Inert at a one-day cap — the weakest trade the band allows still
+    reports ~560%/yr — but it is the binding gate as soon as the window
+    widens, so keep it covered."""
+    p = _params(max_days_to_resolution=45.0)
+    assert screen.evaluate(market(bestAsk="0.98", bestBid="0.97"), end_ts(40), NOW, p) \
+        == "not worth the wait"
 
 
 def test_an_hours_floor_still_applies_when_set():
@@ -119,7 +127,7 @@ def _cand(market_id, event, category, annualized) -> screen.Candidate:
     return screen.Candidate(
         market_id=market_id, asset_id=f"tok_{market_id}", question="q",
         outcome="Yes", ask=0.97, bid=0.96, liquidity=25_000.0,
-        end_ts=end_ts(2), days=2.0, annualized=annualized,
+        end_ts=end_ts(0.5), days=0.5, annualized=annualized,
         event_id=event, category=category,
     )
 
@@ -185,7 +193,7 @@ def _algo(ledger, rows, **overrides):
 
 
 def test_poll_emits_one_flat_stake_open_intent(ledger):
-    rows = [market(_end_ts=end_ts(2))]
+    rows = [market(_end_ts=end_ts(0.5))]
     intents = list(_algo(ledger, rows).poll())
 
     assert len(intents) == 1
@@ -202,7 +210,7 @@ def test_a_held_market_is_never_re_opened(ledger):
     """Being at size is the dedupe — there is no seen-ring to go stale."""
     from tests.conftest import make_trade
 
-    rows = [market(_end_ts=end_ts(2))]
+    rows = [market(_end_ts=end_ts(0.5))]
     algo = _algo(ledger, rows)
     ledger.record_buy(
         make_trade(market_id="0xm1", asset_id="tok_yes", price=0.97),
@@ -214,7 +222,7 @@ def test_a_held_market_is_never_re_opened(ledger):
 def test_full_book_stops_scanning(ledger):
     from tests.conftest import make_trade
 
-    rows = [market(_end_ts=end_ts(2))]
+    rows = [market(_end_ts=end_ts(0.5))]
     algo = _algo(ledger, rows, max_concurrent_positions=1)
     ledger.record_buy(
         make_trade(market_id="0xother", asset_id="tok_x", price=0.97),
@@ -226,7 +234,7 @@ def test_full_book_stops_scanning(ledger):
 def test_non_sports_market_is_screened_out(ledger):
     from algorithms.resolution_carry import ResolutionCarryAlgorithm
 
-    rows = [market(_end_ts=end_ts(2))]
+    rows = [market(_end_ts=end_ts(0.5))]
     algo = ResolutionCarryAlgorithm(
         params=_params(), market_data=FakeGateway(rows, labels="politics"),
     )

@@ -190,12 +190,12 @@ Every knob lives in `params.py` with a `_doc` string, per the invariant.
 
 ```python
 # ── Price band ──────────────────────────────────────────────────────────
-min_ask                 0.93   # below this we are forecasting, not carrying
+min_ask                 0.95   # below this we are forecasting, not carrying
 max_ask                 0.985  # above this the residual cannot cover the tail
 
 # ── Time value ──────────────────────────────────────────────────────────
-max_days_to_resolution  45     # capital lockup ceiling
-min_annualized_return   0.25   # the real hurdle: 2% in 30d passes, 2% in 180d does not
+max_days_to_resolution  1      # capital lockup ceiling; a day, not 45 — see below
+min_annualized_return   0.25   # inert at a 1-day window; binds again if it widens
 min_hours_to_resolution 0      # was 6; see below — it excluded the thesis
 
 # ── Liquidity ───────────────────────────────────────────────────────────
@@ -224,7 +224,23 @@ poll_interval_seconds   60       # set by the staleness measurement, not taste
 settle_check_every      12
 ```
 
-Three defaults worth explaining, all deliberate:
+Four defaults worth explaining, all deliberate:
+
+**`max_days_to_resolution = 1` and `min_ask = 0.95`**, tightened from 45 days
+and 0.93. Both follow from the horizon table above rather than from taste: a
+2% carry is worth ~250x more at a one-day horizon than at two months, and
+`min_annualized_return` was the wrong instrument for enforcing that — it let
+a 31-day trade through on arithmetic. A hard day cap says the same thing
+directly, and it makes the gate inert (the weakest trade the band allows
+still annualises to ~560%/yr), which is fine: it stays as the binding gate
+if the window ever widens.
+
+Two side effects worth knowing. The scan gets much cheaper — a one-day
+window is ~400 rows against ~2,100 for 45 days, so it exhausts in about four
+pages instead of twenty-one. And the universe becomes almost entirely
+in-play: markets resolving within a day are games in progress, which is
+where the flow is, but also where a price can move under a resting limit.
+
 
 **`min_hours_to_resolution = 0`, changed from 6 after the first live scan.**
 The 6-hour floor was written to avoid stale books and settling-right-now

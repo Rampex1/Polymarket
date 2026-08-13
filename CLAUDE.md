@@ -335,8 +335,9 @@ prod bankroll**; scale in `algorithms/insider_flow/params.py` when capital grows
 
 ### resolution_carry
 
-Buys the top of the book (`bestAsk` in 0.93–0.985) and holds to settlement,
-so the premise is that the price is *correct* — not that we know better.
+Buys the top of the book (`bestAsk` in 0.95–0.985, resolving within a day)
+and holds to settlement, so the premise is that the price is *correct* — not
+that we know better.
 Each poll pages Gamma's volume-ordered open markets inside the resolution
 window, screens on price band → spread/liquidity → time value → category →
 diversification, ranks survivors by annualised return, and opens a flat

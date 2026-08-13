@@ -20,13 +20,16 @@ class ResolutionCarryParams:
     mode: Mode = Mode.PAPER          # fail-safe; the profile block sets it
 
     # ── Price band ───────────────────────────────────────────────────────────
-    min_ask: float = _doc(0.93, "Below this we are forecasting, not carrying.")
+    min_ask: float = _doc(0.95, "Below this we are forecasting, not carrying.")
     max_ask: float = _doc(0.985, "Above this the residual cannot cover the tail.")
 
     # ── Time value ───────────────────────────────────────────────────────────
     # Time is the binding constraint, not price: 2% is excellent over 30 days
     # and worse than cash over 180. Unknown end date fails closed.
-    max_days_to_resolution: float = _doc(45.0, "Capital lockup ceiling, in days.")
+    max_days_to_resolution: float = _doc(1.0, "Capital lockup ceiling, in days.")
+    # Inert at a one-day window: annualisation floors the horizon at a day, so
+    # the weakest trade the band allows (0.985) still reports ~560%/yr. Kept
+    # because it becomes the binding gate the moment the window widens.
     min_annualized_return: float = _doc(0.25, "Win-case return annualized over the wait must beat this (0.25 = +25%/yr).")
     # 0, not 6: a floor in hours is a floor on the whole thesis. The trade
     # this strategy exists to take is a game decided on the pitch and sitting
@@ -77,11 +80,11 @@ class ResolutionCarryParams:
     # over five minutes, roughly the entire return of a 0.98 entry.
     poll_interval_seconds: int = _doc(60, "Seconds between discovery scans. Set by the staleness measurement, not taste.")
     # 21 is everything Gamma will serve: it 422s past offset 2100. The scan
-    # also stops early on a short page, so this is a ceiling, not a cost —
-    # measured at ~2,100 rows and ~17s for a 45-day window. Scanning less is
-    # not an option: Gamma orders by volume and the markets this strategy
-    # wants — sports games near their end — are the low-volume tail, so a
-    # partial scan systematically misses the universe.
+    # also stops early on a short page, so this is a ceiling, not a cost — a
+    # one-day window is ~400 rows and exhausts in about four pages. Scanning
+    # less is not an option: Gamma orders by volume and the markets this
+    # strategy wants — sports games near their end — are the low-volume tail,
+    # so a partial scan systematically misses the universe.
     discovery_pages: int = _doc(21, "Max Gamma /markets pages to scan per poll (100 rows each). 21 is Gamma's own offset ceiling.")
     settle_check_every: int = _doc(12, "Polls between market-resolution sweeps.")
 
