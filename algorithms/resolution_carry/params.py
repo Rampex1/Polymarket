@@ -94,7 +94,18 @@ class ResolutionCarryParams:
     # screen was hired for. `market_category` is logged on every signal, so
     # the arms can still be compared on realized P&L.
     require_sports: bool = _doc(False, "Only trade markets Gamma labels sports/esports.")
-    exclude_categories: tuple = _doc((), "Gamma category/tag substrings to reject. Deliberately empty — efficiency is the product here.")
+    # Crypto is out entirely. A "will BTC be above X at 4pm" market is not a
+    # question awaiting settlement — it is a live price that keeps moving
+    # until the instant it expires, so there is no decided outcome to be paid
+    # for waiting on, and the ask reprices continuously against us. The rest
+    # of the universe is markets whose answer is already determined and only
+    # the paperwork is pending, which is the entire thesis.
+    #
+    # A substring on the Gamma label is enough, and that is measured rather
+    # than assumed: of 130 crypto markets in a one-day window, 130 carried a
+    # "crypto" label, and 0 of 300 sampled markets carried no labels at all
+    # (the case this screen would fail open on).
+    exclude_categories: tuple = _doc(("crypto",), "Gamma category/tag substrings to reject.")
     # 15, from the archive: across 4,765 transits through this band on tokens
     # that finished at/above 0.99, 99% lasted a single one-minute sample. The
     # band is open for about a minute, so a 60s poll lands inside it roughly

@@ -243,7 +243,7 @@ max_slippage            0.005    # half a cent is a quarter of the return
 
 # ── Screening ───────────────────────────────────────────────────────────
 require_sports          False    # the day cap guarantees the horizon; see below
-exclude_categories      ()       # deliberately empty — see below
+exclude_categories      ("crypto",)   # a live price is not a decided outcome
 poll_interval_seconds   15       # set by the band-dwell measurement, not taste
 settle_check_every      12
 ```
@@ -292,11 +292,21 @@ reconciliation — an open GTC that never fills must not be mistaken for a
 position. **This is the biggest execution unknown and should be verified in
 paper before live.**
 
-**`exclude_categories = ()` and `require_sports = False`.** Every other
+**`require_sports = False`, `exclude_categories = ("crypto",)`.** Every other
 strategy screens sports *out*, because efficient pricing destroys a
 forecasting edge. Here efficiency is *the product* — we need the price to be
-right, and we are paid for waiting rather than for knowing better. So
-nothing is excluded.
+right, and we are paid for waiting rather than for knowing better. So the
+screen is open except for crypto.
+
+Crypto is excluded because it does not fit the thesis at all. "Will BTC be
+above $62,000 at 4pm" is a live price that keeps moving until the instant it
+expires; there is no decided outcome sitting there waiting on paperwork, so
+there is nothing to be paid for waiting on, and the ask reprices
+continuously against a resting order. Everything else in the universe is a
+question whose answer is already determined. The substring screen is enough,
+measured rather than assumed: of 130 crypto markets in a one-day window, 130
+carried a `crypto` label, and 0 of 300 sampled markets carried no labels at
+all — the case an exclusion screen fails open on.
 
 Requiring sports was the original default, on the reasoning that only a
 game has a knowably certain resolution time. That turned out to be

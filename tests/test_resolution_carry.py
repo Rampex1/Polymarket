@@ -302,3 +302,11 @@ def test_caps_must_agree_with_the_bankroll():
 def test_this_algorithm_opts_out_of_signal_alerts():
     """The channel is a trade log: it screens ~2,100 markets a poll."""
     assert _params().notify_signals is False
+
+
+def test_crypto_is_excluded():
+    """A "BTC above X at 4pm" market is a live price, not a decided outcome
+    waiting on paperwork — there is nothing to be paid for waiting on."""
+    p = _params()
+    assert not screen.category_ok("bitcoin,weekly,crypto,crypto prices", p)
+    assert screen.category_ok("sports,games,soccer,leagues cup", p)

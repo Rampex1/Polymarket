@@ -345,8 +345,11 @@ stake. Exits are the shared settle sweep only.
 
 Non-obvious behavior, all deliberate:
 
-- **No category screen at all** (`require_sports = False`,
-  `exclude_categories = ()`). Every other strategy screens sports out
+- **Sports is not required; crypto is excluded** (`require_sports = False`,
+  `exclude_categories = ("crypto",)`). A "will BTC be above X at 4pm" market
+  is a live price, not a decided outcome awaiting settlement — nothing to be
+  paid for waiting on. Measured: 130 of 130 crypto markets in a one-day
+  window carry a `crypto` label, and 0 of 300 markets carry none. Every other strategy screens sports out
   because efficient pricing kills a forecasting edge; here efficiency is the
   product. Sports was required at first, on the assumption that only a game
   has a knowably certain resolution time — measured and false: non-sports
