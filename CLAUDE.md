@@ -131,7 +131,6 @@ algorithms/
     multi_leader.py       # Multi-leader event watcher + consensus-to-intent translation
     ranker.py             # Offline-testable confidence-adjusted wallet ranking
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
-    research/             # Dune query behind the ranked-wallet workflow (its header documents the CSV → wallet_resolved_bets load)
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
