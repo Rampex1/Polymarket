@@ -5,3 +5,17 @@
 type = "insider_flow"
 name = "insider_flow_paper"
 mode = "paper"
+
+# A/B on the sports screen. Identical cohort and sizing; the only difference
+# is exclude_categories, set per-name in algorithms/copy_trade/params.py
+# VARIANTS. Split realized P&L by the signals table's market_category to
+# settle whether excluding sports helps or just starves the strategy.
+[[algorithm]]
+type = "copy_trade"
+name = "copy_trade_paper"
+mode = "paper"
+
+[[algorithm]]
+type = "copy_trade"
+name = "copy_trade_sports_paper"
+mode = "paper"

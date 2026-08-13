@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Phase 0 consensus reporter — READ-ONLY. Places no orders, writes no DB.
 
-    python scripts/consensus_report.py cohort.txt
-    python scripts/consensus_report.py --from-firehose 40 --save cohort.txt
+    python -m algorithms.copy_trade.report cohort.txt
+    python -m algorithms.copy_trade.report --from-firehose 40 --save cohort.txt
 
 `cohort.txt` is one proxy-wallet address per line; blank lines and `#`
 comments are ignored.
@@ -14,16 +13,12 @@ file by hand afterwards.
 """
 
 import argparse
-import os
 import re
-import sys
 from concurrent.futures import ThreadPoolExecutor
 
-# Allow running from any directory.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from algorithms.copy_trade.consensus import find_consensus, parse_positions
 from bot.polymarket import api
+
+from .consensus import find_consensus, parse_positions
 
 
 def load_cohort(path: str) -> list[str]:

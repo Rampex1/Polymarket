@@ -6,13 +6,64 @@ every profile block states every knob, and this module reads no environment
 variables.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from bot.domain.mode import Mode
 
 
 def _doc(default, doc: str):
     return field(default=default, metadata={"doc": doc})
+
+
+# The vetted cohort, seated by `python -m algorithms.copy_trade.cohort`. Pinned
+# here rather than left to the DB so both arms of an A/B provably watch the
+# same wallets, and so the cohort behind a stretch of results is recoverable
+# from git. A watchlist activated for a given algorithm name still overrides.
+COHORT = (
+    "0x032eb1bc893940263ad0b01889f262fc232f2a9e",
+    "0x0d42d3504ae69136406708fc1cc3117842932eee",
+    "0x161a7f666ca49d592848cf415b42f49a84714103",
+    "0x2037bb7a0773499b3afc9b4a4c18ff8fb715473d",
+    "0x27f738fe203827445690339104aae35b20bc44b0",
+    "0x2cc8cc54f50dbb45fe346612821ca93b6e93262b",
+    "0x2cd09d387c5ab462b6dc60bef59304f215108e55",
+    "0x4d0e9b029700163625c551a0073636f3dc5ec45b",
+    "0x5912794596cd3cc2f36605710fc1fcd6e5886f45",
+    "0x7bff96579b20fe3530e140d6a3c223c9f2127cd6",
+    "0xa2c908ce8b8386bc8c5471120c5a662551332c23",
+    "0xa52b785a5510117ac3ae03d75d029f89a36c9480",
+    "0xaa9ae1ef7719af8694d6811817c6d0c22aa43b3e",
+    "0xb595d09ce5bbc4d39e3b3d04e80c402d2c8d5922",
+    "0xb7cd8599d690b62e5a50e9cabacbbf900d086827",
+    "0xc72d7dcdb23597d143a83536fb97b1d7db7efc21",
+    "0xcbd0f3b660c1c0609ac25919ec0cea828f7edec4",
+    "0xcd3675803ac7c8242a83fd6ecdfe3d2239ae0f01",
+    "0xd1c769317bd15de7768a70d0214cf0bbcc531d2b",
+    "0xe16d3f2a5807999b358affd9445c3a09e45e5e30",
+    "0xfcd0eadb24d78e016e88b9e2a7029e349ba6391d",
+)
+
+
+# Named variants — the one place a knob may differ between two blocks of this
+# type, keyed by the `name` a profile declares. The values still live in this
+# file, so there is still exactly one place to look up what a knob is set to.
+#
+# For A/B pairs only: change one screen, hold everything else identical. A
+# variant that drifts into general tuning defeats the point of the rule.
+VARIANTS: dict[str, dict] = {
+    # Control arm: the sports screen as shipped.
+    "copy_trade_paper": {
+        "watchlist_candidate_wallets": COHORT,
+    },
+    # Treatment arm for the category question. The sports screen was imported
+    # as an assumption and has never been tested against our own P&L, while it
+    # currently drops ~86% of consensus signals. This arm keeps sports so the
+    # two can be compared on realized outcomes instead of on priors.
+    "copy_trade_sports_paper": {
+        "watchlist_candidate_wallets": COHORT,
+        "exclude_categories": (),
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -29,7 +80,10 @@ class CopyTradeParams:
     # instead of the static target fields above. Consensus is read off the
     # cohort's *standing positions* each snapshot, not off a window of entry
     # events, so agreement accumulated days apart still counts.
-    watchlist_candidate_wallets: tuple = _doc((), "Cohort proxy-wallet addresses. Non-empty activates consensus mode. Bootstrap with scripts/consensus_report.py.")
+    # Empty by default so single-target mode stays the base behaviour and the
+    # loader still rejects an algorithm with neither a target nor a cohort.
+    # The consensus arms get theirs from VARIANTS.
+    watchlist_candidate_wallets: tuple = _doc((), "Cohort proxy-wallet addresses. Non-empty activates consensus mode. An activated watchlist for this algorithm's name overrides it.")
     watchlist_size: int = _doc(0, "Rank the cohort down to this many wallets; 0 uses the candidate list as given.")
     watchlist_min_resolved_bets: int = _doc(50, "Minimum resolved bets before a wallet is eligible.")
     watchlist_confidence_z: float = _doc(1.645, "One-sided confidence multiplier used for the edge lower bound.")
@@ -76,11 +130,29 @@ class CopyTradeParams:
     order_type: str = _doc("market", "'market' (FOK/FAK) or 'limit' (GTC).")
 
     # ── Notifications ────────────────────────────────────────────────────────
-    webhook_url: str = _doc("", "Per-algorithm Discord webhook URL. Overrides the global registry; '' falls back to config/webhooks.toml routing.")
+    # Shares insider_flow's channel for now. Both arms post here, and each
+    # message carries its algorithm's display_name, so they are separable —
+    # but give copy_trade its own webhook before this generates real volume.
+    webhook_url: str = _doc(
+        "https://discord.com/api/webhooks/1514867567519596594/tPzzQrqH5_0X5oXIV2iQnH5hFiSMe4h0iNyvQslN5xNHhSUn7lfPOB4_KRdLDKJbe99Q",
+        "Per-algorithm Discord webhook URL. Required — there is no global fallback.",
+    )
 
     # ── Paper mode ───────────────────────────────────────────────────────────
     paper_starting_balance: float = _doc(10_000.0, "Virtual balance — seeded into the DB on FIRST run only; later edits need scripts/reset_paper_trade_db.py or a manual UPDATE.")
     paper_fee_bps: float = _doc(0.0, "Modeled paper fee, basis points.")
+
+    def __post_init__(self) -> None:
+        """Apply this name's variant overrides, if it has any."""
+        known = {f.name for f in fields(self)}
+        for knob, value in VARIANTS.get(self.name, {}).items():
+            # Same fail-fast contract as the profile loader: a typo'd knob is
+            # a crash, never a silent no-op that quietly runs the control.
+            if knob not in known:
+                raise ValueError(
+                    f"VARIANTS['{self.name}'] sets unknown knob '{knob}'."
+                )
+            object.__setattr__(self, knob, value)
 
     def validate(self) -> None:
         """Boot-time sanity checks — called by the profile loader."""

@@ -2,6 +2,17 @@
 
 ## Claude Behavior
 
+- **Never modify anything under `bot/` without explicit permission.** Ask
+  first, every time, and say what the change would be and why nothing in
+  `algorithms/` can do it instead. `bot/` is shared infrastructure — the
+  ledger, execution, gateway, loader, and Discord plumbing that every
+  strategy depends on — so a change there to suit one strategy silently
+  changes them all. This holds even when editing `bot/` looks like the
+  shorter diff.
+- **copy_trade is the user's code.** Its logic lives in
+  `algorithms/copy_trade/`, including the scripts that operate on it, which
+  are package modules run with `python -m`. Do not scatter copy-trade logic
+  into `scripts/` or `bot/`. Tests are the exception and belong in `tests/`.
 - After implementing changes, **commit automatically** (no need to ask).
 - **Do not push** until the user explicitly says to.
 - **Keep comments short.** Write one only when the code can't say it itself —
@@ -23,6 +34,8 @@ only here:
 PROFILE=<name> python main.py                   # run one profile's workers
 python -m algorithms.insider_flow.archive --once            # archiver: one pass
 python -m algorithms.insider_flow.archive --loop --every 3600
+python -m algorithms.copy_trade.cohort --discover 40 --activate <algo>   # build/seat a cohort
+python -m algorithms.copy_trade.report cohort.txt           # read-only consensus report
 ```
 
 ## Invariants — don't break these
@@ -50,8 +63,10 @@ python -m algorithms.insider_flow.archive --loop --every 3600
   truth per knob. A profile TOML declares *what runs* — `type`, `name`,
   `mode` — and nothing else; an `[algorithm.params]` block is a boot error,
   not a silent no-op. Tuning is therefore a code edit and a redeploy, and
-  two blocks of the same type inside one profile cannot differ. That is the
-  accepted trade for having exactly one place to look.
+  two blocks of the same type inside one profile differ **only** through a
+  `VARIANTS[name]` entry in that same params.py — an A/B lever, not a
+  general tuning channel. Values still live in one file, and an unknown knob
+  in a variant raises rather than silently running the control.
 - **One `.env`, shared by every profile.** Per-profile env files are not
   read and `setup_vm.sh` deletes any it finds. Don't reintroduce a
   `.env.<profile>` fallback: paper's safety comes from the `allow_live`
@@ -130,6 +145,8 @@ algorithms/
     params.py             # CopyTradeParams — pure schema
     consensus.py          # Pure grouping: cohort positions → markets they agree on. No I/O, so thresholds sweep offline
     engine.py             # ConsensusEngine — snapshots the cohort, screens, emits intents
+    cohort.py             # `python -m` job: discover wallets, reconstruct history, rank, --activate a cohort
+    report.py             # `python -m` job: read-only consensus report. Places no orders
     history.py            # Pure reconstruction of a wallet's resolved bets from /activity + /positions
     ranker.py             # Offline-testable confidence-adjusted wallet ranking; reads/writes wallet_resolved_bets
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
@@ -139,8 +156,6 @@ algorithms/
     archive.py            # Price-history archiver (CLOB drops history at resolution — hoard it); own DB, own process
     research/             # Plans and notes behind this strategy
 scripts/
-  consensus_report.py     # Read-only cohort-consensus report; bootstraps a cohort from the firehose. Places no orders
-  rank_wallets.py         # Discover wallets, reconstruct their resolved record, rank, and (with --activate) seat the cohort
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
@@ -215,7 +230,24 @@ are not:
   a dead price. Positions with no `asset_id`, or whose Gamma lookup failed,
   are skipped for the same reason: never act on an unverifiable reading.
 
-### Building the cohort (`scripts/rank_wallets.py`)
+### The paper A/B on category screening
+
+`config/experimental.toml` runs two `copy_trade` blocks over the same 21-wallet
+cohort, differing only in `exclude_categories` via `VARIANTS`:
+
+| name | sports |
+|---|---|
+| `copy_trade_paper` | excluded (control) |
+| `copy_trade_sports_paper` | kept (treatment) |
+
+The screen was imported from insider_flow as an assumption and has never been
+tested against our own P&L, while it currently drops ~86% of consensus
+signals. Every `OpenIntent` logs `market_category` in its `signals` features
+row and gets `outcome`/`pnl_usdc` at settlement, so split realized P&L by
+category and algo to settle it. Both arms share insider_flow's webhook for
+now; each message carries its `display_name`.
+
+### Building the cohort (`python -m algorithms.copy_trade.cohort`)
 
 Batch, not a worker thread. The ranker consumes *resolved* bets, so its input
 only moves as markets settle — days to weeks. Ingestion stays out of the poll

@@ -2,6 +2,8 @@
 
 import time
 
+import pytest
+
 from algorithms.copy_trade.ranker import ResolvedBet, rank_wallets
 from algorithms.copy_trade.watchlist import WatchlistRepository
 from bot.execution import lots
@@ -220,3 +222,25 @@ def test_watchlist_never_activates_a_wallet_it_cannot_call_profitable(fresh_db):
     repo.refresh("weak", _bets("0xa") + losers, watchlist_size=5, min_resolved_bets=2,
                  confidence_z=1.645, min_copyability_score=0.0, persistence_passed=True)
     assert repo.active_wallets("weak") == ["0xa"]
+
+
+def test_variants_differ_only_where_declared_and_reject_typos():
+    """A/B arms must share every knob but the one under test."""
+    from algorithms.copy_trade import params as P
+    from dataclasses import fields
+
+    control = P.CopyTradeParams(name="copy_trade_paper")
+    treatment = P.CopyTradeParams(name="copy_trade_sports_paper")
+    differing = {f.name for f in fields(control)
+                 if getattr(control, f.name) != getattr(treatment, f.name)}
+    assert differing == {"name", "exclude_categories"}
+    assert control.exclude_categories == ("sports",)
+    assert treatment.exclude_categories == ()
+
+    # A typo'd knob must crash, not silently leave the arm running the control.
+    P.VARIANTS["typo_probe"] = {"exclude_catagories": ()}
+    try:
+        with pytest.raises(ValueError, match="unknown knob"):
+            P.CopyTradeParams(name="typo_probe")
+    finally:
+        del P.VARIANTS["typo_probe"]

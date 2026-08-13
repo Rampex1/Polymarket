@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """Phase 3 cohort builder — discover wallets, reconstruct their record, rank.
 
-    python scripts/rank_wallets.py --discover 40      # widen the pool, then rank
-    python scripts/rank_wallets.py                    # re-rank what we already have
-    python scripts/rank_wallets.py --activate copy_trade_paper
+    python -m algorithms.copy_trade.cohort --discover 40      # widen the pool, then rank
+    python -m algorithms.copy_trade.cohort                    # re-rank what we already have
+    python -m algorithms.copy_trade.cohort --activate copy_trade_paper
 
 Batch on purpose, not a worker thread. The ranker consumes *resolved* bets, so
 its input only changes as markets settle — days to weeks. Polling faster buys
@@ -17,21 +16,17 @@ redeploy. Without the flag nothing is written and this only prints.
 """
 
 import argparse
-import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 
-# Allow running from any directory.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from bot.polymarket import api
 
-from algorithms.copy_trade.history import resolved_bets_from
-from algorithms.copy_trade.params import CopyTradeParams
-from algorithms.copy_trade.ranker import (
+from .history import resolved_bets_from
+from .params import CopyTradeParams
+from .ranker import (
     SQLiteResolvedBetSource, known_wallets, persistence_passes, rank_wallets,
     store_resolved_bets,
 )
-from algorithms.copy_trade.watchlist import WatchlistRepository
-from bot.polymarket import api
+from .watchlist import WatchlistRepository
 
 ACTIVITY_PAGE = 500
 POSITION_PAGE = 500

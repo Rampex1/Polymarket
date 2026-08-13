@@ -74,7 +74,7 @@ def test_undated_and_nonsense_rows_are_skipped():
 
 def test_a_failed_page_is_not_an_exhausted_history(monkeypatch):
     """A failed read must never be mistaken for the end of a wallet's record."""
-    import scripts.rank_wallets as rw
+    import algorithms.copy_trade.cohort as rw
 
     pages = {0: [buy()] * 500, 500: None}          # page two fails
     monkeypatch.setattr(rw.api, "fetch_activity",
