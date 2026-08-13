@@ -629,3 +629,67 @@ def test_dispatch_settle_falls_back_when_closed_but_undetermined(
     runner.dispatch(intent, algo, ledger, risk, client=None, paper=True)
     assert ledger.get("m1", paper=True) is None
     assert ledger.today_pnl_usdc(paper=True) == 6.0
+
+
+# ---------------------------------------------------------------------------
+# notify_signals — per-algorithm opt-out for pre-execution alerts
+# ---------------------------------------------------------------------------
+
+
+def _capture_alerts(monkeypatch):
+    """Record which alert helpers the runner reaches, without posting."""
+    from bot.execution import runner as runner_mod
+
+    fired = []
+    for name in ("on_signal", "on_risk_blocked", "on_buy_executed",
+                 "on_buy_failed", "on_settle_executed"):
+        monkeypatch.setattr(
+            runner_mod.alerts, name,
+            lambda *a, _n=name, **kw: fired.append(_n),
+        )
+    return fired
+
+
+def test_signal_alerts_fire_by_default(monkeypatch, ledger, risk, algo):
+    """An algorithm that never declares the knob keeps posting as before."""
+    from bot.execution import runner
+
+    fired = _capture_alerts(monkeypatch)
+    monkeypatch.setattr(runner, "_get_current_price", lambda *a, **kw: 0.50)
+    intent = OpenIntent(market_id="m1", asset_id="a1", usdc_amount=10.0,
+                        signal_price=0.50, question="Q?", outcome="Yes")
+    runner.dispatch(intent, algo, ledger, risk, None, paper=True)
+
+    assert "on_signal" in fired
+    assert "on_buy_executed" in fired
+
+
+def test_notify_signals_false_silences_signal_but_not_the_fill(
+    monkeypatch, ledger, risk, algo,
+):
+    from bot.execution import runner
+
+    algo.params.notify_signals = False
+    fired = _capture_alerts(monkeypatch)
+    monkeypatch.setattr(runner, "_get_current_price", lambda *a, **kw: 0.50)
+    intent = OpenIntent(market_id="m1", asset_id="a1", usdc_amount=10.0,
+                        signal_price=0.50, question="Q?", outcome="Yes")
+    runner.dispatch(intent, algo, ledger, risk, None, paper=True)
+
+    assert "on_signal" not in fired
+    assert "on_buy_executed" in fired      # what happened is never suppressed
+
+
+def test_notify_signals_false_silences_risk_blocks(
+    monkeypatch, ledger, risk, algo,
+):
+    from bot.execution import runner
+
+    algo.params.notify_signals = False
+    algo.params.max_position_size_usdc = 1.0
+    fired = _capture_alerts(monkeypatch)
+    intent = OpenIntent(market_id="m1", asset_id="a1", usdc_amount=999.0,
+                        signal_price=0.50, question="Q?", outcome="Yes")
+    runner.dispatch(intent, algo, ledger, risk, None, paper=True)
+
+    assert fired == []                     # blocked, and silently

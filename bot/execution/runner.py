@@ -100,6 +100,15 @@ def build_client() -> Optional[ClobClient]:
 # Dispatch — the public entry point algorithms route through
 # ---------------------------------------------------------------------------
 
+def _notifies_signals(algo) -> bool:
+    """Whether this algorithm wants pre-execution alerts (signals, risk
+    blocks). Opt-out, read off params: an algorithm that never declares the
+    knob keeps posting them, so adding it changed no existing behavior.
+    Fills, settlements, and failures are never suppressed by it — those are
+    what happened, not what was considered."""
+    return getattr(algo.params, "notify_signals", True)
+
+
 def dispatch(
     intent: Intent,
     algo,                     # bot.domain.algorithm.Algorithm
@@ -117,8 +126,12 @@ def dispatch(
     if isinstance(intent, OpenIntent) and risk.is_suspended(intent.market_id):
         return  # prior BUY failed — suppress all further signals silently
 
-    alerts.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
-                       paper=paper)
+    # A strategy that emits many more candidates than it can fill wants its
+    # channel to be a trade log, not a firehose. Absent the knob, every
+    # existing algorithm keeps posting exactly as before.
+    if _notifies_signals(algo):
+        alerts.on_signal(intent, algo.display_name, webhook_url=algo.params.webhook_url,
+                           paper=paper)
 
     if isinstance(intent, OpenIntent):
         _handle_open(intent, algo, ledger, risk, client, paper)
@@ -154,7 +167,7 @@ def _handle_open(
                        algo.name, reason, trade.question[:50])
         signals.record(algo.name, intent, paper, executed=False,
                        skip_reason=f"risk: {reason}")
-        if "suspended" not in reason:
+        if "suspended" not in reason and _notifies_signals(algo):
             alerts.on_risk_blocked(reason, trade, algo.display_name,
                                      webhook_url=algo.params.webhook_url, paper=paper)
         return

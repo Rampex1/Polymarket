@@ -287,3 +287,18 @@ def test_validate_rejects(overrides):
 
 def test_shipped_defaults_validate():
     ResolutionCarryParams(webhook_url="http://hook").validate()
+
+
+def test_caps_must_agree_with_the_bankroll():
+    """More positions than the exposure cap can fund only ever produces
+    intents that are emitted and then rejected."""
+    with pytest.raises(ValueError):
+        _params(max_concurrent_positions=20, max_total_exposure_usdc=15.0,
+                bet_size_usdc=1.0).validate()
+    _params(max_concurrent_positions=15, max_total_exposure_usdc=15.0,
+            bet_size_usdc=1.0).validate()
+
+
+def test_this_algorithm_opts_out_of_signal_alerts():
+    """The channel is a trade log: it screens ~2,100 markets a poll."""
+    assert _params().notify_signals is False

@@ -49,5 +49,12 @@ def feature_line(features: dict) -> str:
         parts.append(escape(str(category)))
     end_ts = features.get("market_end_ts")
     if end_ts is not None:
-        parts.append(f"resolves in {max(0.0, (end_ts - time.time()) / 86_400):.0f}d")
+        # Hours under a day: whole days alone render every sub-day horizon as
+        # "0d", which is the least useful thing this line can say for a
+        # strategy whose markets all resolve within one.
+        left = max(0.0, end_ts - time.time())
+        parts.append(
+            f"resolves in {left / 3_600:.1f}h" if left < 86_400
+            else f"resolves in {left / 86_400:.0f}d"
+        )
     return " · ".join(parts)

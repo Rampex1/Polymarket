@@ -260,9 +260,12 @@ class ResolutionCarryAlgorithm(Algorithm):
 
     def _open(self, cand: screen.Candidate) -> OpenIntent:
         p = self.params
+        # Hours, not days: every market this strategy touches resolves inside
+        # one, so days round every horizon to "0.0d".
+        horizon = f"{cand.days * 24:.1f}h" if cand.days < 1 else f"{cand.days:.1f}d"
         logger.info(
-            "[%s] CARRY: ask %.3f, %.1fd out, ~%.0f%%/yr | %s",
-            p.name, cand.ask, cand.days, cand.annualized * 100,
+            "[%s] CARRY: ask %.3f, %s out, ~%.0f%%/yr | %s",
+            p.name, cand.ask, horizon, cand.annualized * 100,
             cand.question[:55],
         )
         return OpenIntent(
@@ -275,7 +278,7 @@ class ResolutionCarryAlgorithm(Algorithm):
             signal_id=f"carry:{cand.asset_id}:{self._poll_count}",
             reason=(
                 f"ask {cand.ask:.3f} ({(1 - cand.ask) / cand.ask:+.1%} if right), "
-                f"resolves in {cand.days:.1f}d → ~{cand.annualized:.0%}/yr"
+                f"resolves in {horizon} → ~{cand.annualized:.0%}/yr"
             ),
             # Raw observables only — the derived score belongs in the
             # analysis, not in the training row.

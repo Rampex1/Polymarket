@@ -50,7 +50,11 @@ class ResolutionCarryParams:
     # ── Diversification (the load-bearing risk control) ──────────────────────
     # Twenty positions at 0.98 that are all legs of one election are one
     # position at 0.98 with twenty times the size.
-    max_concurrent_positions: int = _doc(20, "Hard cap on simultaneously open markets.")
+    # Held equal to max_total_exposure_usdc / bet_size_usdc on purpose. When
+    # this sits above what the exposure cap can fund, every poll emits
+    # intents that provably cannot be filled, and each one costs a rejected
+    # dispatch. validate() keeps the two in step.
+    max_concurrent_positions: int = _doc(15, "Hard cap on simultaneously open markets.")
     max_positions_per_event: int = _doc(1, "Legs per Gamma eventId.")
     # 20, i.e. inert. Set while the arm was sports-only, where it was
     # degenerate: the primary Gamma label of every sports market is "sports",
@@ -116,6 +120,12 @@ class ResolutionCarryParams:
     settle_check_every: int = _doc(12, "Polls between market-resolution sweeps.")
 
     # ── Notifications ────────────────────────────────────────────────────────
+    # Off, unlike every sibling. This strategy screens ~2,100 markets a poll
+    # and emits far more candidates than it fills, so signal and risk-block
+    # alerts would bury the ones that matter. The channel is a trade log:
+    # fills, settlements, and failures only — what happened, not what was
+    # considered. The `signals` table still records every candidate.
+    notify_signals: bool = _doc(False, "Post SIGNAL and risk-block alerts before execution. Off = fills and settlements only.")
     webhook_url: str = _doc(
         "https://discord.com/api/webhooks/1537542638591410239/Cm8imiHekuEMjqj_EXRfamB61RkmHazqIQRVXqTTzK_fvdN7ScijyupxDONtTDQTqgAQ",
         "Discord webhook for this algorithm's trade alerts. Required — there is no global fallback.",
@@ -137,6 +147,14 @@ class ResolutionCarryParams:
             raise ValueError(
                 f"bet_size_usdc ${self.bet_size_usdc} exceeds max_position_size_usdc "
                 f"${self.max_position_size_usdc} — every buy would fail the risk check."
+            )
+        fundable = int(self.max_total_exposure_usdc // max(self.bet_size_usdc, 1e-9))
+        if self.max_concurrent_positions > fundable:
+            raise ValueError(
+                f"max_concurrent_positions ({self.max_concurrent_positions}) exceeds "
+                f"the {fundable} positions max_total_exposure_usdc "
+                f"(${self.max_total_exposure_usdc}) can fund at ${self.bet_size_usdc} "
+                f"each — the excess would only ever be emitted and rejected."
             )
         if self.min_hours_to_resolution < 0:
             raise ValueError(
