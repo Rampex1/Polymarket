@@ -345,21 +345,27 @@ stake. Exits are the shared settle sweep only.
 
 Non-obvious behavior, all deliberate:
 
-- **Sports is *required*, not excluded** (`require_sports`). Every other
-  strategy screens sports out because efficient pricing kills a forecasting
-  edge; here efficiency is the product, and sports supplies objective
-  resolution, independent events, and the short horizons that make 2% worth
-  having.
+- **No category screen at all** (`require_sports = False`,
+  `exclude_categories = ()`). Every other strategy screens sports out
+  because efficient pricing kills a forecasting edge; here efficiency is the
+  product. Sports was required at first, on the assumption that only a game
+  has a knowably certain resolution time — measured and false: non-sports
+  markets honoured their stated end date 983/984 against 92% for sports
+  (games get postponed), so the one-day cap already does that job.
+  `require_sports` stays as a switch and `market_category` is logged on
+  every signal, so the arms can be settled on realized P&L.
 - **`min_hours_to_resolution = 0`, unlike every sibling.** The trade is a
   match decided on the pitch sitting at 0.97 while it waits to settle —
   minutes out, not hours. A 6h floor excluded exactly that and left a
   universe of one sports market. The gate still rejects a market past its
   end date (a dead book with no carry left), and `validate()` refuses a
   negative value.
-- **`poll_interval_seconds = 60`, from a measurement.** p95 drift on a
-  market already at 0.95+ is 0.0185 over five minutes — the entire return of
-  a 0.98 entry. 300 would systematically fill only the trades that moved
-  against us.
+- **`poll_interval_seconds = 15`, from a measurement.** Across 4,765
+  archived transits through the band on tokens that finished ≥0.99, 99%
+  lasted a single one-minute sample. The band is open for about a minute, so
+  a 60s poll misses transits outright whenever one falls between two polls;
+  15s gives ~3-4 looks. A scan is 21 pages / ~6.5s, so the effective
+  cycle is ~21s and a poll never overlaps its own scan.
 - **`order_type = "limit"`.** One tick of slippage is a quarter of the
   return. Non-fills are the accepted cost; whether a GTC at the ask reliably
   fills is the open question paper exists to answer.

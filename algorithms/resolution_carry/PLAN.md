@@ -151,11 +151,35 @@ A 0.98 entry pays about 0.020. So at a 5-minute poll, one observation in
 twenty has moved by roughly the entire return before we can act; at 15
 minutes the p95 move *exceeds* the return. At 1 minute it is a quarter of it.
 
-**This sets `poll_interval_seconds = 60`, not 300** — it is the single
-number this measurement changes, and it was worth taking before writing any
-strategy code. (Sample is currently ~340 observations over one archiving
-session; it will firm up as the archive grows, and the number should be
-rechecked before going live.)
+This first ruled out 300. A second measurement, once the archive had grown,
+ruled out 60 as well — see below.
+
+### The band-dwell measurement, and why the poll is 15s
+
+Drift tells you how far a price moves while you decide. It does not tell you
+how long the opportunity exists at all, which is the number that actually
+sets a poll interval. The archive now answers that directly: across **4,765
+transits through 0.95–0.985** on tokens that finished at or above 0.99, at
+one-minute sampling,
+
+| in-band dwell | share of transits |
+|---|---|
+| ≤ 1 sample (~1 min) | **99%** |
+| ≤ 5 samples | 100% |
+
+The band is open for about a minute. A 60-second poll therefore lands inside
+it roughly once when it lands at all, and misses outright whenever a transit
+falls between two polls. **This sets `poll_interval_seconds = 15`**, giving
+about three to four looks per transit. A scan is 21 pages and ~6.5s, so the
+effective cycle is ~21s and a poll never overlaps its own scan; much below
+15s buys little, since scan time rather than sleep is most of the cycle. One
+minute of dwell is also an upper bound at this sampling rate — the true
+window may be shorter, which argues for the faster poll, not against it.
+
+Worth knowing: **even a one-day window fills all 21 pages.** More than 2,100
+markets end within a day, so the scan sees the highest-volume 2,100 of them
+and never the tail. The liquidity floor would reject most of that tail
+anyway, but no claim that this scan is exhaustive should be believed.
 
 ## Module layout
 
@@ -218,9 +242,9 @@ order_type              "limit"  # NOT market — see below
 max_slippage            0.005    # half a cent is a quarter of the return
 
 # ── Screening ───────────────────────────────────────────────────────────
-require_sports          True     # sports-primary; see Universe above
+require_sports          False    # the day cap guarantees the horizon; see below
 exclude_categories      ()       # deliberately empty — see below
-poll_interval_seconds   60       # set by the staleness measurement, not taste
+poll_interval_seconds   15       # set by the band-dwell measurement, not taste
 settle_check_every      12
 ```
 
@@ -268,13 +292,27 @@ reconciliation — an open GTC that never fills must not be mistaken for a
 position. **This is the biggest execution unknown and should be verified in
 paper before live.**
 
-**`exclude_categories = ()` with `require_sports = True`.** Every other
+**`exclude_categories = ()` and `require_sports = False`.** Every other
 strategy screens sports *out*, because efficient pricing destroys a
 forecasting edge. Here efficiency is *the product* — we need the price to be
-right, and we are paid for waiting rather than for knowing better. A match
-decided on the pitch and sitting at 0.98 awaiting settlement is the ideal
-trade. `require_sports` is a switch rather than a hard-coding so the
-non-sports arm can be run as a control; log `market_category` either way.
+right, and we are paid for waiting rather than for knowing better. So
+nothing is excluded.
+
+Requiring sports was the original default, on the reasoning that only a
+game has a knowably certain resolution time. That turned out to be
+measurable rather than assumed, and it does not hold: over a 6-hour slice
+of end dates three days back, non-sports markets honoured their stated end
+date **983 of 984 times**, against **1117 of 1215 (92%)** for sports —
+games get postponed, prediction markets with a date in the question do not.
+Since `max_days_to_resolution = 1` reads exactly that end date, the day cap
+already does the job the sports screen was hired for.
+
+Two things sports was *also* bought for are genuinely given up: objective
+resolution (a scoreboard is not a disputed UMA proposal — note the
+measurement above is about resolution *timing*, not correctness) and
+uncorrelated events. The per-event cap still holds, and `market_category`
+is logged on every signal, so `require_sports` remains a switch and the two
+arms can be settled on realized P&L rather than on this argument.
 
 ## Pipeline
 

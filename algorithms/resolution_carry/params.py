@@ -52,13 +52,16 @@ class ResolutionCarryParams:
     # position at 0.98 with twenty times the size.
     max_concurrent_positions: int = _doc(20, "Hard cap on simultaneously open markets.")
     max_positions_per_event: int = _doc(1, "Legs per Gamma eventId.")
-    # 20, i.e. inert, because the primary Gamma label of every sports market
-    # is "sports" — at 5 this silently capped the strategy at five positions
-    # and made max_concurrent_positions decorative. The cap was written for
-    # "twenty political markets that are really one election"; within sports
-    # it does not do that job, since two games are not a shared theme and the
-    # per-event cap already blocks two legs of the same one. Restore a real
-    # value if the non-sports arm ever runs.
+    # 20, i.e. inert. Set while the arm was sports-only, where it was
+    # degenerate: the primary Gamma label of every sports market is "sports",
+    # so a cap of 5 silently capped the strategy at five positions and made
+    # max_concurrent_positions decorative.
+    #
+    # Now that require_sports is off, labels do vary and a real value would
+    # do its intended job again — capping "twenty political markets that are
+    # really one election" — at the price of capping sports, which is where
+    # the flow is. Left inert deliberately; the per-event cap carries the
+    # diversification. Revisit once paper shows how loss concentrates.
     max_positions_per_category: int = _doc(20, "Positions sharing a primary Gamma category.")
 
     # ── Sizing ───────────────────────────────────────────────────────────────
@@ -77,21 +80,31 @@ class ResolutionCarryParams:
     max_slippage: float = _doc(0.005, "Max drift from the signal ask before we skip. Half a cent is a quarter of the return.")
 
     # ── Screening + cadence ──────────────────────────────────────────────────
-    # Sports-primary: objective resolution, genuinely independent events, and
-    # short horizons — the same 2% is worth ~250x more at a one-day horizon
-    # than a two-month one. A switch, not a hard-coding, so the non-sports arm
-    # can run as a control.
-    require_sports: bool = _doc(True, "Only trade markets Gamma labels sports/esports.")
+    # Off, because the thing sports was standing in for turned out to be
+    # measurable directly. The worry was that only a game has a knowably
+    # certain resolution time; but Gamma's end date is what the horizon gate
+    # already reads, and it holds. Over a 6-hour slice of end dates three
+    # days back, non-sports markets honoured their stated date 983 of 984
+    # times, against 1117 of 1215 for sports — sports is the *less* punctual
+    # class, because games get postponed. The day cap does the work the sports
+    # screen was hired for. `market_category` is logged on every signal, so
+    # the arms can still be compared on realized P&L.
+    require_sports: bool = _doc(False, "Only trade markets Gamma labels sports/esports.")
     exclude_categories: tuple = _doc((), "Gamma category/tag substrings to reject. Deliberately empty — efficiency is the product here.")
-    # 60, not 300: measured p95 drift on a market already at 0.95+ is 0.0185
-    # over five minutes, roughly the entire return of a 0.98 entry.
-    poll_interval_seconds: int = _doc(60, "Seconds between discovery scans. Set by the staleness measurement, not taste.")
-    # 21 is everything Gamma will serve: it 422s past offset 2100. The scan
-    # also stops early on a short page, so this is a ceiling, not a cost — a
-    # one-day window is ~400 rows and exhausts in about four pages. Scanning
-    # less is not an option: Gamma orders by volume and the markets this
-    # strategy wants — sports games near their end — are the low-volume tail,
-    # so a partial scan systematically misses the universe.
+    # 15, from the archive: across 4,765 transits through this band on tokens
+    # that finished at/above 0.99, 99% lasted a single one-minute sample. The
+    # band is open for about a minute, so a 60s poll lands inside it roughly
+    # once and misses outright whenever the transit falls between two polls.
+    # A scan is 21 pages / ~6.5s, so the effective cycle is ~21s and a poll
+    # never overlaps its own scan. Going much below 15s buys little: the
+    # scan time, not the sleep, is most of the cycle.
+    poll_interval_seconds: int = _doc(15, "Seconds between discovery scans. Set by the band-dwell measurement, not taste.")
+    # 21 is everything Gamma will serve: it 422s past offset 2100. Note that
+    # even a one-day window fills all 21 pages — there are more than 2,100
+    # markets ending within a day, so we see the highest-volume 2,100 of them
+    # and never the tail. That is survivable only because
+    # min_market_liquidity_usdc would reject most of that tail anyway; it is
+    # the reason to be suspicious of any claim that this scan is exhaustive.
     discovery_pages: int = _doc(21, "Max Gamma /markets pages to scan per poll (100 rows each). 21 is Gamma's own offset ceiling.")
     settle_check_every: int = _doc(12, "Polls between market-resolution sweeps.")
 

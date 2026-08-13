@@ -112,13 +112,19 @@ def test_validate_refuses_a_negative_hours_floor():
         _params(min_hours_to_resolution=-1.0).validate()
 
 
-def test_sports_is_required_not_excluded():
+def test_categories_are_open_by_default():
+    """The day cap, not a category screen, is what guarantees the horizon."""
     p = _params()
+    assert screen.category_ok("sports,nfl", p)
+    assert screen.category_ok("politics", p)
+    assert screen.category_ok("", p)
+
+
+def test_require_sports_still_screens_when_switched_on():
+    p = _params(require_sports=True)
     assert screen.category_ok("sports,nfl", p)
     assert not screen.category_ok("politics", p)
     assert not screen.category_ok("", p)          # unlabelled fails closed
-    # ...unless the control arm turns the switch off.
-    assert screen.category_ok("politics", _params(require_sports=False))
 
 
 # ── Diversification ──────────────────────────────────────────────────────────
@@ -236,7 +242,8 @@ def test_non_sports_market_is_screened_out(ledger):
 
     rows = [market(_end_ts=end_ts(0.5))]
     algo = ResolutionCarryAlgorithm(
-        params=_params(), market_data=FakeGateway(rows, labels="politics"),
+        params=_params(require_sports=True),
+        market_data=FakeGateway(rows, labels="politics"),
     )
     algo.setup(ledger)
     assert list(algo.poll()) == []
