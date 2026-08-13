@@ -31,7 +31,6 @@ class CopyTradeParams:
     # events, so agreement accumulated days apart still counts.
     watchlist_candidate_wallets: tuple = _doc((), "Cohort proxy-wallet addresses. Non-empty activates consensus mode. Bootstrap with scripts/consensus_report.py.")
     watchlist_size: int = _doc(0, "Rank the cohort down to this many wallets; 0 uses the candidate list as given.")
-    watchlist_refresh_seconds: int = _doc(86_400, "How often to rescore and atomically replace the active wallet cohort.")
     watchlist_min_resolved_bets: int = _doc(50, "Minimum resolved bets before a wallet is eligible.")
     watchlist_confidence_z: float = _doc(1.645, "One-sided confidence multiplier used for the edge lower bound.")
     watchlist_min_copyability_score: float = _doc(0.0, "Reject wallets below this historical copyability score (0..1).")
@@ -96,8 +95,8 @@ class CopyTradeParams:
             raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
         if not (0 < self.tier1_min <= self.tier1_max <= self.tier2_max):
             raise ValueError("tiers must satisfy 0 < tier1_min <= tier1_max <= tier2_max.")
-        if self.watchlist_refresh_seconds <= 0 or self.snapshot_interval_seconds <= 0:
-            raise ValueError("watchlist_refresh_seconds and snapshot_interval_seconds must be positive.")
+        if self.snapshot_interval_seconds <= 0:
+            raise ValueError("snapshot_interval_seconds must be positive.")
         if self.consensus_min_leaders < 2:
             raise ValueError("consensus requires at least two leaders.")
         if self.consensus_min_margin > self.consensus_min_leaders:

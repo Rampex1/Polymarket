@@ -130,7 +130,8 @@ algorithms/
     params.py             # CopyTradeParams — pure schema
     consensus.py          # Pure grouping: cohort positions → markets they agree on. No I/O, so thresholds sweep offline
     engine.py             # ConsensusEngine — snapshots the cohort, screens, emits intents
-    ranker.py             # Offline-testable confidence-adjusted wallet ranking
+    history.py            # Pure reconstruction of a wallet's resolved bets from /activity + /positions
+    ranker.py             # Offline-testable confidence-adjusted wallet ranking; reads/writes wallet_resolved_bets
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
@@ -139,6 +140,7 @@ algorithms/
     research/             # Plans and notes behind this strategy
 scripts/
   consensus_report.py     # Read-only cohort-consensus report; bootstraps a cohort from the firehose. Places no orders
+  rank_wallets.py         # Discover wallets, reconstruct their resolved record, rank, and (with --activate) seat the cohort
   setup_vm.sh             # Zero-to-running VPS deploy; also what /restart invokes. Never run from CI — deploys are manual. Re-execs itself after the pull (SETUP_VM_REEXEC) so a deploy that changes this file still runs the new copy — keep that guard
   reset_paper_trade_db.py             # Wipe and reset paper trading state
 ```
@@ -213,6 +215,40 @@ are not:
   a dead price. Positions with no `asset_id`, or whose Gamma lookup failed,
   are skipped for the same reason: never act on an unverifiable reading.
 
+### Building the cohort (`scripts/rank_wallets.py`)
+
+Batch, not a worker thread. The ranker consumes *resolved* bets, so its input
+only moves as markets settle — days to weeks. Ingestion stays out of the poll
+loop so a slow crawl can never delay a snapshot. The engine reads
+`active_wallets()` every snapshot, so `--activate` propagates within one
+snapshot interval with no redeploy and no refresh timer.
+
+Reconstructing a wallet's record needs **both** public sources, and either one
+alone is catastrophically skewed:
+
+- `/positions` keeps a resolved position only until it is redeemed. Winners
+  get claimed and vanish; losers have nothing to claim and sit forever.
+  Measured: 100% of `redeemable` rows on real wallets were losses (227/227,
+  498/498). Rank on this alone and nobody has ever won a bet.
+- `/activity` REDEEM rows are the mirror image — they exist only for positions
+  that paid out, so they are all winners.
+
+**The window trap.** `/positions` accumulates unredeemed losers for the
+wallet's whole life, while a capped `/activity` crawl sees only recent
+history. Measured on one wallet: 11 days of wins scored against 4 months of
+losses, producing a −0.42 "edge" that was pure artifact — and real wallets
+flipped sign (−0.086 → +0.166) once corrected. `resolved_bets_from(...,
+since_ts=)` clamps losses to the window the wins cover whenever the crawl hit
+its page cap. Raise `--max-pages` for heavy traders; the script reports how
+many wallets were capped.
+
+A wallet that sold before resolution appears in neither source, which is
+correct — an exit is a trade, not a verdict.
+
+`WatchlistRepository.refresh` activates nothing unless `persistence_passes`
+(early winners still winning late) **and** a wallet's `edge_lower_bound > 0`.
+Rank order alone would seat the least-bad wallet in a weak pool.
+
 ### Trade lifecycle
 
 Single-target mode. `poll()` classifies target activity into BUY → `OpenIntent` (top up to the
@@ -283,6 +319,9 @@ column so multiple algorithms share one DB without collisions.
 - `position_lots` — attributed fills behind an aggregated position; `source` is an opaque key (copy_trade passes a leader wallet)
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
+- `wallet_resolved_bets` — reconstructed wallet history, the ranker's only input. Natural PK `(wallet, resolved_at, entry_price, outcome)` makes re-ingestion idempotent; a duplicate would silently double-weight that wallet. Written only by `scripts/rank_wallets.py`
+- `wallet_score_runs` / `wallet_scores` — one row per ranking run and its scores, kept so a cohort choice stays explicable after the fact
+- `copy_watchlist` — `(algo, wallet)` → active/demoted. What `ConsensusEngine` reads each snapshot
 - `runs` — one row per worker boot: resolved params JSON, profile, git sha. Written on every boot; nothing reads it yet. Kept so the config behind a stretch of results stays recoverable after the fact.
 
 Schema is created by `CREATE TABLE IF NOT EXISTS` on every connect. There

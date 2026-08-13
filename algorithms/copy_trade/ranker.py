@@ -78,6 +78,38 @@ class SQLiteResolvedBetSource:
                             float(r["copyability_score"])) for r in rows]
 
 
+def store_resolved_bets(bets: Iterable[ResolvedBet]) -> int:
+    """Write reconstructed history. Returns the number of new rows.
+
+    The natural primary key makes re-ingestion free: rerunning the job over a
+    wallet already covered is a no-op rather than a duplicate that would
+    silently double-weight that wallet in the ranking.
+    """
+    rows = [(b.wallet.lower(), b.entry_price, b.outcome, b.resolved_at,
+             b.copyability_score) for b in bets]
+    if not rows:
+        return 0
+    conn = db.get()
+    conn.executescript(SQLiteResolvedBetSource._SCHEMA)
+    with conn:
+        before = conn.execute("SELECT COUNT(*) FROM wallet_resolved_bets").fetchone()[0]
+        conn.executemany(
+            "INSERT OR IGNORE INTO wallet_resolved_bets "
+            "(wallet, entry_price, outcome, resolved_at, copyability_score) "
+            "VALUES (?, ?, ?, ?, ?)", rows,
+        )
+        after = conn.execute("SELECT COUNT(*) FROM wallet_resolved_bets").fetchone()[0]
+    return after - before
+
+
+def known_wallets() -> list[str]:
+    """Every wallet we already hold history for — the standing candidate pool."""
+    conn = db.get()
+    conn.executescript(SQLiteResolvedBetSource._SCHEMA)
+    return [str(r["wallet"]) for r in conn.execute(
+        "SELECT DISTINCT wallet FROM wallet_resolved_bets ORDER BY wallet")]
+
+
 def score_wallet(wallet: str, bets: list[ResolvedBet], confidence_z: float) -> WalletScore | None:
     """Compute a conservative confidence-bound score for one wallet."""
     valid = [b for b in bets if 0 < b.entry_price < 1 and b.outcome in (0.0, 1.0)]

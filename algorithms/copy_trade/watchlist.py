@@ -77,7 +77,10 @@ class WatchlistRepository:
         )
         conn.execute("UPDATE copy_watchlist SET status='demoted', updated_at=? WHERE algo=? AND status='active'", (now, algo))
         if persistence_passed:
-            selected = scores[:watchlist_size]
+            # Rank order alone would seat the least-bad wallet in a weak pool.
+            # A non-positive lower bound means we cannot distinguish the wallet
+            # from a coin flip, which is the entire point of computing one.
+            selected = [s for s in scores if s.edge_lower_bound > 0][:watchlist_size]
             conn.executemany(
                 """INSERT INTO copy_watchlist (algo, wallet, status, score_run_id, updated_at)
                    VALUES (?, ?, 'active', ?, ?)

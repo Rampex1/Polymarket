@@ -205,6 +205,27 @@ def _parse_trade(item: dict) -> Optional[Trade]:
         return None
 
 
+def fetch_activity(address: str, limit: int = 500, offset: int = 0) -> list[dict]:
+    """One raw page of `/activity`.
+
+    `fetch_recent_trades` parses this endpoint into `Trade` for the trading
+    path; the offline history job needs the untouched rows — REDEEM `usdcSize`
+    and `outcomeIndex` in particular, which the Trade shape drops.
+    """
+    try:
+        resp = SESSION.get(
+            f"{config.DATA_API}/activity",
+            params={"user": address, "limit": limit, "offset": offset},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("data", [])
+    except Exception as e:
+        logger.warning("Could not fetch activity for %s: %s", address, e)
+        return []
+
+
 def fetch_user_positions(address: str, limit: int = 500) -> list[dict]:
     """All open positions for `address`, as raw rows from the Data API.
 

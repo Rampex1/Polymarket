@@ -210,3 +210,13 @@ def test_resolving_markets_are_left_to_the_settle_sweep(fresh_db, ledger):
     _hold(ledger, asset="gone")
 
     assert list(algo.poll()) == []
+
+
+def test_watchlist_never_activates_a_wallet_it_cannot_call_profitable(fresh_db):
+    # A weak pool must yield an empty cohort, not its least-bad member: a
+    # non-positive lower bound is indistinguishable from a coin flip.
+    losers = [ResolvedBet("0xc", 0.80, 0.0, i, 1.0) for i in range(1, 7)]
+    repo = WatchlistRepository()
+    repo.refresh("weak", _bets("0xa") + losers, watchlist_size=5, min_resolved_bets=2,
+                 confidence_z=1.645, min_copyability_score=0.0, persistence_passed=True)
+    assert repo.active_wallets("weak") == ["0xa"]
