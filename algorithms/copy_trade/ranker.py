@@ -8,7 +8,7 @@ putting query details or network calls into the strategy's hot loop.
 from dataclasses import dataclass
 from math import sqrt
 from statistics import stdev
-from typing import Iterable, Protocol
+from typing import Iterable, Optional, Protocol
 
 from bot.storage import db
 
@@ -141,6 +141,98 @@ def rank_wallets(
     eligible = [s for s in scores if s and s.sample_size >= min_resolved_bets
                 and s.copyability_score >= min_copyability_score]
     return sorted(eligible, key=lambda s: (s.edge_lower_bound, s.copyability_score), reverse=True)
+
+
+@dataclass(frozen=True)
+class HoldoutResult:
+    """Did picking wallets on past data predict anything about later data?"""
+
+    split_at: int
+    judgeable: int
+    selected_edge: float
+    rest_edge: float
+    rank_correlation: float
+    # (wallet, lower bound it was picked on, edge it actually delivered after)
+    per_wallet: tuple[tuple[str, float, float], ...]
+
+    @property
+    def lift(self) -> float:
+        """How much better the picks did than the wallets we passed over.
+
+        This is the number that matters. A high `selected_edge` on its own can
+        just mean the whole pool did well in the holdout period; only the gap
+        says the *ranking* carried information.
+        """
+        return self.selected_edge - self.rest_edge
+
+
+def _spearman(xs: list[float], ys: list[float]) -> float:
+    """Rank correlation. Pearson over ranks, ties broken by position."""
+    n = len(xs)
+    if n < 3:
+        return 0.0
+    rank = lambda vs: [i for i, _ in sorted(enumerate(vs), key=lambda p: p[1])]
+    rx, ry = [0.0] * n, [0.0] * n
+    for pos, idx in enumerate(rank(xs)):
+        rx[idx] = pos
+    for pos, idx in enumerate(rank(ys)):
+        ry[idx] = pos
+    mx, my = sum(rx) / n, sum(ry) / n
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    den = sqrt(sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry))
+    return num / den if den else 0.0
+
+
+def holdout_report(
+    bets: Iterable[ResolvedBet], *, split_at: int, min_resolved_bets: int,
+    confidence_z: float, min_copyability_score: float, top_n: int,
+    min_holdout_bets: int = 20,
+) -> Optional[HoldoutResult]:
+    """Rank on bets before `split_at`, then score the picks on bets after it.
+
+    The honest test of a wallet selector, and the one `persistence_passes`
+    only gestures at: that returns a single pass/fail for the whole pool,
+    which a few strong wallets can carry. This asks the question the bot
+    actually faces — *if I had chosen a cohort on this date, would those
+    wallets have outperformed the ones I passed over?*
+
+    Both groups are restricted to wallets with at least `min_holdout_bets`
+    after the split, so the comparison is not between wallets we can measure
+    and wallets we cannot. Returns None when the split leaves too little on
+    either side to say anything.
+    """
+    rows = list(bets)
+    train = [b for b in rows if b.resolved_at < split_at]
+    later: dict[str, list[ResolvedBet]] = {}
+    for b in rows:
+        if b.resolved_at >= split_at:
+            later.setdefault(b.wallet.lower(), []).append(b)
+
+    judgeable = {w for w, rs in later.items() if len(rs) >= min_holdout_bets}
+    ranked = [s for s in rank_wallets(train, min_resolved_bets, confidence_z,
+                                      min_copyability_score)
+              if s.wallet in judgeable]
+    if len(ranked) < 2:
+        return None
+
+    holdout_edge = {w: sum(b.edge for b in rs) / len(rs) for w, rs in later.items()}
+    selected, rest = ranked[:top_n], ranked[top_n:]
+    if not selected or not rest:
+        return None
+
+    # Equal weight per wallet, not per bet: the question is whether we picked
+    # good *wallets*, and pooling would let one hyperactive wallet answer it.
+    mean = lambda ss: sum(holdout_edge[s.wallet] for s in ss) / len(ss)
+    return HoldoutResult(
+        split_at=split_at,
+        judgeable=len(ranked),
+        selected_edge=mean(selected),
+        rest_edge=mean(rest),
+        rank_correlation=_spearman([s.edge_lower_bound for s in ranked],
+                                   [holdout_edge[s.wallet] for s in ranked]),
+        per_wallet=tuple((s.wallet, s.edge_lower_bound, holdout_edge[s.wallet])
+                         for s in selected),
+    )
 
 
 def persistence_passes(

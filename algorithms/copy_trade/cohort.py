@@ -17,14 +17,15 @@ redeploy. Without the flag nothing is written and this only prints.
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from bot.polymarket import api
 
 from .history import resolved_bets_from
 from .params import CopyTradeParams
 from .ranker import (
-    SQLiteResolvedBetSource, known_wallets, persistence_passes, rank_wallets,
-    store_resolved_bets,
+    SQLiteResolvedBetSource, holdout_report, known_wallets, persistence_passes,
+    rank_wallets, store_resolved_bets,
 )
 from .watchlist import WatchlistRepository
 
@@ -83,6 +84,43 @@ def ingest(wallet: str, max_pages: int) -> tuple[int, bool]:
     return store_resolved_bets(bets), truncated
 
 
+def _holdout(bets, args) -> int:
+    """Would a cohort picked on older data have beaten the wallets we passed over?"""
+    if args.split_at:
+        split = int(datetime.fromisoformat(args.split_at).replace(tzinfo=timezone.utc).timestamp())
+    else:
+        stamps = sorted(b.resolved_at for b in bets)
+        split = stamps[len(stamps) // 2]
+
+    when = datetime.fromtimestamp(split, timezone.utc).date()
+    result = holdout_report(
+        bets, split_at=split, min_resolved_bets=args.min_bets,
+        confidence_z=args.confidence_z, min_copyability_score=args.min_copyability,
+        top_n=args.top,
+    )
+    if result is None:
+        print(f"Split at {when} leaves too little on one side to judge. "
+              f"Try --split-at, a lower --min-bets, or more history.")
+        return 1
+
+    print(f"Split at {when}: rank on everything before, score on everything after.")
+    print(f"{result.judgeable} wallets have enough bets on both sides to judge.\n")
+    print(f"{'WALLET':<44} {'PICKED ON':>10} {'DELIVERED':>10}")
+    print("-" * 68)
+    for wallet, picked, delivered in result.per_wallet:
+        flag = "" if delivered > 0 else "   <- did not hold up"
+        print(f"{wallet:<44} {picked:>+10.3f} {delivered:>+10.3f}{flag}")
+
+    print(f"\nPicked wallets, after the split:   {result.selected_edge:+.4f}")
+    print(f"Wallets we passed over, after:     {result.rest_edge:+.4f}")
+    print(f"Lift from ranking:                 {result.lift:+.4f}")
+    print(f"Rank correlation before vs after:  {result.rank_correlation:+.3f}")
+    print("\nLift is the verdict: it is what the ranking earned over picking from "
+          "the same eligible pool at random. Near zero or negative means the "
+          "selection did not generalise, and a wider pool will not fix that.")
+    return 0
+
+
 def main() -> int:
     d = CopyTradeParams()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -96,6 +134,10 @@ def main() -> int:
     p.add_argument("--min-copyability", type=float, default=d.watchlist_min_copyability_score)
     p.add_argument("--top", type=int, default=20, help="cohort size to report and activate")
     p.add_argument("--activate", metavar="ALGO", help="write the cohort to this algorithm's watchlist")
+    p.add_argument("--holdout", action="store_true",
+                   help="out-of-sample check: rank on older bets, score the picks on newer ones")
+    p.add_argument("--split-at", metavar="YYYY-MM-DD",
+                   help="holdout split date (default: the pool's median resolution date)")
     args = p.parse_args()
 
     pool = known_wallets()
@@ -137,6 +179,9 @@ def main() -> int:
             print(f"{s.sample_size:>4} {s.mean_edge:>+10.3f} {s.edge_lower_bound:>+8.3f}  {s.wallet}")
         print("\nLOWER is the confidence-bound edge — the number to rank on. A big "
               "MEAN on a small N is mostly luck.")
+
+    if args.holdout:
+        return _holdout(bets, args)
 
     if args.activate:
         repo = WatchlistRepository()
