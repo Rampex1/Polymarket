@@ -106,6 +106,13 @@ class ResolutionCarryParams:
     # min_market_liquidity_usdc would reject most of that tail anyway; it is
     # the reason to be suspicious of any claim that this scan is exhaustive.
     discovery_pages: int = _doc(21, "Max Gamma /markets pages to scan per poll (100 rows each). 21 is Gamma's own offset ceiling.")
+    # A filled signal becomes a position and is deduped by that forever; a
+    # *rejected* one leaves nothing behind, so without a cooldown it returns
+    # every poll. Dispatch alerts before it gates, so a parked market failing
+    # the slippage check would post to Discord every ~21s for hours. At 300s
+    # that is a retry every five minutes instead. Costs nothing on a real
+    # transit, which is out of the band inside a minute either way. 0 disables.
+    resignal_cooldown_seconds: float = _doc(300.0, "Hold a market back from re-signalling for this long after an intent is emitted. 0 disables.")
     settle_check_every: int = _doc(12, "Polls between market-resolution sweeps.")
 
     # ── Notifications ────────────────────────────────────────────────────────

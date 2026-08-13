@@ -87,6 +87,8 @@ class ResolutionCarryAlgorithm(Algorithm):
         # market_id → lowest ask seen while we held it. In memory only: this
         # is evidence for a future stop-loss decision, not a trading input.
         self._low_water: dict[str, float] = {}
+        # market_id → earliest time we may signal it again. See _mark_signalled.
+        self._signalled: dict[str, float] = {}
 
     @property
     def display_name(self) -> str:
@@ -129,19 +131,27 @@ class ResolutionCarryAlgorithm(Algorithm):
         held_ids = {pos.market_id for pos in held}
         self._note_lows(rows, held_ids)
 
+        now = time.time()
         funnel: Counter = Counter()
         candidates = []
         for row in rows:
             verdict = screen.evaluate(
-                row, self._market_data.market_end_ts(row), time.time(), p,
+                row, self._market_data.market_end_ts(row), now, p,
             )
             if isinstance(verdict, str):
                 funnel[verdict] += 1
                 continue
-            # Holding the market is the dedupe: a position already at size
-            # yields nothing on every later scan, so there is no seen-ring.
+            # Holding the market is the primary dedupe: a position already at
+            # size yields nothing on every later scan.
             if verdict.market_id in held_ids:
                 funnel["already held"] += 1
+                continue
+            # ...but a signal the runner *rejected* leaves no position, so it
+            # would come back on every poll. Dispatch alerts before it gates,
+            # so a parked market failing the slippage check would post to
+            # Discord every cycle for as long as it sits in the band.
+            if self._signalled.get(verdict.market_id, 0.0) > now:
+                funnel["cooling off"] += 1
                 continue
             labels = self._market_data.market_labels(row)
             if not screen.category_ok(labels, p):
@@ -158,7 +168,22 @@ class ResolutionCarryAlgorithm(Algorithm):
         events, categories = self._held_buckets(held)
         for cand in screen.select(candidates, events, categories, slots, p):
             self._buckets[cand.market_id] = (cand.event_id, cand.category)
+            self._mark_signalled(cand.market_id, now)
             yield self._open(cand)
+
+    def _mark_signalled(self, market_id: str, now: float) -> None:
+        """Hold a market back from re-signalling for the cooldown.
+
+        Set on emit rather than on outcome, because the algorithm never hears
+        what the runner did with an intent. It does not need to: a fill
+        becomes a position and is deduped by `held_ids` forever, so the
+        cooldown only ever governs the rejected case.
+        """
+        if len(self._signalled) > 500:
+            self._signalled = {
+                m: exp for m, exp in self._signalled.items() if exp > now
+            }
+        self._signalled[market_id] = now + self.params.resignal_cooldown_seconds
 
     # ── Discovery ────────────────────────────────────────────────────────────
 

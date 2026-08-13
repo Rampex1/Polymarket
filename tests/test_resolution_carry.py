@@ -225,6 +225,28 @@ def test_a_held_market_is_never_re_opened(ledger):
     assert list(algo.poll()) == []
 
 
+def test_a_rejected_signal_does_not_come_back_every_poll(ledger):
+    """The runner alerts before it gates, so a market that fails the slippage
+    check leaves no position and would otherwise re-signal every cycle."""
+    rows = [market(_end_ts=end_ts(0.5))]
+    algo = _algo(ledger, rows)
+
+    assert len(list(algo.poll())) == 1      # emitted; assume the runner skips it
+    assert list(algo.poll()) == []          # would have been a duplicate alert
+
+    # ...and it is a cooldown, not a permanent ban: the market is still a
+    # perfectly good carry once the price has had time to settle.
+    algo._signalled["0xm1"] = time.time() - 1
+    assert len(list(algo.poll())) == 1
+
+
+def test_cooldown_of_zero_disables_it(ledger):
+    rows = [market(_end_ts=end_ts(0.5))]
+    algo = _algo(ledger, rows, resignal_cooldown_seconds=0.0)
+    assert len(list(algo.poll())) == 1
+    assert len(list(algo.poll())) == 1
+
+
 def test_full_book_stops_scanning(ledger):
     from tests.conftest import make_trade
 
