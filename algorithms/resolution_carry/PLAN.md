@@ -97,6 +97,62 @@ Two things fall out immediately:
 Nothing here should be traded live until the calibration question has a real
 answer. Paper is how we get one.
 
+## Universe: sports-primary
+
+Sports is the natural home for this strategy, and the reason is capital
+velocity. From a live scan of 2,100 open markets, the 0.93–0.985 band by
+horizon:
+
+| horizon | n | median annualised |
+|---|---|---|
+| 6–24h | 2 | **4,958%** |
+| 1–3d | 2 | 525% |
+| 3–14d | 1 | 161% |
+| 14–45d | 7 | 84% |
+| >45d | 17 | 19% |
+
+The same 2% trade is worth 250x more at a one-day horizon than a two-month
+one. Sports is where short horizons live, and it brings three more things
+this strategy specifically needs:
+
+- **Objective resolution.** A scoreboard is not an ambiguous UMA proposal.
+  Risk #2 below largely disappears.
+- **Free diversification.** Twenty political markets are often one election
+  in disguise; Tuesday's games and Wednesday's games are genuinely
+  independent, which is what the per-event cap exists to manufacture.
+- **Fast evidence.** The paper phase needs several hundred resolved
+  positions. Sports produces dozens of resolutions per day, turning a
+  year-long validation into a few weeks.
+
+**Only 29 of 2,100 open markets sit in the band at any instant**, and 17 of
+those are more than 45 days out. The band is thin as a *stock* and large as a
+*flow*: a game that ends decisively passes through 0.93 → 1.00 in its closing
+minutes. The strategy is therefore a poller of markets approaching
+resolution, not a screener of markets already parked at 0.98.
+
+### The staleness constraint, measured
+
+The counter-argument to in-play sports is that prices move while you are
+deciding, and the fills you get are disproportionately the ones that moved
+against you. That is measurable, and now measured — how far a market already
+at 0.95+ travels over the following interval:
+
+| after | median | p95 |
+|---|---|---|
+| 1 min | 0.0000 | **0.0045** |
+| 5 min | 0.0000 | **0.0185** |
+| 15 min | 0.0000 | 0.0260 |
+
+A 0.98 entry pays about 0.020. So at a 5-minute poll, one observation in
+twenty has moved by roughly the entire return before we can act; at 15
+minutes the p95 move *exceeds* the return. At 1 minute it is a quarter of it.
+
+**This sets `poll_interval_seconds = 60`, not 300** — it is the single
+number this measurement changes, and it was worth taking before writing any
+strategy code. (Sample is currently ~340 observations over one archiving
+session; it will firm up as the archive grows, and the number should be
+rechecked before going live.)
+
 ## Module layout
 
 Follows the repo convention: `params.py` is the entire config surface, pure
@@ -109,7 +165,8 @@ algorithms/resolution_carry/
   algorithm.py      # poll → screen → OpenIntent; settle sweep for exits
   params.py         # ResolutionCarryParams — pure schema + validate()
   screen.py         # pure: market rows → ranked candidates. No I/O.
-  calibration.py    # `python -m` backtest against discovery_archive.db
+  seed.py           # `python -m` job: seed the archive with markets resolving soon  [BUILT]
+  calibration.py    # `python -m` backtest against discovery_archive.db          [BUILT]
   PLAN.md           # this file
 ```
 
@@ -154,8 +211,9 @@ order_type              "limit"  # NOT market — see below
 max_slippage            0.005    # half a cent is a quarter of the return
 
 # ── Screening ───────────────────────────────────────────────────────────
+require_sports          True     # sports-primary; see Universe above
 exclude_categories      ()       # deliberately empty — see below
-poll_interval_seconds   300
+poll_interval_seconds   60       # set by the staleness measurement, not taste
 settle_check_every      12
 ```
 
@@ -169,12 +227,13 @@ reconciliation — an open GTC that never fills must not be mistaken for a
 position. **This is the biggest execution unknown and should be verified in
 paper before live.**
 
-**`exclude_categories = ()`.** Every other strategy screens out sports
-because efficient pricing destroys a forecasting edge. Here efficiency is
-*the product* — we want the price to be right. A finished match sitting at
-0.98 awaiting settlement is the ideal trade: objectively determined, short
-wait, no information asymmetry left to exploit. Sports should be *included*
-and its performance tracked separately in the signals features.
+**`exclude_categories = ()` with `require_sports = True`.** Every other
+strategy screens sports *out*, because efficient pricing destroys a
+forecasting edge. Here efficiency is *the product* — we need the price to be
+right, and we are paid for waiting rather than for knowing better. A match
+decided on the pitch and sitting at 0.98 awaiting settlement is the ideal
+trade. `require_sports` is a switch rather than a hard-coding so the
+non-sports arm can be run as a control; log `market_category` either way.
 
 ## Pipeline
 
@@ -282,15 +341,29 @@ In rough order of expected damage:
 > until its market's end date, record `(p, d, final_outcome)`. Report the
 > resolved-YES rate bucketed by `(price band × days-remaining band)`.
 
-This is the honest version of the peak-price number above and directly
-answers whether the premise holds. Two prerequisites:
+**Both the seeder and the backtest are built.** Status:
 
-- **Restart the archiver.** It has been dark since 2026-06-11 and holds only
-  123 markets. `python -m algorithms.insider_flow.archive --loop --every 3600`.
-- **Seed it with high-priced markets.** It currently tracks what discovery
-  happens to surface, which is not the 0.93–0.99 band this strategy needs.
-  Its `tracked_markets` table takes arbitrary condition ids, so a screen for
-  high-ask markets can feed it directly.
+```bash
+python -m algorithms.resolution_carry.seed --within-days 7   # widen the universe
+python -m algorithms.resolution_carry.calibration            # read the verdict
+```
+
+- Archiver is **running** in tmux session `archiver`, `--loop --every 1800
+  --fidelity 1`, logging to `logs/archiver.log`.
+- Archive is **seeded** with 91 markets resolving within 7 days, 42 of them
+  sports. Re-run the seeder periodically; markets resolve and the universe
+  needs refreshing.
+- **Fidelity is in minutes, and it matters.** The archiver's default of 60
+  produces *hourly* bars, which cannot answer the staleness question at all —
+  a football match yields two data points. It now runs at `--fidelity 1`
+  (~60s bars). If it is ever restarted, keep that flag or this whole phase
+  goes blind.
+
+Current output is real but far too thin to act on: 288 resolved tokens, 214
+independent observations, and single-digit `n` in the bands that matter. One
+row is worth staring at anyway — of two markets priced ~0.976 with under six
+hours left, **one lost**. n=2 means nothing, but it is a concrete picture of
+the tail this strategy is short.
 
 The archive is the only unbiased calibration source available: the CLOB drops
 price history at resolution, so anything not archived before it settles is
