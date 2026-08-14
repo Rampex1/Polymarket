@@ -51,7 +51,20 @@ class ResolutionCarryParams:
 
     # ── Liquidity ────────────────────────────────────────────────────────────
     min_market_liquidity_usdc: float = _doc(5_000.0, "Gamma `liquidityClob` floor — a depth proxy, not a measurement.")
-    max_ask_spread: float = _doc(0.02, "bestAsk - bestBid ceiling; a wide book means there is no real price.")
+    # 0.05, loosened from 0.02 once require_in_play made 0.02 unsatisfiable:
+    # in-play books are wider than pregame ones, because the price is moving
+    # and makers widen to protect themselves. At 0.02 nothing live ever
+    # qualified.
+    #
+    # The spread is not a cost here — we hold to resolution and never cross
+    # back over the bid — so this is a judgement about whether the ask can be
+    # trusted, not about friction. The thing to watch is how far the ask sits
+    # above the mid, because that is the premium being paid over what the
+    # book collectively thinks: at a 0.069 spread the ask was 3.4c over mid
+    # for a trade returning 2.1c, which is negative expectancy if the mid is
+    # nearer the truth. Half of this cap (2.5c) against a 1.5-4.5c return is
+    # already the outer edge of defensible.
+    max_ask_spread: float = _doc(0.05, "bestAsk - bestBid ceiling. Not a cost (we hold to resolution) but a limit on how far above the mid we will pay.")
 
     # ── Diversification (the load-bearing risk control) ──────────────────────
     # Twenty positions at 0.98 that are all legs of one election are one

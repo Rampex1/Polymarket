@@ -371,3 +371,13 @@ def test_the_worst_admissible_fill_stays_above_95c():
     """min_ask exists to floor what we own, not just what we signalled."""
     p = _params()
     assert p.min_ask * (1 - p.max_slippage) > 0.95
+
+
+def test_spread_cap_admits_in_play_books_but_not_absent_ones():
+    """In-play books run wider than pregame; a book quoted 0.97/0.79 is not
+    a wide price, it is two lonely orders and no price at all."""
+    p = _params()
+    assert isinstance(screen.evaluate(_game(-1, bestAsk="0.970", bestBid="0.925"),
+                                      end_ts(0.2), NOW, p), screen.Candidate)
+    assert screen.evaluate(_game(-1, bestAsk="0.970", bestBid="0.790"),
+                           end_ts(0.2), NOW, p) == "spread"

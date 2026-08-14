@@ -375,6 +375,12 @@ Non-obvious behavior, all deliberate:
   a 60s poll misses transits outright whenever one falls between two polls;
   15s gives ~3-4 looks. A scan is 21 pages / ~6.5s, so the effective
   cycle is ~21s and a poll never overlaps its own scan.
+- **`max_ask_spread = 0.05`, wider than it looks like it should be.** In-play
+  books run wider than pregame ones, and at 0.02 nothing live ever qualified.
+  The spread is not a cost here — positions are held to resolution, never
+  sold back across the bid — so this caps how far above the *mid* we will
+  pay, not friction. Watch that premium: a 0.069 spread put the ask 3.4c over
+  mid on a trade returning 2.1c.
 - **`order_type = "limit"`.** One tick of slippage is a quarter of the
   return. Non-fills are the accepted cost; whether a GTC at the ask reliably
   fills is the open question paper exists to answer.

@@ -224,7 +224,7 @@ min_hours_to_resolution 0      # was 6; see below — it excluded the thesis
 
 # ── Liquidity ───────────────────────────────────────────────────────────
 min_market_liquidity_usdc  5000   # Gamma `liquidityClob`, proxy for depth
-max_ask_spread             0.02   # bestAsk - bestBid; a wide book means no real price
+max_ask_spread             0.05   # widened for in-play books — see below
 
 # ── Diversification (the load-bearing risk control) ─────────────────────
 max_concurrent_positions   20
@@ -265,6 +265,22 @@ one-day window, 607 of them already started. The 229 without it are not games
 expires is never live. `startDate` is deliberately NOT a fallback: every
 market has one, so falling back would report everything as started and
 silently disable the gate.
+
+`max_ask_spread` had to widen from 0.02 to 0.05 to make this gate
+satisfiable at all: in-play books run wider than pregame ones, because the
+price is moving and makers widen to protect themselves. At 0.02, zero live
+markets qualified.
+
+That widening is safer than it sounds in one way and more dangerous in
+another. It is not a *cost* — we hold to resolution and never cross back over
+the bid, so the spread is never paid. What it does buy is uncertainty about
+whether the ask is trustworthy, and the number to watch is how far the ask
+sits above the mid: measured on live in-band books, a 0.069 spread put the
+ask 3.4c over mid on a trade returning 2.1c. Paying more over the midpoint
+than the trade can return is negative expectancy whenever the mid is nearer
+the truth. Half of this cap is 2.5c against a 1.5-4.5c return, which is the
+outer edge of defensible; anything wider should be a relative gate
+(spread <= 1 - ask) rather than a bigger constant.
 
 Know what this costs. Of 607 live markets, the price distribution is
 barbelled — 510 below 0.50, 60 above 0.985, and only **7 inside the band**,
