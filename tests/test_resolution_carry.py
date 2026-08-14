@@ -124,19 +124,15 @@ def test_validate_refuses_a_negative_hours_floor():
         _params(min_hours_to_resolution=-1.0).validate()
 
 
-def test_categories_are_open_by_default():
-    """The day cap, not a category screen, is what guarantees the horizon."""
-    p = _params()
-    assert screen.category_ok("sports,nfl", p)
+def test_require_sports_can_be_switched_off():
+    """Kept as a switch so a non-sports arm can run as a control."""
+    p = _params(require_sports=False)
     assert screen.category_ok("politics", p)
     assert screen.category_ok("", p)
 
 
-def test_require_sports_still_screens_when_switched_on():
-    p = _params(require_sports=True)
-    assert screen.category_ok("sports,nfl", p)
-    assert not screen.category_ok("politics", p)
-    assert not screen.category_ok("", p)          # unlabelled fails closed
+def test_unlabelled_fails_closed_under_require_sports():
+    assert not screen.category_ok("", _params())
 
 
 # ── Diversification ──────────────────────────────────────────────────────────
@@ -418,3 +414,40 @@ def test_post_whistle_entries_are_labelled_for_attribution(ledger):
     assert len(intents) == 1
     assert intents[0].features["hours_past_end"] == pytest.approx(0.167, abs=0.02)
     assert "ended" in intents[0].reason
+
+
+# ── Moneyline only ───────────────────────────────────────────────────────────
+
+def test_a_moneyline_is_tradeable():
+    row = _game(-1, question="Will Wolverhampton Wanderers FC win on 2026-08-14?")
+    assert isinstance(screen.evaluate(row, end_ts(0.2), NOW, _params()), screen.Candidate)
+
+
+@pytest.mark.parametrize("question, outcomes", [
+    # Totals quote Over/Under, not Yes/No.
+    ("Wolverhampton Wanderers FC vs. Blackburn Rovers FC: O/U 2.5", '["Over", "No"]'),
+    # These are Yes/No but are props, not "who wins" — 682 of 751 live Yes/No
+    # sports markets look like this.
+    ("Will Galatasaray SK vs. Çorum FK end in a draw?", '["Yes", "No"]'),
+    ("Galatasaray SK vs. Çorum FK: Both Teams to Score", '["Yes", "No"]'),
+    ("Exact Score: Wolverhampton 3 - 0 Blackburn", '["Yes", "No"]'),
+    ("Will Elon Musk post 40-64 tweets from August 13 to August 15?", '["Yes", "No"]'),
+])
+def test_everything_that_is_not_a_moneyline_is_rejected(question, outcomes):
+    row = _game(-1, question=question, outcomes=outcomes)
+    assert screen.evaluate(row, end_ts(0.2), NOW, _params()) == "not a winner market"
+
+
+def test_an_esports_game_winner_does_not_slip_through_on_the_word_winner():
+    """`\\bwin\\b` must not match the "Winner" in "Game 2 Winner", and those
+    markets quote team names rather than Yes/No anyway."""
+    row = _game(-1, question="LoL: T1 Academy vs Dplus KIA - Game 2 Winner",
+                outcomes='["T1 Academy", "Dplus KIA"]')
+    assert not screen.is_winner_market(row)
+
+
+def test_sports_is_required_again():
+    p = _params()
+    assert screen.category_ok("sports,games,soccer,efl championship", p)
+    assert not screen.category_ok("weather,hong kong", p)
+    assert not screen.category_ok("commodities,gold", p)

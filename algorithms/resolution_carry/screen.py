@@ -7,10 +7,15 @@ database. The algorithm module owns the fetching, caching, and logging.
 """
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Iterable, Optional
+
+
+# Whole word: must not match the "Winner" in an esports "Game 2 Winner".
+_WIN_RE = re.compile(r"\bwin\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,14 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
             return "not a live event"
         if start_ts > now:
             return "pregame"
+
+    # Moneyline only. The hypothesis being tested is that 95% on "who wins"
+    # is a steadier 95% than on any other market shape: it is read off a
+    # scoreline and a clock, whereas an O/U 0.5 at 95% is still a forecast
+    # that a goal will arrive, and a prop can turn on one incident.
+    if p.require_winner_market and not is_winner_market(market):
+        return "not a winner market"
+
     if bid is None or ask - bid > p.max_ask_spread:
         return "spread"
 
@@ -194,6 +207,22 @@ def _json_list(raw) -> list:
         except ValueError:
             return []
     return raw if isinstance(raw, list) else []
+
+
+def is_winner_market(market: dict) -> bool:
+    """A moneyline — "Will <team> win on <date>?" — and nothing else.
+
+    Two conditions, because either alone lets the wrong thing through.
+    Yes/No outcomes exclude totals (which quote Over/Under) and esports
+    head-to-heads (which quote team names), but 682 of 751 live Yes/No sports
+    markets are props: draws, both-teams-to-score, exact scorelines, tweet
+    counts. Requiring "win" as a whole word cuts those, and the word boundary
+    matters — it must not match the "Winner" in an esports "Game 2 Winner".
+    """
+    outcomes = [str(o).strip().lower() for o in _json_list(market.get("outcomes"))]
+    if outcomes != ["yes", "no"]:
+        return False
+    return bool(_WIN_RE.search(market.get("question") or ""))
 
 
 def game_start_ts(market: dict) -> Optional[float]:

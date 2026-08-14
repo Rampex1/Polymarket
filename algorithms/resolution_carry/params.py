@@ -100,11 +100,10 @@ class ResolutionCarryParams:
     # so a cap of 5 silently capped the strategy at five positions and made
     # max_concurrent_positions decorative.
     #
-    # Now that require_sports is off, labels do vary and a real value would
-    # do its intended job again — capping "twenty political markets that are
-    # really one election" — at the price of capping sports, which is where
-    # the flow is. Left inert deliberately; the per-event cap carries the
-    # diversification. Revisit once paper shows how loss concentrates.
+    # With require_sports back on, every primary label is "sports" again, so
+    # this stays inert by necessity rather than by choice. The per-event cap
+    # is what carries the diversification. Revisit if the universe ever
+    # widens beyond sports.
     max_positions_per_category: int = _doc(20, "Positions sharing a primary Gamma category.")
 
     # ── Sizing ───────────────────────────────────────────────────────────────
@@ -123,16 +122,15 @@ class ResolutionCarryParams:
     max_slippage: float = _doc(0.005, "Max drift from the signal ask before we skip. Half a cent is a quarter of the return.")
 
     # ── Screening + cadence ──────────────────────────────────────────────────
-    # Off, because the thing sports was standing in for turned out to be
-    # measurable directly. The worry was that only a game has a knowably
-    # certain resolution time; but Gamma's end date is what the horizon gate
-    # already reads, and it holds. Over a 6-hour slice of end dates three
-    # days back, non-sports markets honoured their stated date 983 of 984
-    # times, against 1117 of 1215 for sports — sports is the *less* punctual
-    # class, because games get postponed. The day cap does the work the sports
-    # screen was hired for. `market_category` is logged on every signal, so
-    # the arms can still be compared on realized P&L.
-    require_sports: bool = _doc(False, "Only trade markets Gamma labels sports/esports.")
+    # Back on, and this time for the reason sports actually earns rather than
+    # the one it was first given. It is not about resolution *timing* — that
+    # was measured and sports is the less punctual class (92% against
+    # essentially 100% for everything else). It is that a scoreline and a
+    # clock are the most legible source of certainty available: at 95% with
+    # the game underway, the market is reading a state of the world, not
+    # forecasting one. Weather, tweet counts and index levels are still
+    # forecasts at 95%, however punctual their expiry.
+    require_sports: bool = _doc(True, "Only trade markets Gamma labels sports/esports.")
     # Crypto is out entirely. A "will BTC be above X at 4pm" market is not a
     # question awaiting settlement — it is a live price that keeps moving
     # until the instant it expires, so there is no decided outcome to be paid
@@ -157,6 +155,19 @@ class ResolutionCarryParams:
     # without it are not games at all (weather, tweet counts, index levels)
     # and are rejected, since a thing that merely expires is never live.
     require_in_play: bool = _doc(True, "Only trade markets whose gameStartTime has passed. Markets with no gameStartTime are rejected.")
+
+    # Moneyline only — "Will <team> win on <date>?" — on the hypothesis that
+    # 95% on who-wins is a steadier 95% than 95% on anything else, because it
+    # is read off a scoreline and a clock rather than forecast. An in-play
+    # O/U 0.5 at 95% is still a prediction that a goal will arrive; a prop
+    # can turn on a single incident.
+    #
+    # Two conditions are needed, because either alone leaks. Yes/No outcomes
+    # exclude totals (Over/Under) and esports head-to-heads (team names), but
+    # 682 of 751 live Yes/No sports markets are props — draws, both-teams-to-
+    # score, exact scorelines, tweet counts. Requiring "win" as a whole word
+    # cuts those and leaves exactly one shape.
+    require_winner_market: bool = _doc(True, "Only trade moneyline markets: Yes/No outcomes whose question contains 'win'.")
     # 15, from the archive: across 4,765 transits through this band on tokens
     # that finished at/above 0.99, 99% lasted a single one-minute sample. The
     # band is open for about a minute, so a 60s poll lands inside it roughly
