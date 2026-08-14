@@ -83,7 +83,6 @@ def test_clean_row_becomes_a_candidate():
     (market(bestBid="0.90"),  0.5, "spread"),       # no real price
     (market(liquidityClob="100"), 0.5, "illiquid"),
     (market(clobTokenIds="[]"),   0.5, "no token id"),
-    (market(),               -0.1, "past end date"),
     (market(),                3,   "resolves too far out"),
 ])
 def test_gates_reject_with_a_reason(row, days, reason):
@@ -381,3 +380,41 @@ def test_spread_cap_admits_in_play_books_but_not_absent_ones():
                                       end_ts(0.2), NOW, p), screen.Candidate)
     assert screen.evaluate(_game(-1, bestAsk="0.970", bestBid="0.790"),
                            end_ts(0.2), NOW, p) == "spread"
+
+
+# ── The grace window: trading after the whistle ──────────────────────────────
+
+def test_a_market_that_just_ended_is_tradeable():
+    """The purest form of the trade — result known, only the oracle pending.
+    Measured post-end books stay live for 10-40 minutes at 0.95-0.99."""
+    cand = screen.evaluate(_game(-2), end_ts(-10 / 1440), NOW, _params())
+    assert isinstance(cand, screen.Candidate)
+    assert cand.days < 0                       # horizon is behind us
+
+
+def test_a_fossil_is_still_rejected():
+    """106 of 500 rows had end dates months past and were never resolved.
+    Their quotes are artifacts, not prices."""
+    assert screen.evaluate(_game(-800), end_ts(-30), NOW, _params()) == "long past end"
+
+
+def test_grace_of_zero_restores_the_old_behaviour():
+    p = _params(max_hours_past_end=0.0)
+    assert screen.evaluate(_game(-2), end_ts(-10 / 1440), NOW, p) == "long past end"
+
+
+def test_the_settle_soon_floor_does_not_apply_after_the_whistle():
+    """A floor on time-to-settle is meaningless once the event is over."""
+    p = _params(min_hours_to_resolution=6.0)
+    assert isinstance(screen.evaluate(_game(-2), end_ts(-10 / 1440), NOW, p),
+                      screen.Candidate)
+    assert screen.evaluate(_game(-2), end_ts(0.1), NOW, p) == "resolves too soon"
+
+
+def test_post_whistle_entries_are_labelled_for_attribution(ledger):
+    rows = [market(_end_ts=end_ts(-10 / 1440),
+                   gameStartTime=_iso(NOW - 7200))]
+    intents = list(_algo(ledger, rows).poll())
+    assert len(intents) == 1
+    assert intents[0].features["hours_past_end"] == pytest.approx(0.167, abs=0.02)
+    assert "ended" in intents[0].reason

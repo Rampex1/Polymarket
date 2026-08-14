@@ -381,6 +381,15 @@ Non-obvious behavior, all deliberate:
   sold back across the bid — so this caps how far above the *mid* we will
   pay, not friction. Watch that premium: a 0.069 spread put the ask 3.4c over
   mid on a trade returning 2.1c.
+- **`max_hours_past_end = 6` — the grace window, and the scan range moves
+  with it.** A market whose whistle went minutes ago is this trade at its
+  purest (result known, oracle pending); one whose end date passed months ago
+  is a fossil. The old gate rejected both. Post-end books measured live for
+  10–40 min at 0.95–0.99 with the best edge in the dataset (+3.5%), on n=16 —
+  which admits a 19% failure rate against a 3.5% break-even, so the window is
+  there to collect evidence, not because it is in. `hours_past_end` is logged
+  per signal to keep these separable in the P&L. Note `_scan` must reach back
+  by the same amount or Gamma filters them out before the gate sees them.
 - **`order_type = "limit"`.** One tick of slippage is a quarter of the
   return. Non-fills are the accepted cost; whether a GTC at the ask reliably
   fills is the open question paper exists to answer.

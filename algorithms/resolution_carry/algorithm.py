@@ -197,7 +197,12 @@ class ResolutionCarryAlgorithm(Algorithm):
         already parked at 0.98.
         """
         now = datetime.now(timezone.utc)
-        end_min = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Reach back by the grace window, or the screen's post-end gate can
+        # never fire: Gamma would filter those markets out before it sees
+        # them, and the knob would look enabled while doing nothing.
+        end_min = (
+            now - timedelta(hours=self.params.max_hours_past_end)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         end_max = (
             now + timedelta(days=self.params.max_days_to_resolution)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -261,10 +266,16 @@ class ResolutionCarryAlgorithm(Algorithm):
     def _open(self, cand: screen.Candidate) -> OpenIntent:
         p = self.params
         # Hours, not days: every market this strategy touches resolves inside
-        # one, so days round every horizon to "0.0d".
-        horizon = f"{cand.days * 24:.1f}h" if cand.days < 1 else f"{cand.days:.1f}d"
+        # one, so days round every horizon to "0.0d". A negative horizon is
+        # the post-whistle case and reads as time elapsed, not time remaining.
+        hours = cand.days * 24
+        horizon = (
+            f"ended {-hours * 60:.0f}m ago" if hours < 0
+            else f"resolves in {hours:.1f}h" if cand.days < 1
+            else f"resolves in {cand.days:.1f}d"
+        )
         logger.info(
-            "[%s] CARRY: ask %.3f, %s out, ~%.0f%%/yr | %s",
+            "[%s] CARRY: ask %.3f, %s, ~%.0f%%/yr | %s",
             p.name, cand.ask, horizon, cand.annualized * 100,
             cand.question[:55],
         )
@@ -278,7 +289,7 @@ class ResolutionCarryAlgorithm(Algorithm):
             signal_id=f"carry:{cand.asset_id}:{self._poll_count}",
             reason=(
                 f"ask {cand.ask:.3f} ({(1 - cand.ask) / cand.ask:+.1%} if right), "
-                f"resolves in {horizon} → ~{cand.annualized:.0%}/yr"
+                f"{horizon} → ~{cand.annualized:.0%}/yr"
             ),
             # Raw observables only — the derived score belongs in the
             # analysis, not in the training row.
@@ -288,6 +299,10 @@ class ResolutionCarryAlgorithm(Algorithm):
                 "days_to_resolution": cand.days,
                 "annualized": cand.annualized,
                 "liquidity_clob": cand.liquidity,
+                # Splits post-whistle entries from pre-whistle ones in the
+                # P&L later, so the grace window can be judged on its own
+                # results rather than blended into the strategy's.
+                "hours_past_end": max(0.0, -cand.days * 24),
                 "market_category": cand.category,
                 "event_id": cand.event_id,
                 "market_end_ts": cand.end_ts,

@@ -82,13 +82,18 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
     if end_ts is None:
         return "no end date"
     hours = (end_ts - now) / 3_600.0
-    # Past its end date is not "nearly settled", it is settled: trading has
-    # effectively stopped, so the quote is a dead book and there is no carry
-    # left to earn. Kept separate from the floor below so the funnel says
-    # which one fired.
-    if hours < 0:
-        return "past end date"
-    if hours < p.min_hours_to_resolution:
+    # Past the end date splits into two populations that look identical to a
+    # sign test and are nothing alike. A market whose whistle went minutes ago
+    # is the purest form of this trade — the result is known and only the
+    # oracle is pending — and measured post-end books stay live for ten to
+    # forty minutes at 0.95-0.99. A market whose end date passed *months* ago
+    # is a fossil nobody ever resolved (106 of 500 rows), and its quote is an
+    # artifact. `max_hours_past_end` is the line between them.
+    if hours < -p.max_hours_past_end:
+        return "long past end"
+    # The floor is about not buying something that settles before we are
+    # filled; it has no meaning once the event is already over.
+    if 0 <= hours < p.min_hours_to_resolution:
         return "resolves too soon"
     days = hours / 24.0
     if days > p.max_days_to_resolution:

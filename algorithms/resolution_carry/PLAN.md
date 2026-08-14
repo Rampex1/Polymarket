@@ -221,6 +221,7 @@ max_ask                 0.985  # above this the residual cannot cover the tail
 max_days_to_resolution  1      # capital lockup ceiling; a day, not 45 — see below
 min_annualized_return   0.25   # inert at a 1-day window; binds again if it widens
 min_hours_to_resolution 0      # was 6; see below — it excluded the thesis
+max_hours_past_end      6      # the grace window — trade after the whistle
 
 # ── Liquidity ───────────────────────────────────────────────────────────
 min_market_liquidity_usdc  5000   # Gamma `liquidityClob`, proxy for depth
@@ -249,7 +250,41 @@ poll_interval_seconds   15       # set by the band-dwell measurement, not taste
 settle_check_every      12
 ```
 
-Five defaults worth explaining, all deliberate:
+Six defaults worth explaining, all deliberate:
+
+**`max_hours_past_end = 6` — the grace window.** Past the end date splits
+into two populations that a sign test cannot tell apart and that are nothing
+alike. A market whose whistle went minutes ago is this trade at its purest:
+the result is known, only the oracle is outstanding. A market whose end date
+passed *months* ago is a fossil nobody resolved (106 of 500 rows), and its
+quote is an artifact. The original gate rejected both, on the reasoning that
+"trading has effectively stopped, so the quote is a dead book" — which is
+true of the second and false of the first.
+
+Measured against the archive, restricted to prices recorded after the
+scheduled end:
+
+| band | n | resolved YES | edge | window stays open |
+|---|---|---|---|---|
+| 0.950–0.980 | 16 | 100% | **+0.035** | median 11m, max 36m |
+| 0.980–0.990 | 9 | 100% | +0.015 | median 10m, max 24m |
+| 0.990–0.995 | 9 | 100% | +0.008 | median 4m, p90 14h |
+| 0.995–1.000 | 40 | 100% | +0.002 | median 42m, max 30h |
+
+The best edge in the entire dataset sits in the ten minutes after a final
+whistle. 6h has an order of magnitude of margin at both ends: the tradeable
+window closes within 36 minutes, and the fossils are months old.
+
+**The `n` column is the point, not the 100%.** Zero failures in 16 still
+admits a true failure rate near 19%, against a 3.5% break-even — the sample
+cannot distinguish free money from a steady bleed. Reaching ~250 post-whistle
+settlements is what would. The window exists to *collect* that evidence, and
+`hours_past_end` is logged on every signal so these entries can be judged
+apart from the rest of the strategy rather than blended into it.
+
+The scan range moves with it (`end_date_min = now - max_hours_past_end`);
+without that Gamma filters these markets out before the gate ever sees them,
+and the knob would look enabled while doing nothing.
 
 **`require_in_play = True`.** The sharpest correction the strategy has had.
 0.95 before kickoff and 0.95 with the game underway are not the same number:

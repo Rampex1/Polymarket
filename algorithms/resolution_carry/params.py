@@ -47,7 +47,27 @@ class ResolutionCarryParams:
     # trading has effectively stopped, there is no carry left to earn, and
     # the quoted price is a dead book rather than an opinion. That is the
     # part worth keeping, so validate() refuses a negative value.
-    min_hours_to_resolution: float = _doc(0.0, "Skip markets settling sooner than this. 0 still rejects markets already past their end date.")
+    min_hours_to_resolution: float = _doc(0.0, "Skip markets settling sooner than this. Applies only to markets that have not yet reached their end date.")
+
+    # The grace window: how far past its scheduled end a market may be and
+    # still be tradeable. This is where the purest version of the trade lives
+    # — the whistle has gone, the result is known, and only the oracle is
+    # outstanding — and it was excluded outright until measured.
+    #
+    # From the archive, restricted to prices recorded after the scheduled end:
+    #
+    #   band          n   resolved YES   edge     window stays open
+    #   0.950-0.980  16      100%       +0.035    median 11m, max 36m
+    #   0.980-0.990   9      100%       +0.015    median 10m, max 24m
+    #   0.990-0.995   9      100%       +0.008    median  4m, p90 14h
+    #   0.995-1.000  40      100%       +0.002    median 42m, max 30h
+    #
+    # 6h has an order of magnitude of margin at both ends: the tradeable
+    # window at 0.95-0.99 closes within 36 minutes, and the fossils this must
+    # keep excluding are months old. Note the n: 0 failures in 16 still admits
+    # a true failure rate near 19%, against a 3.5% break-even. This window is
+    # here to *collect* the evidence, not because the evidence is in.
+    max_hours_past_end: float = _doc(6.0, "How many hours past its scheduled end a market may be and still trade. 0 rejects everything past its end date.")
 
     # ── Liquidity ────────────────────────────────────────────────────────────
     min_market_liquidity_usdc: float = _doc(5_000.0, "Gamma `liquidityClob` floor — a depth proxy, not a measurement.")
