@@ -214,7 +214,7 @@ Every knob lives in `params.py` with a `_doc` string, per the invariant.
 
 ```python
 # ── Price band ──────────────────────────────────────────────────────────
-min_ask                 0.95   # below this we are forecasting, not carrying
+min_ask                 0.955  # floors the FILL at 0.95, not just the signal
 max_ask                 0.985  # above this the residual cannot cover the tail
 
 # ── Time value ──────────────────────────────────────────────────────────
@@ -243,12 +243,34 @@ max_slippage            0.005    # half a cent is a quarter of the return
 
 # ── Screening ───────────────────────────────────────────────────────────
 require_sports          False    # the day cap guarantees the horizon; see below
-exclude_categories      ("crypto",)   # a live price is not a decided outcome
+exclude_categories      ("crypto","esports")  # neither is a decided outcome
+require_in_play         True   # kickoff must have passed — see below
 poll_interval_seconds   15       # set by the band-dwell measurement, not taste
 settle_check_every      12
 ```
 
-Four defaults worth explaining, all deliberate:
+Five defaults worth explaining, all deliberate:
+
+**`require_in_play = True`.** The sharpest correction the strategy has had.
+0.95 before kickoff and 0.95 with the game underway are not the same number:
+the first is a forecast that a thing will happen, the second is a scoreboard
+that has largely already decided it. Only the second is an outcome waiting on
+paperwork, which is the only thing this strategy is paid to hold. The first
+day of paper ran almost entirely on pregame O/U 0.5 markets — "will there be
+one goal" — which is a statistical claim, not a settled result.
+
+Gamma's `gameStartTime` implements it: present on 1,871 of 2,100 markets in a
+one-day window, 607 of them already started. The 229 without it are not games
+(weather, tweet counts, index levels) and are rejected — a thing that merely
+expires is never live. `startDate` is deliberately NOT a fallback: every
+market has one, so falling back would report everything as started and
+silently disable the gate.
+
+Know what this costs. Of 607 live markets, the price distribution is
+barbelled — 510 below 0.50, 60 above 0.985, and only **7 inside the band**,
+because a live game is either undecided or already decided and the band is
+the brief transit between. Combined with a ~1-minute dwell, entries become
+rare and bursty rather than steady.
 
 **`max_days_to_resolution = 1` and `min_ask = 0.95`**, tightened from 45 days
 and 0.93. Both follow from the horizon table above rather than from taste: a

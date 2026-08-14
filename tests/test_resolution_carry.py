@@ -33,9 +33,15 @@ def _params(**overrides):
     return ResolutionCarryParams(**base)
 
 
+def _iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
 def market(**overrides) -> dict:
-    """A Gamma row that clears every gate: sports, 0.97 ask, 12 hours out."""
+    """A Gamma row that clears every gate: a soccer match already underway,
+    0.97 ask, 12 hours from settling."""
     row = {
+        "gameStartTime": _iso(NOW - 3600),
         "conditionId": "0xm1",
         "clobTokenIds": '["tok_yes", "tok_no"]',
         "outcomes": '["Yes", "No"]',
@@ -46,6 +52,13 @@ def market(**overrides) -> dict:
         "events": [{"id": "ev1"}],
     }
     row.update(overrides)
+    return row
+
+
+def non_game(**overrides) -> dict:
+    """Weather, tweet counts, index levels — no kick-off, never "live"."""
+    row = market(**overrides)
+    row.pop("gameStartTime")
     return row
 
 
@@ -310,3 +323,51 @@ def test_crypto_is_excluded():
     p = _params()
     assert not screen.category_ok("bitcoin,weekly,crypto,crypto prices", p)
     assert screen.category_ok("sports,games,soccer,leagues cup", p)
+
+
+# ── In-play only ─────────────────────────────────────────────────────────────
+
+def _game(hours_from_now: float, **overrides) -> dict:
+    """A market row with a kick-off time relative to NOW."""
+    return market(gameStartTime=_iso(NOW + hours_from_now * 3600), **overrides)
+
+
+def test_a_game_underway_is_tradeable():
+    cand = screen.evaluate(_game(-1.0), end_ts(0.2), NOW, _params())
+    assert isinstance(cand, screen.Candidate)
+
+
+def test_pregame_is_rejected():
+    """0.95 before kickoff is a forecast; 0.95 with the game underway is a
+    scoreboard. Only the second is an outcome waiting on paperwork."""
+    assert screen.evaluate(_game(2.0), end_ts(0.5), NOW, _params()) == "pregame"
+
+
+def test_a_market_that_is_not_a_game_is_rejected():
+    """Weather and tweet counts never go live — they just expire."""
+    assert screen.evaluate(non_game(), end_ts(0.5), NOW, _params()) == "not a live event"
+
+
+def test_start_date_is_not_used_as_a_kickoff_fallback():
+    """Every market has a startDate; falling back to it would silently
+    report everything as already started and disable the gate."""
+    row = non_game(startDate="2020-01-01T00:00:00Z")
+    assert screen.game_start_ts(row) is None
+    assert screen.evaluate(row, end_ts(0.5), NOW, _params()) == "not a live event"
+
+
+def test_in_play_gate_can_be_switched_off():
+    p = _params(require_in_play=False)
+    assert isinstance(screen.evaluate(non_game(), end_ts(0.5), NOW, p), screen.Candidate)
+
+
+def test_esports_is_excluded():
+    p = _params()
+    assert not screen.category_ok("esports,counter strike 2,games,sports", p)
+    assert screen.category_ok("sports,games,soccer,efl championship", p)
+
+
+def test_the_worst_admissible_fill_stays_above_95c():
+    """min_ask exists to floor what we own, not just what we signalled."""
+    p = _params()
+    assert p.min_ask * (1 - p.max_slippage) > 0.95

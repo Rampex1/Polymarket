@@ -9,6 +9,7 @@ database. The algorithm module owns the fetching, caching, and logging.
 import json
 from collections import Counter
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 
@@ -54,6 +55,21 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
     # and the mid is unfillable. It is what we would actually pay.
     if ask is None or not (p.min_ask <= ask <= p.max_ask):
         return "out of band"
+
+    # In-play only. 0.95 before kickoff and 0.95 with the game underway are
+    # not the same number: the first is a forecast that a thing will happen,
+    # the second is a scoreboard that has largely already decided it. This
+    # strategy is paid for waiting on a settled outcome, not for being right
+    # about an unsettled one, and only the second is that.
+    if p.require_in_play:
+        start_ts = game_start_ts(market)
+        if start_ts is None:
+            # No start time means it is not a game at all (weather, tweet
+            # counts, index levels). Those never become "live" — they just
+            # expire — so there is nothing to verify and we fail closed.
+            return "not a live event"
+        if start_ts > now:
+            return "pregame"
     if bid is None or ask - bid > p.max_ask_spread:
         return "spread"
 
@@ -173,6 +189,25 @@ def _json_list(raw) -> list:
         except ValueError:
             return []
     return raw if isinstance(raw, list) else []
+
+
+def game_start_ts(market: dict) -> Optional[float]:
+    """Kick-off as a unix timestamp, or None when Gamma has no `gameStartTime`.
+
+    Deliberately does NOT fall back to `startDate`: that is when the *market*
+    opened, which every market has, so a fallback would report every row as
+    already started and silently turn the in-play gate off.
+    """
+    raw = market.get("gameStartTime")
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 
 def event_id(market: dict) -> str:

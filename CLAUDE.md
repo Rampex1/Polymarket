@@ -346,10 +346,16 @@ stake. Exits are the shared settle sweep only.
 Non-obvious behavior, all deliberate:
 
 - **Sports is not required; crypto is excluded** (`require_sports = False`,
-  `exclude_categories = ("crypto",)`). A "will BTC be above X at 4pm" market
-  is a live price, not a decided outcome awaiting settlement — nothing to be
-  paid for waiting on. Measured: 130 of 130 crypto markets in a one-day
-  window carry a `crypto` label, and 0 of 300 markets carry none. Every other strategy screens sports out
+  `exclude_categories = ("crypto", "esports")`). A "will BTC be above X at
+  4pm" market is a live price, not a decided outcome; a best-of-three at 0.95
+  is one teamfight from 0.40. Labels are reliable: 130/130 crypto and 94/94
+  esports markets carry theirs, and 0 of 300 markets carry none.
+- **`require_in_play = True` — the gate that encodes the thesis.** 0.95
+  before kickoff is a forecast; 0.95 with the game underway is a scoreboard.
+  Only the second is an outcome awaiting paperwork. Uses Gamma's
+  `gameStartTime` (present on 1,871/2,100 in a one-day window); markets
+  without it are not games and are rejected. `startDate` is NOT a fallback —
+  every market has one, so it would silently disable the gate. Every other strategy screens sports out
   because efficient pricing kills a forecasting edge; here efficiency is the
   product. Sports was required at first, on the assumption that only a game
   has a knowably certain resolution time — measured and false: non-sports

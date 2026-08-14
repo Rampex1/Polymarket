@@ -20,7 +20,13 @@ class ResolutionCarryParams:
     mode: Mode = Mode.PAPER          # fail-safe; the profile block sets it
 
     # ── Price band ───────────────────────────────────────────────────────────
-    min_ask: float = _doc(0.95, "Below this we are forecasting, not carrying.")
+    # 0.955, not 0.95, and the extra half-cent is arithmetic rather than
+    # taste: the slippage gate admits a fill up to max_slippage *below* the
+    # signal, so a 0.950 signal could fill at 0.9453 — and one already did
+    # (KÍ vs Lech Poznań, filled 0.949). The floor is meant to be a floor on
+    # what we actually own, so it has to sit at 0.95 / (1 - max_slippage) for
+    # the worst admissible fill to still land above 0.95.
+    min_ask: float = _doc(0.955, "Below this we are forecasting, not carrying. Set so the worst fill the slippage gate allows still lands above 0.95.")
     max_ask: float = _doc(0.985, "Above this the residual cannot cover the tail.")
 
     # ── Time value ───────────────────────────────────────────────────────────
@@ -105,7 +111,19 @@ class ResolutionCarryParams:
     # than assumed: of 130 crypto markets in a one-day window, 130 carried a
     # "crypto" label, and 0 of 300 sampled markets carried no labels at all
     # (the case this screen would fail open on).
-    exclude_categories: tuple = _doc(("crypto",), "Gamma category/tag substrings to reject.")
+    # Esports joins crypto. A best-of-three at 0.95 is one teamfight from
+    # 0.40 — the tail arrives far more often than the price implies, which is
+    # exactly the miscalibration this strategy cannot survive. Also measured:
+    # 94 of 94 esports markets carry an "esports" label, and the 66 further
+    # markets that carry it without an esports-looking title are all handicap
+    # legs of the same matches, so the substring catches them too.
+    exclude_categories: tuple = _doc(("crypto", "esports"), "Gamma category/tag substrings to reject.")
+
+    # Only markets whose game has actually kicked off. Gamma ships
+    # `gameStartTime` on 1,871 of 2,100 markets in a one-day window; the 229
+    # without it are not games at all (weather, tweet counts, index levels)
+    # and are rejected, since a thing that merely expires is never live.
+    require_in_play: bool = _doc(True, "Only trade markets whose gameStartTime has passed. Markets with no gameStartTime are rejected.")
     # 15, from the archive: across 4,765 transits through this band on tokens
     # that finished at/above 0.99, 99% lasted a single one-minute sample. The
     # band is open for about a minute, so a 60s poll lands inside it roughly
