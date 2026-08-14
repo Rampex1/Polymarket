@@ -150,7 +150,7 @@ algorithms/
     history.py            # Pure reconstruction of a wallet's resolved bets from /activity + /positions
     ranker.py             # Offline-testable confidence-adjusted wallet ranking; reads/writes wallet_resolved_bets
     watchlist.py          # SQLite-backed scored-wallet cohort, atomically replaced on refresh
-  resolution_carry/       # Buy near-certain outcomes, hold to resolution, collect the residual. Registered, running paper in experimental.toml. See PLAN.md
+  resolution_carry/       # Buy near-certain outcomes, hold to resolution, collect the residual. Registered, running paper in experimental.toml. See its README.md
     algorithm.py          # ResolutionCarryAlgorithm: paged Gamma scan → screen → OpenIntent; settle sweep for exits
     params.py             # ResolutionCarryParams — pure schema
     screen.py             # Pure: market rows → ranked, diversified candidates. No I/O, so the funnel sweeps offline
