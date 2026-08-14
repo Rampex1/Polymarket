@@ -127,41 +127,46 @@ class ResolutionCarryAlgorithm(Algorithm):
                         p.name, len(held), p.max_concurrent_positions)
             return
 
-        rows = self._scan()
         held_ids = {pos.market_id for pos in held}
-        self._note_lows(rows, held_ids)
-
         now = time.time()
         funnel: Counter = Counter()
         candidates = []
-        for row in rows:
-            verdict = screen.evaluate(
-                row, self._market_data.market_end_ts(row), now, p,
-            )
-            if isinstance(verdict, str):
-                funnel[verdict] += 1
-                continue
-            # Holding the market is the primary dedupe: a position already at
-            # size yields nothing on every later scan.
-            if verdict.market_id in held_ids:
-                funnel["already held"] += 1
-                continue
-            # ...but a signal the runner *rejected* leaves no position, so it
-            # would come back on every poll. Dispatch alerts before it gates,
-            # so a parked market failing the slippage check would post to
-            # Discord every cycle for as long as it sits in the band.
-            if self._signalled.get(verdict.market_id, 0.0) > now:
-                funnel["cooling off"] += 1
-                continue
-            labels = self._market_data.market_labels(row)
-            if not screen.category_ok(labels, p):
-                funnel["category"] += 1
-                continue
-            candidates.append(screen.with_category(verdict, labels))
+        scanned = 0
+
+        # Screened a page at a time, so only ~100 Gamma rows are live at once
+        # instead of all 2,100. Those rows are fat — nested events, tags,
+        # outcomes — and this runs every 15s on a 498MB box.
+        for page in self._scan_pages():
+            scanned += len(page)
+            self._note_lows(page, held_ids)
+            for row in page:
+                verdict = screen.evaluate(
+                    row, self._market_data.market_end_ts(row), now, p,
+                )
+                if isinstance(verdict, str):
+                    funnel[verdict] += 1
+                    continue
+                # Holding the market is the primary dedupe: a position already
+                # at size yields nothing on every later scan.
+                if verdict.market_id in held_ids:
+                    funnel["already held"] += 1
+                    continue
+                # ...but a signal the runner *rejected* leaves no position, so
+                # it would come back on every poll. Dispatch alerts before it
+                # gates, so a parked market failing the slippage check would
+                # post to Discord every cycle for as long as it sits in band.
+                if self._signalled.get(verdict.market_id, 0.0) > now:
+                    funnel["cooling off"] += 1
+                    continue
+                labels = self._market_data.market_labels(row)
+                if not screen.category_ok(labels, p):
+                    funnel["category"] += 1
+                    continue
+                candidates.append(screen.with_category(verdict, labels))
 
         logger.info(
             "[%s] Scanned %d markets → %d in band. Rejections: %s",
-            p.name, len(rows), len(candidates),
+            p.name, scanned, len(candidates),
             ", ".join(f"{k} {v}" for k, v in funnel.most_common(5)) or "none",
         )
 
@@ -187,8 +192,15 @@ class ResolutionCarryAlgorithm(Algorithm):
 
     # ── Discovery ────────────────────────────────────────────────────────────
 
-    def _scan(self) -> list[dict]:
-        """Open markets resolving inside our window, most-traded first.
+    def _scan_pages(self) -> Iterator[list[dict]]:
+        """Open markets resolving inside our window, most-traded first, one
+        Gamma page at a time.
+
+        A generator rather than a list on purpose. Returning all 2,100 rows
+        held every market dict from the whole window in memory at once, every
+        15 seconds, on a 498MB box already running two other Python
+        processes. Yielding pages keeps ~100 rows live and lets the rest be
+        collected as the caller finishes with them.
 
         The band is thin as a stock and large as a flow — only ~29 of 2,100
         open markets sit in it at any instant, but a game that ends
@@ -207,11 +219,10 @@ class ResolutionCarryAlgorithm(Algorithm):
             now + timedelta(days=self.params.max_days_to_resolution)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        rows: list[dict] = []
         for page in range(max(1, self.params.discovery_pages)):
             offset = page * GAMMA_PAGE
             if offset >= GAMMA_MAX_OFFSET:
-                break
+                return
             batch = self._market_data.top_markets(
                 closed=False, limit=GAMMA_PAGE, offset=offset,
                 # Without the floor, a fifth of the pages are markets whose
@@ -220,12 +231,11 @@ class ResolutionCarryAlgorithm(Algorithm):
                 # that they crowd out real candidates from the scan.
                 end_date_min=end_min, end_date_max=end_max,
             )
-            rows.extend(batch)
+            yield batch
             # A short page is the end of the list; so is the empty list Gamma
             # returns past its offset ceiling.
             if len(batch) < GAMMA_PAGE:
-                break
-        return rows
+                return
 
     # ── Diversification bookkeeping ──────────────────────────────────────────
 

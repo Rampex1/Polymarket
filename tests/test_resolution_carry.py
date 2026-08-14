@@ -451,3 +451,54 @@ def test_sports_is_required_again():
     assert screen.category_ok("sports,games,soccer,efl championship", p)
     assert not screen.category_ok("weather,hong kong", p)
     assert not screen.category_ok("commodities,gold", p)
+
+
+# ── Scanning is paged, not accumulated ───────────────────────────────────────
+
+class PagedGateway(FakeGateway):
+    """Serves 100-row pages and records what was asked for."""
+
+    def __init__(self, pages, labels="sports,nfl"):
+        super().__init__([r for p in pages for r in p], labels)
+        self._pages = pages
+        self.offsets: list[int] = []
+
+    def top_markets(self, closed=False, limit=100, offset=0,
+                    end_date_min=None, end_date_max=None):
+        self.offsets.append(offset)
+        idx = offset // 100
+        return self._pages[idx] if idx < len(self._pages) else []
+
+
+def _full_page(prefix):
+    """100 rows that all fail an early gate — cheap filler."""
+    return [market(conditionId=f"{prefix}{i}", bestAsk="0.10") for i in range(100)]
+
+
+def test_every_page_is_screened_and_a_short_page_ends_the_scan(ledger):
+    from algorithms.resolution_carry import ResolutionCarryAlgorithm
+
+    winner = market(conditionId="0xwin", _end_ts=end_ts(0.2),
+                    question="Will Team A win on 2026-08-14?")
+    gw = PagedGateway([_full_page("a"), _full_page("b"), [winner]])
+    algo = ResolutionCarryAlgorithm(params=_params(discovery_pages=21), market_data=gw)
+    algo.setup(ledger)
+
+    intents = list(algo.poll())
+    assert gw.offsets == [0, 100, 200]      # stopped on the short third page
+    assert [i.market_id for i in intents] == ["0xwin"]
+
+
+def test_scan_is_lazy(ledger):
+    """A generator, so a page is fetched only as the screen reaches it —
+    that is what keeps one page in memory instead of all 2,100 rows."""
+    from algorithms.resolution_carry import ResolutionCarryAlgorithm
+
+    gw = PagedGateway([_full_page("a"), [market(conditionId="0xz")]])
+    algo = ResolutionCarryAlgorithm(params=_params(discovery_pages=21), market_data=gw)
+    algo.setup(ledger)
+
+    pages = algo._scan_pages()
+    assert gw.offsets == []                 # nothing fetched yet
+    next(pages)
+    assert gw.offsets == [0]                # exactly one page, on demand

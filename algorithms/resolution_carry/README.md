@@ -42,6 +42,11 @@ One worker thread, `poll()` every 15 seconds.
 `MarketDataGateway.top_markets`, paged, volume-ordered, windowed to markets
 ending between 6 hours ago and 1 day from now. About 2,100 rows and ~6.5s.
 
+Pages are **screened as they arrive** rather than accumulated. Gamma rows are
+fat — nested events, tags, outcomes — and holding the whole window at once
+peaked at 34.5 MB per poll against 5.7 MB page-at-a-time, every 15 seconds, on
+a 498 MB box that also runs the archiver and the Discord bot.
+
 Two properties of Gamma to know:
 
 - A page is capped at 100 rows regardless of `limit`.
