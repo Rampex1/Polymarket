@@ -20,3 +20,18 @@
 type = "resolution_carry"
 name = "resolution_carry_paper"
 mode = "paper"
+
+# A/B on which side of the same trade to take. Identical screen, identical
+# ranking, identical markets — the only difference is the token bought, set
+# per-name in algorithms/resolution_carry/params.py VARIANTS. Split realized
+# P&L by the signals table's `side` to settle it.
+#
+# The control buys the favourite at ~0.97 and must be right 97% of the time.
+# The treatment buys the same market's underdog at ~0.04 and needs 4%. Over
+# the control's first 33 settlements it went 30-3 for -$2.15, while the mirror
+# of those exact trades would have made +$40.05 — on three events, which
+# proves nothing. ~200 settlements separate the two.
+[[algorithm]]
+type = "resolution_carry"
+name = "resolution_carry_underdog_paper"
+mode = "paper"

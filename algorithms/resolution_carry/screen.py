@@ -34,6 +34,16 @@ class Candidate:
     annualized: float
     event_id: str
     category: Optional[str] = None
+    # The opposite side of the same market, priced and named. Every gate and
+    # the ranking run on the favourite regardless of which side is bought, so
+    # both arms of the A/B select the identical set of markets and differ only
+    # in the token they take. Empty when the market quotes one token.
+    under_asset_id: str = ""
+    under_outcome: str = ""
+    # What the underdog would cost: its ask is (1 - favourite bid), never
+    # (1 - favourite ask). The spread is paid on whichever side you take, and
+    # at 4c that difference is a third of the theoretical edge.
+    under_ask: float = 0.0
 
 
 def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate | str":
@@ -116,6 +126,7 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
     if annualized < p.min_annualized_return:
         return "not worth the wait"
 
+    under_asset_id, under_outcome = _token1(market)
     return Candidate(
         market_id=market_id,
         asset_id=asset_id,
@@ -128,6 +139,9 @@ def evaluate(market: dict, end_ts: Optional[float], now: float, p) -> "Candidate
         days=days,
         annualized=annualized,
         event_id=event_id(market),
+        under_asset_id=under_asset_id,
+        under_outcome=under_outcome,
+        under_ask=round(1.0 - bid, 4),
     )
 
 
@@ -198,6 +212,15 @@ def _token0(market: dict) -> tuple[str, str]:
         return "", ""
     outcomes = _json_list(market.get("outcomes"))
     return str(tokens[0]), str(outcomes[0]) if outcomes else "Yes"
+
+
+def _token1(market: dict) -> tuple[str, str]:
+    """(token id, outcome label) for the side Gamma does NOT quote."""
+    tokens = _json_list(market.get("clobTokenIds"))
+    if len(tokens) < 2:
+        return "", ""
+    outcomes = _json_list(market.get("outcomes"))
+    return str(tokens[1]), str(outcomes[1]) if len(outcomes) > 1 else "No"
 
 
 def _json_list(raw) -> list:

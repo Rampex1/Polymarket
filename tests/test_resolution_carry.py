@@ -502,3 +502,59 @@ def test_scan_is_lazy(ledger):
     assert gw.offsets == []                 # nothing fetched yet
     next(pages)
     assert gw.offsets == [0]                # exactly one page, on demand
+
+
+# ── The underdog arm ─────────────────────────────────────────────────────────
+
+def test_the_underdog_ask_is_one_minus_the_bid_not_one_minus_the_ask():
+    """The spread is paid on whichever side you take. At a 0.97/0.96 book the
+    underdog costs 0.04, not 0.03 — a third of the theoretical edge."""
+    cand = screen.evaluate(_game(-1), end_ts(0.2), NOW, _params())
+    assert cand.ask == 0.97 and cand.bid == 0.96
+    assert cand.under_ask == 0.04
+    assert cand.under_asset_id == "tok_no"
+    assert cand.under_outcome == "No"
+
+
+def test_underdog_arm_buys_the_other_token(ledger):
+    rows = [market(_end_ts=end_ts(0.2), gameStartTime=_iso(NOW - 3600),
+                   question="Will Team A win on 2026-08-16?")]
+    control = list(_algo(ledger, rows).poll())
+    assert control[0].asset_id == "tok_yes"
+    assert control[0].signal_price == 0.97
+    assert control[0].features["side"] == "favourite"
+
+    treatment = list(_algo(ledger, rows, buy_underdog=True).poll())
+    assert treatment[0].asset_id == "tok_no"
+    assert treatment[0].outcome == "No"
+    assert treatment[0].signal_price == 0.04
+    assert treatment[0].features["side"] == "underdog"
+
+
+def test_both_arms_select_the_identical_markets(ledger):
+    """Every gate and the ranking run on the favourite regardless of side, so
+    the A/B differs only in the token bought."""
+    rows = [
+        market(conditionId="0xa", _end_ts=end_ts(0.2), bestAsk="0.96", bestBid="0.95",
+               gameStartTime=_iso(NOW - 3600), question="Will A win on 2026-08-16?",
+               events=[{"id": "e1"}], clobTokenIds='["a_yes", "a_no"]'),
+        market(conditionId="0xb", _end_ts=end_ts(0.2), bestAsk="0.98", bestBid="0.97",
+               gameStartTime=_iso(NOW - 3600), question="Will B win on 2026-08-16?",
+               events=[{"id": "e2"}], clobTokenIds='["b_yes", "b_no"]'),
+    ]
+    control = [i.market_id for i in _algo(ledger, rows).poll()]
+    treatment = [i.market_id for i in _algo(ledger, rows, buy_underdog=True).poll()]
+    assert control == treatment          # same markets, same order
+
+
+def test_the_variant_wires_the_underdog_arm():
+    """A typo'd knob in VARIANTS must crash, not silently run the control."""
+    from algorithms.resolution_carry.params import VARIANTS, ResolutionCarryParams
+
+    p = ResolutionCarryParams(name="resolution_carry_underdog_paper")
+    assert p.buy_underdog is True
+    # A relative slippage gate of 0.005 on a 0.04 entry is a fifth of a cent;
+    # the variant restores roughly the control's absolute tolerance.
+    assert p.max_slippage * 0.04 == pytest.approx(0.005 * 0.97, abs=0.002)
+    assert ResolutionCarryParams(name="resolution_carry_paper").buy_underdog is False
+    assert "resolution_carry_underdog_paper" in VARIANTS

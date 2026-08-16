@@ -5,13 +5,45 @@ Pure schema — names, types, docs, and boot-time validation. Values live only
 here; a profile block declares what runs, never how it is tuned.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from bot.domain.mode import Mode
 
 
 def _doc(default, doc: str):
     return field(default=default, metadata={"doc": doc})
+
+
+# Named variants — the one place a knob may differ between two blocks of this
+# type, keyed by the `name` a profile declares. Values still live in this file,
+# so there is still exactly one place to look up what a knob is set to.
+#
+# The A/B: identical screen, identical ranking, identical markets — only the
+# side traded differs. The control buys the favourite at ~0.97 and needs to be
+# right 97% of the time; the treatment buys the same market's underdog at
+# ~0.04 and needs 4%. Over the first 33 settlements the control went 30-3 for
+# -$2.15 while the mirror of those same trades would have made +$40.05, on a
+# 9.1% hit rate against a 4.1% break-even. That is 3 events and proves
+# nothing: the 95% interval on 9.1% is [3.1%, 23.6%], which contains
+# break-even, and a fair market throws 3+ winners 15% of the time. ~200
+# settlements separate the two.
+VARIANTS: dict[str, dict] = {
+    "resolution_carry_underdog_paper": {
+        "buy_underdog": True,
+        # Both of these follow from the side flip rather than being tuned.
+        #
+        # max_slippage is a *relative* gate, and 0.005 of a 0.04 entry is a
+        # fifth of a cent — tighter than the CLOB quotes. 0.12 of 0.04 is the
+        # same ~0.5c of absolute tolerance the control gets at 0.97.
+        "max_slippage": 0.12,
+        # The daily loss limit is meant to catch a bad day, not a normal one.
+        # At a ~9% hit rate roughly nine trades in ten lose their full dollar,
+        # so $5 would suspend this arm within its first hour every day and it
+        # would never accumulate a sample. $20 is the whole bankroll — a real
+        # stop, not a throttle.
+        "daily_loss_limit_usdc": 20.0,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -168,6 +200,18 @@ class ResolutionCarryParams:
     # score, exact scorelines, tweet counts. Requiring "win" as a whole word
     # cuts those and leaves exactly one shape.
     require_winner_market: bool = _doc(True, "Only trade moneyline markets: Yes/No outcomes whose question contains 'win'.")
+
+    # Buy the other side of every market this screen picks. The screen and the
+    # ranking still run on the favourite, so both arms select exactly the same
+    # markets and differ only in the token taken — a controlled mirror rather
+    # than a second strategy.
+    #
+    # Note this inverts the thesis, and that is the point of testing it. The
+    # control asserts the price is *correct* and collects a fee for waiting.
+    # This asserts the price is *wrong* at the tail — a forecasting claim, of
+    # the kind that sank copy_trade. It is here because the control's own
+    # first 33 settlements suggested it, not because the argument is good.
+    buy_underdog: bool = _doc(False, "Buy the opposite side of each selected market at its own ask.")
     # 15, from the archive: across 4,765 transits through this band on tokens
     # that finished at/above 0.99, 99% lasted a single one-minute sample. The
     # band is open for about a minute, so a 60s poll lands inside it roughly
@@ -207,6 +251,18 @@ class ResolutionCarryParams:
     # ── Paper ────────────────────────────────────────────────────────────────
     paper_starting_balance: float = _doc(20.0, "Virtual balance — seeded into the DB on FIRST run only.")
     paper_fee_bps: float = _doc(0.0, "Modeled paper fee, basis points.")
+
+    def __post_init__(self) -> None:
+        """Apply this name's variant overrides, if it has any."""
+        known = {f.name for f in fields(self)}
+        for knob, value in VARIANTS.get(self.name, {}).items():
+            # Same fail-fast contract as the profile loader: a typo'd knob is
+            # a crash, never a silent no-op that quietly runs the control.
+            if knob not in known:
+                raise ValueError(
+                    f"VARIANTS['{self.name}'] sets unknown knob '{knob}'."
+                )
+            object.__setattr__(self, knob, value)
 
     def validate(self) -> None:
         """Boot-time sanity checks — called by the profile loader."""

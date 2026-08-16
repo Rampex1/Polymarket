@@ -284,28 +284,43 @@ class ResolutionCarryAlgorithm(Algorithm):
             else f"resolves in {hours:.1f}h" if cand.days < 1
             else f"resolves in {cand.days:.1f}d"
         )
+        # The A/B's only divergence, and it happens after every gate and the
+        # ranking have run on the favourite — so both arms buy into exactly
+        # the same markets at the same moment, on opposite sides.
+        if p.buy_underdog:
+            asset_id, outcome, price = (
+                cand.under_asset_id, cand.under_outcome, cand.under_ask,
+            )
+            tag = "UNDERDOG"
+        else:
+            asset_id, outcome, price = cand.asset_id, cand.outcome, cand.ask
+            tag = "CARRY"
+
         logger.info(
-            "[%s] CARRY: ask %.3f, %s, ~%.0f%%/yr | %s",
-            p.name, cand.ask, horizon, cand.annualized * 100,
-            cand.question[:55],
+            "[%s] %s: %s @ %.3f, %s | %s",
+            p.name, tag, outcome or "—", price, horizon, cand.question[:52],
         )
         return OpenIntent(
             market_id=cand.market_id,
-            asset_id=cand.asset_id,
+            asset_id=asset_id,
             usdc_amount=p.bet_size_usdc,
-            signal_price=cand.ask,
+            signal_price=price,
             question=cand.question,
-            outcome=cand.outcome,
-            signal_id=f"carry:{cand.asset_id}:{self._poll_count}",
+            outcome=outcome,
+            signal_id=f"carry:{asset_id}:{self._poll_count}",
             reason=(
-                f"ask {cand.ask:.3f} ({(1 - cand.ask) / cand.ask:+.1%} if right), "
-                f"{horizon} → ~{cand.annualized:.0%}/yr"
+                f"{'underdog' if p.buy_underdog else 'ask'} {price:.3f} "
+                f"({(1 - price) / price:+.1%} if right), {horizon}"
             ),
             # Raw observables only — the derived score belongs in the
             # analysis, not in the training row.
             features={
+                # Always the favourite's book, on both arms: it is the shared
+                # observable the two sides are judged against.
                 "ask": cand.ask,
                 "bid": cand.bid,
+                "side": "underdog" if p.buy_underdog else "favourite",
+                "entry_price": price,
                 "days_to_resolution": cand.days,
                 "annualized": cand.annualized,
                 "liquidity_clob": cand.liquidity,

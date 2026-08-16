@@ -226,6 +226,49 @@ So this strategy trades the **transit** — the ~1 minute a game spends crossing
 0.955→0.985 as it becomes decided. Expect a quiet funnel punctuated by bursts
 as games finish, not a steady stream.
 
+## The underdog A/B
+
+`config/experimental.toml` runs two blocks over the same screen, differing
+only in `buy_underdog` via `VARIANTS`:
+
+| name | side | entry | must be right |
+|---|---|---|---|
+| `resolution_carry_paper` | favourite | ~0.97 | 97% |
+| `resolution_carry_underdog_paper` | underdog | ~0.04–0.06 | 4–6% |
+
+Every gate and the ranking run on the favourite regardless of side, so the
+arms select the same markets and differ only in the token bought. Two knobs
+move with the side because they are relative, not because they are tuned:
+`max_slippage` (0.005 of a 0.04 entry is a fifth of a cent — 0.12 restores
+the control's absolute tolerance) and `daily_loss_limit_usdc` (at a ~9% hit
+rate, $5 suspends the arm within an hour every day).
+
+**Why it is being tested.** Over the control's first 33 settlements it went
+30–3 for −$2.15 — a 90.9% win rate against a 97.2% break-even. The mirror of
+those exact trades would have made **+$40.05**, on a 9.1% hit rate against a
+4.1% break-even.
+
+**Why that is not a green light.** Both results rest on the same three
+events. The 95% interval on 9.1% is [3.1%, 23.6%], which contains break-even,
+and a perfectly fair market throws 3+ winners 15% of the time. At a 4¢ entry
+the estimate is ~25× levered, so a few points of error is the difference
+between +2,000% and −25%. It also runs against the favourite-longshot bias,
+where longshots are usually *over*priced. ~200 settlements separate the two.
+
+Note the underdog's ask is `1 - favourite bid`, never `1 - favourite ask`:
+the spread is paid on whichever side is taken. A 0.96/0.94 book makes the
+underdog 0.06, not 0.04 — half the theoretical edge gone before anything
+happens.
+
+Two caveats on reading the result. The arms poll independently ~8s apart, so
+in production they do **not** trade an identical market set — the band is a
+transit and one arm can see a market the other misses. And this arm inverts
+the thesis: the control asserts the price is correct and collects a fee for
+waiting, while this asserts the price is wrong at the tail, which is a
+forecasting claim of the kind that sank copy_trade.
+
+Split by the `side` field in each `signals` row.
+
 ## How it loses money
 
 In rough order of expected damage:

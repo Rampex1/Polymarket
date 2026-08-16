@@ -399,6 +399,13 @@ Non-obvious behavior, all deliberate:
   well as to open positions. `max_positions_per_category` is deliberately
   inert (20): every sports market's primary Gamma label is `sports`, so a
   real value there caps total positions rather than capping a theme.
+- **An A/B runs on which side to take.** `resolution_carry_paper` buys the
+  favourite (~0.97, needs 97%); `resolution_carry_underdog_paper` buys the
+  same markets' underdog (~0.04–0.06, needs 4–6%), set via `VARIANTS`. Every
+  gate and the ranking run on the favourite either way, so the arms differ
+  only in the token bought. `max_slippage` and `daily_loss_limit_usdc` move
+  with the side because both are relative to entry price, not because they
+  are being tuned. Split by the `side` field in `signals`.
 - **Being at size is the dedupe.** A held market yields nothing on later
   scans, so there is no `SeenRing`.
 - **No stop-loss.** A stop realises exactly the losses the strategy exists to
