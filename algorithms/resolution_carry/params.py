@@ -42,6 +42,20 @@ VARIANTS: dict[str, dict] = {
         # would never accumulate a sample. $20 is the whole bankroll — a real
         # stop, not a throttle.
         "daily_loss_limit_usdc": 20.0,
+        # Pinned to the original band. The control's floor moved to 0.980 on
+        # the measurement above, which would silently move this arm from
+        # buying 0.04-0.06 underdogs to buying 0.01-0.02 ones — a different
+        # experiment from the one that was started, and a worse one. Holding
+        # the band here keeps the arms comparable to their own history.
+        #
+        # Note the measurement has largely answered this arm's question
+        # already: across n=1529 in the old band the favourite failed 3.01% of
+        # the time against a 3.15% break-even, so the underdog mirror is a
+        # ~break-even-to-negative trade, not the 9.1% hit rate the first 33
+        # settlements suggested. Retire it once the sample agrees.
+        "min_ask": 0.955,
+        "max_ask": 0.985,
+        "max_ask_spread": 0.05,
     },
 }
 
@@ -52,14 +66,30 @@ class ResolutionCarryParams:
     mode: Mode = Mode.PAPER          # fail-safe; the profile block sets it
 
     # ── Price band ───────────────────────────────────────────────────────────
-    # 0.955, not 0.95, and the extra half-cent is arithmetic rather than
-    # taste: the slippage gate admits a fill up to max_slippage *below* the
-    # signal, so a 0.950 signal could fill at 0.9453 — and one already did
-    # (KÍ vs Lech Poznań, filled 0.949). The floor is meant to be a floor on
-    # what we actually own, so it has to sit at 0.95 / (1 - max_slippage) for
-    # the worst admissible fill to still land above 0.95.
-    min_ask: float = _doc(0.955, "Below this we are forecasting, not carrying. Set so the worst fill the slippage gate allows still lands above 0.95.")
-    max_ask: float = _doc(0.985, "Above this the residual cannot cover the tail.")
+    # Measured, not assumed. 17,557 closed moneylines (every one in a 25-day
+    # window, so no selection on who traded them), one entry per market at its
+    # first in-play touch of each ask band, net of a 1c spread and the
+    # 5%*p*(1-p) taker fee:
+    #
+    #   ask band       n    failures   rate    break-even    net ROI
+    #   0.950-0.960   623      35      5.62%     4.73%       -1.17%
+    #   0.960-0.970   559      20      3.58%     3.69%       -0.06%
+    #   0.970-0.980   551      16      2.90%     2.63%       -0.42%
+    #   0.980-0.990   627       4      0.64%     1.54%       +0.84%
+    #   0.990-0.995   483       4      0.83%     0.80%       -0.07%
+    #
+    # The old band (0.955-0.985) priced to -0.01% over n=1529 — a coin flip
+    # that pays its own costs, which is exactly the live 30-3 / -$2.15 record.
+    # The edge is entirely above 0.975: at 0.975-0.990 the failure rate is
+    # 0.82% against a 1.78% break-even, and the 95% upper bound (1.68%) sits
+    # below break-even, so it is established rather than merely favourable.
+    #
+    # The floor is 0.980 rather than 0.975 for the same arithmetic as before:
+    # the slippage gate admits a fill up to max_slippage *below* the signal,
+    # and 0.980 * (1 - 0.005) = 0.975 keeps the worst admissible fill inside
+    # the proven band. Below 0.975 the trade is measurably negative.
+    min_ask: float = _doc(0.980, "Below this the failure rate exceeds the residual. Set so the worst fill the slippage gate allows still lands at/above 0.975.")
+    max_ask: float = _doc(0.990, "Above this the residual cannot cover the tail (0.990-0.995 measured -0.07%).")
 
     # ── Time value ───────────────────────────────────────────────────────────
     # Time is the binding constraint, not price: 2% is excellent over 30 days
@@ -116,7 +146,15 @@ class ResolutionCarryParams:
     # for a trade returning 2.1c, which is negative expectancy if the mid is
     # nearer the truth. Half of this cap (2.5c) against a 1.5-4.5c return is
     # already the outer edge of defensible.
-    max_ask_spread: float = _doc(0.05, "bestAsk - bestBid ceiling. Not a cost (we hold to resolution) but a limit on how far above the mid we will pay.")
+    # Now a measured constraint rather than a judgement. Re-running the
+    # 0.975-0.990 band against wider assumed spreads: +1.14% at 0.005, +0.89%
+    # at 0.01, +0.40% at 0.02, and -0.07% at 0.03. The whole edge is one to
+    # two cents wide, so a 5c cap admitted precisely the books that erase it.
+    # In-play moneylines at 0.98+ with real depth quote a 0.005 median spread
+    # (0.009 at p75), so 0.015 rejects the bad books without emptying the
+    # funnel — it is roughly the `spread <= 1 - ask` relative gate this
+    # comment used to recommend, expressed as the constant the band allows.
+    max_ask_spread: float = _doc(0.015, "bestAsk - bestBid ceiling. The edge is 1-2c wide, so a wide book erases it: measured +0.89% at a 1c spread, -0.07% at 3c.")
 
     # ── Diversification (the load-bearing risk control) ──────────────────────
     # Twenty positions at 0.98 that are all legs of one election are one

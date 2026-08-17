@@ -39,15 +39,15 @@ def _iso(ts: float) -> str:
 
 def market(**overrides) -> dict:
     """A Gamma row that clears every gate: a soccer match already underway,
-    0.97 ask, 12 hours from settling."""
+    0.985 ask on a 0.007 book, 12 hours from settling."""
     row = {
         "gameStartTime": _iso(NOW - 3600),
         "conditionId": "0xm1",
         "clobTokenIds": '["tok_yes", "tok_no"]',
         "outcomes": '["Yes", "No"]',
         "question": "Will Team A win?",
-        "bestAsk": "0.97",
-        "bestBid": "0.96",
+        "bestAsk": "0.985",
+        "bestBid": "0.978",
         "liquidityClob": "25000",
         "events": [{"id": "ev1"}],
     }
@@ -73,13 +73,13 @@ def test_clean_row_becomes_a_candidate():
     assert isinstance(cand, screen.Candidate)
     assert (cand.market_id, cand.asset_id, cand.outcome) == ("0xm1", "tok_yes", "Yes")
     assert cand.event_id == "ev1"
-    # (1-0.97)/0.97, annualised against the 1-day floor.
-    assert cand.annualized == pytest.approx((0.03 / 0.97) * 365, rel=1e-6)
+    # (1-0.985)/0.985, annualised against the 1-day floor.
+    assert cand.annualized == pytest.approx((0.015 / 0.985) * 365, rel=1e-6)
 
 
 @pytest.mark.parametrize("row, days, reason", [
-    (market(bestAsk="0.99"),  0.5, "out of band"),  # residual too thin
-    (market(bestAsk="0.94"),  0.5, "out of band"),  # forecasting, not carrying
+    (market(bestAsk="0.995"), 0.5, "out of band"),  # residual too thin
+    (market(bestAsk="0.970"), 0.5, "out of band"),  # measured negative below 0.975
     (market(bestBid="0.90"),  0.5, "spread"),       # no real price
     (market(liquidityClob="100"), 0.5, "illiquid"),
     (market(clobTokenIds="[]"),   0.5, "no token id"),
@@ -95,13 +95,13 @@ def test_unknown_end_date_fails_closed():
 
 
 def test_a_market_minutes_from_settling_is_tradeable():
-    """The whole thesis: a game decided on the pitch, sitting at 0.97 while
+    """The whole thesis: a game decided on the pitch, sitting at 0.985 while
     it waits to settle. A floor in hours would exclude exactly this."""
     cand = screen.evaluate(market(), end_ts(10 / 1440), NOW, _params())
     assert isinstance(cand, screen.Candidate)
     # Annualising floors the horizon at a day, so a 10-minute wait is not
     # reported as a four-figure return.
-    assert cand.annualized == pytest.approx((0.03 / 0.97) * 365, rel=1e-6)
+    assert cand.annualized == pytest.approx((0.015 / 0.985) * 365, rel=1e-6)
 
 
 def test_the_annualized_hurdle_still_bites_on_a_wider_window():
@@ -109,7 +109,7 @@ def test_the_annualized_hurdle_still_bites_on_a_wider_window():
     reports ~560%/yr — but it is the binding gate as soon as the window
     widens, so keep it covered."""
     p = _params(max_days_to_resolution=45.0)
-    assert screen.evaluate(market(bestAsk="0.98", bestBid="0.97"), end_ts(40), NOW, p) \
+    assert screen.evaluate(market(bestAsk="0.985", bestBid="0.978"), end_ts(40), NOW, p) \
         == "not worth the wait"
 
 
@@ -140,7 +140,7 @@ def test_unlabelled_fails_closed_under_require_sports():
 def _cand(market_id, event, category, annualized) -> screen.Candidate:
     return screen.Candidate(
         market_id=market_id, asset_id=f"tok_{market_id}", question="q",
-        outcome="Yes", ask=0.97, bid=0.96, liquidity=25_000.0,
+        outcome="Yes", ask=0.985, bid=0.978, liquidity=25_000.0,
         end_ts=end_ts(0.5), days=0.5, annualized=annualized,
         event_id=event, category=category,
     )
@@ -215,7 +215,7 @@ def test_poll_emits_one_flat_stake_open_intent(ledger):
     assert isinstance(intent, OpenIntent)
     assert intent.asset_id == "tok_yes"
     assert intent.usdc_amount == 1.0
-    assert intent.signal_price == 0.97          # the ask, not the mid
+    assert intent.signal_price == 0.985         # the ask, not the mid
     assert intent.features["market_category"] == "sports"
     assert intent.features["event_id"] == "ev1"
 
@@ -362,19 +362,23 @@ def test_esports_is_excluded():
     assert screen.category_ok("sports,games,soccer,efl championship", p)
 
 
-def test_the_worst_admissible_fill_stays_above_95c():
-    """min_ask exists to floor what we own, not just what we signalled."""
+def test_the_worst_admissible_fill_stays_inside_the_proven_band():
+    """min_ask floors what we own, not just what we signalled. Below 0.975
+    the measured failure rate exceeds the residual, so the worst fill the
+    slippage gate admits has to land at or above it."""
     p = _params()
-    assert p.min_ask * (1 - p.max_slippage) > 0.95
+    assert p.min_ask * (1 - p.max_slippage) >= 0.975
 
 
-def test_spread_cap_admits_in_play_books_but_not_absent_ones():
-    """In-play books run wider than pregame; a book quoted 0.97/0.79 is not
-    a wide price, it is two lonely orders and no price at all."""
+def test_the_spread_cap_is_sized_to_the_edge_not_to_the_book():
+    """The edge in this band is one to two cents wide, so a book wider than
+    that erases it however normal the width looks: measured +0.89% at a 1c
+    spread and -0.07% at 3c. In-play books at 0.98+ with real depth quote
+    0.005 median, so this admits them and rejects the rest."""
     p = _params()
-    assert isinstance(screen.evaluate(_game(-1, bestAsk="0.970", bestBid="0.925"),
+    assert isinstance(screen.evaluate(_game(-1, bestAsk="0.985", bestBid="0.978"),
                                       end_ts(0.2), NOW, p), screen.Candidate)
-    assert screen.evaluate(_game(-1, bestAsk="0.970", bestBid="0.790"),
+    assert screen.evaluate(_game(-1, bestAsk="0.985", bestBid="0.960"),
                            end_ts(0.2), NOW, p) == "spread"
 
 
@@ -507,11 +511,11 @@ def test_scan_is_lazy(ledger):
 # ── The underdog arm ─────────────────────────────────────────────────────────
 
 def test_the_underdog_ask_is_one_minus_the_bid_not_one_minus_the_ask():
-    """The spread is paid on whichever side you take. At a 0.97/0.96 book the
-    underdog costs 0.04, not 0.03 — a third of the theoretical edge."""
+    """The spread is paid on whichever side you take. At a 0.985/0.978 book the
+    underdog costs 0.022, not 0.015 — a third of the theoretical edge."""
     cand = screen.evaluate(_game(-1), end_ts(0.2), NOW, _params())
-    assert cand.ask == 0.97 and cand.bid == 0.96
-    assert cand.under_ask == 0.04
+    assert cand.ask == 0.985 and cand.bid == 0.978
+    assert cand.under_ask == pytest.approx(0.022)
     assert cand.under_asset_id == "tok_no"
     assert cand.under_outcome == "No"
 
@@ -521,13 +525,13 @@ def test_underdog_arm_buys_the_other_token(ledger):
                    question="Will Team A win on 2026-08-16?")]
     control = list(_algo(ledger, rows).poll())
     assert control[0].asset_id == "tok_yes"
-    assert control[0].signal_price == 0.97
+    assert control[0].signal_price == 0.985
     assert control[0].features["side"] == "favourite"
 
     treatment = list(_algo(ledger, rows, buy_underdog=True).poll())
     assert treatment[0].asset_id == "tok_no"
     assert treatment[0].outcome == "No"
-    assert treatment[0].signal_price == 0.04
+    assert treatment[0].signal_price == pytest.approx(0.022)
     assert treatment[0].features["side"] == "underdog"
 
 
@@ -535,10 +539,10 @@ def test_both_arms_select_the_identical_markets(ledger):
     """Every gate and the ranking run on the favourite regardless of side, so
     the A/B differs only in the token bought."""
     rows = [
-        market(conditionId="0xa", _end_ts=end_ts(0.2), bestAsk="0.96", bestBid="0.95",
+        market(conditionId="0xa", _end_ts=end_ts(0.2), bestAsk="0.982", bestBid="0.975",
                gameStartTime=_iso(NOW - 3600), question="Will A win on 2026-08-16?",
                events=[{"id": "e1"}], clobTokenIds='["a_yes", "a_no"]'),
-        market(conditionId="0xb", _end_ts=end_ts(0.2), bestAsk="0.98", bestBid="0.97",
+        market(conditionId="0xb", _end_ts=end_ts(0.2), bestAsk="0.988", bestBid="0.981",
                gameStartTime=_iso(NOW - 3600), question="Will B win on 2026-08-16?",
                events=[{"id": "e2"}], clobTokenIds='["b_yes", "b_no"]'),
     ]
