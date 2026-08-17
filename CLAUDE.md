@@ -420,6 +420,14 @@ Non-obvious behavior, all deliberate:
   only in the token bought. `max_slippage` and `daily_loss_limit_usdc` move
   with the side because both are relative to entry price, not because they
   are being tuned. Split by the `side` field in `signals`.
+- **One Gamma sweep is shared by every arm** (`resolution_carry/scan.py`).
+  The arms trade the same universe, so each paging it separately cost 63
+  fetches and 23.7s per 15s cycle — more scanning than the poll interval
+  allows. Now 21 and 6.3s. The cache holds only rows inside the *union* of
+  every arm's band (derived from `VARIANTS`, so a new arm widens it) plus a
+  `market_id → bestAsk` map for drawdown tracking; each arm still runs its own
+  `screen.evaluate`, because the arms do not screen alike. It is a process-wide
+  singleton — call `scan.SHARED.reset()` between tests.
 - **Being at size is the dedupe.** A held market yields nothing on later
   scans, so there is no `SeenRing`.
 - **No stop-loss.** A stop realises exactly the losses the strategy exists to

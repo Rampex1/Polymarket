@@ -67,6 +67,31 @@ fat — nested events, tags, outcomes — and holding the whole window at once
 peaked at 34.5 MB per poll against 5.7 MB page-at-a-time, every 15 seconds, on
 a 498 MB box that also runs the archiver and the Discord bot.
 
+**The sweep is shared by every arm** (`scan.py`). The arms trade the same
+universe by construction — they differ in which side they take and how they
+enter, never in what exists to be bought — so scanning it once per arm was
+three times the HTTP for identical rows. Measured over one cycle of three
+arms: **63 page fetches and 23.7s before, 21 and 6.3s after.** The old figure
+is the important one: 23.7s of scanning per 15-second poll interval means the
+box was never idle, which is the likeliest explanation for it wedging its SSH
+daemon three times.
+
+What is shared is the HTTP, not the verdict. The arms do not screen alike —
+the underdog arm is pinned to the original 0.955–0.985 band while the control
+moved to 0.980–0.990 — so each still runs its own `screen.evaluate` and gets
+its own funnel. The cache keeps two things:
+
+- `rows`, but only for the **widest band any arm trades**, computed from
+  `params.py` rather than declared so a new arm widens it automatically. That
+  gate alone rejects ~99% of the universe, so the cache holds ~19 rows, not
+  2,100 — peak memory is unchanged at 6.0 MB.
+- `asks`, a `market_id → bestAsk` map for **everything** scanned. A held
+  position has usually left the band by the time its drawdown is worth
+  watching, so low-water tracking reads this rather than the rows.
+
+Out-of-band rows are counted into each arm's funnel before being dropped, so
+the log line still adds up to the whole universe.
+
 Two properties of Gamma to know:
 
 - A page is capped at 100 rows regardless of `limit`.

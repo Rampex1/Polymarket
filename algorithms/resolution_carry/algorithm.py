@@ -45,7 +45,6 @@ settled with data rather than intuition.
 import logging
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 
 from bot.domain.algorithm import Algorithm
@@ -55,18 +54,10 @@ from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
 from bot.storage import orders
 
-from . import screen
+from . import scan, screen
 from .params import ResolutionCarryParams
 
 logger = logging.getLogger(__name__)
-
-# Gamma caps a /markets page at 100 rows regardless of `limit`, and 422s on
-# any offset at or past 2100 — verified against both closed=true and
-# closed=false, so it is a platform ceiling, not the end of our window. Asking
-# for more is a warning in the log every single poll, and reads as a failed
-# fetch rather than as "there is no more".
-GAMMA_PAGE = 100
-GAMMA_MAX_OFFSET = 2100
 
 
 class ResolutionCarryAlgorithm(Algorithm):
@@ -135,40 +126,41 @@ class ResolutionCarryAlgorithm(Algorithm):
 
         held_ids = {pos.market_id for pos in held} | working
         now = time.time()
-        funnel: Counter = Counter()
         candidates = []
-        scanned = 0
 
-        # Screened a page at a time, so only ~100 Gamma rows are live at once
-        # instead of all 2,100. Those rows are fat — nested events, tags,
-        # outcomes — and this runs every 15s on a 498MB box.
-        for page in self._scan_pages():
-            scanned += len(page)
-            self._note_lows(page, held_ids)
-            for row in page:
-                verdict = screen.evaluate(
-                    row, self._market_data.market_end_ts(row), now, p,
-                )
-                if isinstance(verdict, str):
-                    funnel[verdict] += 1
-                    continue
-                # Holding the market is the primary dedupe: a position already
-                # at size yields nothing on every later scan.
-                if verdict.market_id in held_ids:
-                    funnel["already held"] += 1
-                    continue
-                # ...but a signal the runner *rejected* leaves no position, so
-                # it would come back on every poll. Dispatch alerts before it
-                # gates, so a parked market failing the slippage check would
-                # post to Discord every cycle for as long as it sits in band.
-                if self._signalled.get(verdict.market_id, 0.0) > now:
-                    funnel["cooling off"] += 1
-                    continue
-                labels = self._market_data.market_labels(row)
-                if not screen.category_ok(labels, p):
-                    funnel["category"] += 1
-                    continue
-                candidates.append(screen.with_category(verdict, labels))
+        # One sweep per interval, shared with the other arms — they trade the
+        # same universe, so scanning it once per arm was three times the HTTP
+        # for identical rows. `sweep.rows` is already filtered to the widest
+        # band any arm trades; every other gate still runs here, per arm.
+        sweep = scan.SHARED.get(self._market_data, ttl=p.poll_interval_seconds)
+        scanned = sweep.scanned
+        funnel: Counter = Counter(sweep.funnel)
+        self._note_lows(sweep.asks, held_ids)
+
+        for row in sweep.rows:
+            verdict = screen.evaluate(
+                row, self._market_data.market_end_ts(row), now, p,
+            )
+            if isinstance(verdict, str):
+                funnel[verdict] += 1
+                continue
+            # Holding the market is the primary dedupe: a position already
+            # at size yields nothing on every later scan.
+            if verdict.market_id in held_ids:
+                funnel["already held"] += 1
+                continue
+            # ...but a signal the runner *rejected* leaves no position, so
+            # it would come back on every poll. Dispatch alerts before it
+            # gates, so a parked market failing the slippage check would
+            # post to Discord every cycle for as long as it sits in band.
+            if self._signalled.get(verdict.market_id, 0.0) > now:
+                funnel["cooling off"] += 1
+                continue
+            labels = self._market_data.market_labels(row)
+            if not screen.category_ok(labels, p):
+                funnel["category"] += 1
+                continue
+            candidates.append(screen.with_category(verdict, labels))
 
         logger.info(
             "[%s] Scanned %d markets → %d in band. Rejections: %s",
@@ -197,51 +189,6 @@ class ResolutionCarryAlgorithm(Algorithm):
         self._signalled[market_id] = now + self.params.resignal_cooldown_seconds
 
     # ── Discovery ────────────────────────────────────────────────────────────
-
-    def _scan_pages(self) -> Iterator[list[dict]]:
-        """Open markets resolving inside our window, most-traded first, one
-        Gamma page at a time.
-
-        A generator rather than a list on purpose. Returning all 2,100 rows
-        held every market dict from the whole window in memory at once, every
-        15 seconds, on a 498MB box already running two other Python
-        processes. Yielding pages keeps ~100 rows live and lets the rest be
-        collected as the caller finishes with them.
-
-        The band is thin as a stock and large as a flow — only ~29 of 2,100
-        open markets sit in it at any instant, but a game that ends
-        decisively passes through 0.93 → 1.00 in its closing minutes. So this
-        polls markets approaching resolution rather than screening ones
-        already parked at 0.98.
-        """
-        now = datetime.now(timezone.utc)
-        # Reach back by the grace window, or the screen's post-end gate can
-        # never fire: Gamma would filter those markets out before it sees
-        # them, and the knob would look enabled while doing nothing.
-        end_min = (
-            now - timedelta(hours=self.params.max_hours_past_end)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
-        end_max = (
-            now + timedelta(days=self.params.max_days_to_resolution)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        for page in range(max(1, self.params.discovery_pages)):
-            offset = page * GAMMA_PAGE
-            if offset >= GAMMA_MAX_OFFSET:
-                return
-            batch = self._market_data.top_markets(
-                closed=False, limit=GAMMA_PAGE, offset=offset,
-                # Without the floor, a fifth of the pages are markets whose
-                # end date passed months ago and were never closed (measured:
-                # 106 of 500). They all fail the time gate anyway; the cost is
-                # that they crowd out real candidates from the scan.
-                end_date_min=end_min, end_date_max=end_max,
-            )
-            yield batch
-            # A short page is the end of the list; so is the empty list Gamma
-            # returns past its offset ceiling.
-            if len(batch) < GAMMA_PAGE:
-                return
 
     # ── Diversification bookkeeping ──────────────────────────────────────────
 
@@ -348,23 +295,24 @@ class ResolutionCarryAlgorithm(Algorithm):
             self.params.name, self._poll_count,
         )
 
-    def _note_lows(self, rows: list[dict], held_ids: set[str]) -> None:
+    def _note_lows(self, asks: dict[str, float], held_ids: set[str]) -> None:
         """Log each new low on a held position.
 
         No stop-loss in v1 by design, so this exists purely to answer whether
         one is justified: if positions that fall below ~0.5 essentially never
         recover, a catastrophic stop becomes a data-backed decision.
 
+        Reads the shared scan's price map rather than its rows: a held
+        position has usually left the band by the time it is worth watching,
+        so it is not among the rows the prefilter keeps — but its price is.
+
         ponytail: in memory and only for markets the scan happens to return —
         a position that drops out of the volume window, or one held while we
         are at max positions, stops being sampled. Persist to `signals` if
         the drawdown question ever needs to be answered precisely.
         """
-        for row in rows:
-            market_id = str(row.get("conditionId") or "")
-            if market_id not in held_ids:
-                continue
-            ask = screen.to_float(row.get("bestAsk"))
+        for market_id in held_ids:
+            ask = asks.get(market_id)
             if ask is None or ask >= self._low_water.get(market_id, 1.01):
                 continue
             self._low_water[market_id] = ask

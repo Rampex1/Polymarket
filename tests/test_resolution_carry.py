@@ -14,8 +14,17 @@ import pytest
 from bot.domain.intents import OpenIntent
 from bot.domain.mode import Mode
 
-from algorithms.resolution_carry import screen
+from algorithms.resolution_carry import scan, screen
 from algorithms.resolution_carry.params import ResolutionCarryParams
+
+
+@pytest.fixture(autouse=True)
+def _fresh_shared_scan():
+    """One sweep is cached per process and shared by every arm, so it has to
+    be cleared between tests or the first test's markets leak into the rest."""
+    scan.SHARED.reset()
+    yield
+    scan.SHARED.reset()
 
 
 NOW = time.time()
@@ -493,22 +502,59 @@ def test_every_page_is_screened_and_a_short_page_ends_the_scan(ledger):
     assert [i.market_id for i in intents] == ["0xwin"]
 
 
-def test_scan_is_lazy(ledger):
-    """A generator, so a page is fetched only as the screen reaches it —
-    that is what keeps one page in memory instead of all 2,100 rows."""
+def test_the_sweep_is_shared_between_arms(ledger):
+    """Three arms polling the same universe should cost one scan, not three."""
     from algorithms.resolution_carry import ResolutionCarryAlgorithm
 
-    gw = PagedGateway([_full_page("a"), [market(conditionId="0xz")]])
-    algo = ResolutionCarryAlgorithm(params=_params(discovery_pages=21), market_data=gw)
+    winner = market(conditionId="0xwin", _end_ts=end_ts(0.2),
+                    question="Will Team A win on 2026-08-14?")
+    gw = PagedGateway([[winner]])
+    for name in ("resolution_carry_paper", "resolution_carry_underdog_paper",
+                 "resolution_carry_maker_paper"):
+        a = ResolutionCarryAlgorithm(
+            params=_params(name=name, discovery_pages=21), market_data=gw)
+        a.setup(ledger)
+        list(a.poll())
+    assert gw.offsets == [0]                # one sweep served all three
+
+
+def test_the_sweep_refreshes_once_the_ttl_lapses(ledger):
+    from algorithms.resolution_carry import ResolutionCarryAlgorithm
+
+    gw = PagedGateway([[market(conditionId="0xz")]])
+    algo = ResolutionCarryAlgorithm(
+        params=_params(discovery_pages=21, poll_interval_seconds=15), market_data=gw)
     algo.setup(ledger)
+    list(algo.poll())
+    assert gw.offsets == [0]
+    scan.SHARED.reset()                     # stands in for the TTL lapsing
+    list(algo.poll())
+    assert gw.offsets == [0, 0]
 
-    pages = algo._scan_pages()
-    assert gw.offsets == []                 # nothing fetched yet
-    next(pages)
-    assert gw.offsets == [0]                # exactly one page, on demand
+
+def test_the_prefilter_keeps_every_arms_band():
+    """Derived, not declared: an arm with a wider band must widen the union,
+    or it is silently starved of the markets it exists to trade."""
+    lo, hi = scan.union_band()
+    for p in scan.arm_params():
+        assert lo <= p.min_ask and p.max_ask <= hi, p.name
 
 
-# ── The underdog arm ─────────────────────────────────────────────────────────
+def test_out_of_band_rows_are_counted_but_not_carried(ledger):
+    """The prefilter is what keeps the cache small; the funnel still has to
+    add up to the whole universe."""
+    lo, hi = scan.union_band()
+    rows = [market(conditionId="0xlow", bestAsk="0.10"),
+            market(conditionId="0xhigh", bestAsk="0.999"),
+            market(conditionId="0xin", bestAsk=str(round((lo + hi) / 2, 3)))]
+    sweep = scan.SHARED.get(PagedGateway([rows]), ttl=15)
+    assert sweep.scanned == 3
+    assert [r["conditionId"] for r in sweep.rows] == ["0xin"]
+    assert sweep.funnel["out of band"] == 2
+    # Prices are kept for everything, so a held position that has left the
+    # band can still be watched.
+    assert set(sweep.asks) == {"0xlow", "0xhigh", "0xin"}
+
 
 def test_the_underdog_ask_is_one_minus_the_bid_not_one_minus_the_ask():
     """The spread is paid on whichever side you take. At a 0.985/0.978 book the
