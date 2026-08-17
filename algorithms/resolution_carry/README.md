@@ -308,6 +308,59 @@ forecasting claim of the kind that sank copy_trade.
 
 Split by the `side` field in each `signals` row.
 
+## The execution A/B: maker vs taker
+
+`order_type = "limit"` does **not** make this strategy a maker. A GTC posted at
+the ask crosses the resting ask and takes — it has always paid the taker fee.
+Only `entry_style` changes that, and it is set per-name in `VARIANTS`:
+
+| name | entry | pays |
+|---|---|---|
+| `resolution_carry_paper` | crosses at the ask | `theta*p*(1-p)` fee + half the spread |
+| `resolution_carry_maker_paper` | rests at the bid, `post_only` | nothing |
+
+At an 0.985 entry that difference is a 0.08% fee plus a 0.25% half-spread —
+about a third of a point, against a control that measures +0.84%. So if the two
+arms filled equally often, the maker arm would simply win.
+
+They will not fill equally often, and **that gap is the entire experiment.** A
+maker trades only when somebody sells into its bid, which selects for the
+moments the price is falling — adverse selection that no amount of archived
+data can price, because the archive records what the market did, not what our
+unfilled order would have done. This is the execution unknown the validation
+section has always named; running it is the only way to close it.
+
+Mechanically:
+
+- The price is the best bid, improved by one tick when there is room to do so
+  without crossing. `post_only` is what actually guarantees maker status — if
+  the book moves between the quote and the post, the venue rejects the order
+  instead of silently filling it as a taker.
+- A resting order is **not a position**. It lives in `open_orders` until the
+  worker's per-poll `reconcile_open_orders` books it, or cancels it at
+  `maker_ttl_seconds` (300s — the band is open about a minute, so anything
+  still resting after five is quoting a market that has moved on).
+- It still consumes a slot and blocks its own market, or a 15s poll would
+  stack a fresh order on the same market every cycle while the per-event cap
+  counted none of them.
+- **A non-fill is not a failure.** The taker path suspends a market until
+  restart when an order does not fill; for a maker that is the normal case, and
+  suspending would end the strategy on its first unfilled order.
+
+In paper no order is placed: the row records where we *would* be resting, and
+reconcile fills it only once the market actually trades at or through that
+price. That ignores queue position, so paper's fill rate is an optimistic
+bound — but it is measured rather than assumed, which is the point.
+
+Read the result off `signals.skip_reason`: `maker: resting` when posted,
+`maker: unfilled` when it expired, and an executed row is a fill. Fill rate is
+`fills / (fills + unfilled)`, and the arm is worth keeping only if
+
+    fill_rate * (control_edge + 0.33%) > control_edge
+
+which at +0.84% means it needs to fill roughly **72%** of the time to break even
+against simply crossing the spread.
+
 ## How it loses money
 
 In rough order of expected damage:

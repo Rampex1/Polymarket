@@ -53,6 +53,7 @@ from bot.domain.intents import Intent, OpenIntent, SettleIntent
 from bot.domain.mode import Mode
 from bot.execution import settlement
 from bot.polymarket import DEFAULT_MARKET_DATA, MarketDataGateway
+from bot.storage import orders
 
 from . import screen
 from .params import ResolutionCarryParams
@@ -121,13 +122,18 @@ class ResolutionCarryAlgorithm(Algorithm):
             yield from self._settle_sweep()
 
         held = self._ledger.all_open(paper=self._paper)
-        slots = p.max_concurrent_positions - len(held)
+        # A maker order that is resting is committed capital holding a slot,
+        # but it is not a position — so without counting it here the scan
+        # would re-emit the same market every 15s and stack orders on it,
+        # while the per-event cap counted none of them.
+        working = orders.held_market_ids(p.name, self._paper)
+        slots = p.max_concurrent_positions - len(held) - len(working)
         if slots <= 0:
-            logger.info("[%s] At %d/%d positions — not scanning.",
-                        p.name, len(held), p.max_concurrent_positions)
+            logger.info("[%s] At %d/%d positions (%d resting) — not scanning.",
+                        p.name, len(held), p.max_concurrent_positions, len(working))
             return
 
-        held_ids = {pos.market_id for pos in held}
+        held_ids = {pos.market_id for pos in held} | working
         now = time.time()
         funnel: Counter = Counter()
         candidates = []

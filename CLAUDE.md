@@ -95,6 +95,17 @@ python -m algorithms.copy_trade.report cohort.txt           # read-only consensu
   `None` otherwise — the caller leaves the position open and a later sweep
   retries. Settling early books P&L off a live book, drifts the DB from the
   on-chain position, and writes a `signals.outcome` label that is write-once.
+- **A resting maker order is not a position, and a non-fill is not a failure.**
+  `entry_style = "maker"` posts at the bid under `post_only` and returns
+  without writing to `positions`; `runner.reconcile_open_orders` (called once
+  per poll from `main.py`) books it or cancels it at `maker_ttl_seconds`. Two
+  things break if that distinction leaks: the taker path suspends a market
+  until restart when an order does not fill, which for a maker is the normal
+  case and would end the strategy on its first miss; and a 15s poll would
+  stack a new order on the same market every cycle, so `orders.held_market_ids`
+  has to consume a slot exactly as a position does. Note `order_type = "limit"`
+  does **not** make an algorithm a maker — a GTC at the ask crosses and takes.
+
 - **If an algorithm declares `LIVE` but no CLOB client can be built**, `main()`
   exits — it does **not** fall back to paper. Silently papering a live
   algorithm is worse than not starting: the operator believes real money is
@@ -117,9 +128,10 @@ bot/
     db.py                 # Thread-local connections, WAL, schema on every connect
     ledger.py             # Ledger — positions, trade_log, daily_stats, paper_account
     signals.py            # Signal feature logging — training-data rows, outcome-labeled at settle
+    orders.py             # Resting maker orders — placed, unfilled, and therefore NOT positions
     runs.py               # Run provenance — resolved params + git sha per boot
   execution/              # Turning intents into fills; re-exports nothing
-    runner.py             # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify
+    runner.py             # Shared dispatch: risk check, slippage gate, CLOB orders (FAK/GTC), paper fills, DB writes, notify. Also the maker path — rest at the bid under post_only, reconcile fills once per poll
     risk.py               # RiskManager — pre-trade caps from each algo's params; BUYs only
     fills.py              # Paper-exchange fills — no DB, notification, or strategy imports
     pricing.py            # Current price + the slippage gate
@@ -446,6 +458,7 @@ column so multiple algorithms share one DB without collisions.
 - `paper_account` — virtual cash balance, PK `algo`
 - `position_lots` — attributed fills behind an aggregated position; `source` is an opaque key (copy_trade passes a leader wallet)
 - `signals` — one row per dispatched `OpenIntent` (executed or skipped): raw `features` JSON at signal time, `outcome`/`pnl_usdc` backfilled at settlement. Training data — log raw observables, never derived scores.
+- `open_orders` — maker orders resting on the book, PK `(order_id, algo)`. **Not positions**: exposure, the settle sweep, and `positions` must not see them. Carries enough of the originating `OpenIntent` to replay the ordinary fill path when one fills
 - `discord_threads` — `(market_id, algo, paper)` → Discord thread id, so a market's updates nest under its opening message
 - `wallet_resolved_bets` — reconstructed wallet history, the ranker's only input. Natural PK `(wallet, resolved_at, entry_price, outcome)` makes re-ingestion idempotent; a duplicate would silently double-weight that wallet. Written only by `scripts/rank_wallets.py`
 - `wallet_score_runs` / `wallet_scores` — one row per ranking run and its scores, kept so a cohort choice stays explicable after the fact

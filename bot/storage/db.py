@@ -156,6 +156,32 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (market_id, algo, paper)
         );
 
+        -- Maker entries that are resting on the book and are NOT yet a
+        -- position. Everything needed to rebuild the originating OpenIntent
+        -- is stored, so the fill path runs the same code as a taker fill
+        -- rather than a parallel one that can drift from it.
+        CREATE TABLE IF NOT EXISTS open_orders (
+            order_id        TEXT    NOT NULL,
+            algo            TEXT    NOT NULL,
+            paper           INTEGER NOT NULL DEFAULT 0,
+            market_id       TEXT    NOT NULL,
+            asset_id        TEXT    NOT NULL,
+            outcome         TEXT,
+            question        TEXT,
+            limit_price     REAL    NOT NULL,
+            size            REAL    NOT NULL,
+            usdc_amount     REAL    NOT NULL,
+            signal_id       TEXT,
+            signal_price    REAL    NOT NULL DEFAULT 0,
+            features        TEXT    NOT NULL DEFAULT '{}',
+            source          TEXT,
+            source_event_id TEXT,
+            placed_at       INTEGER NOT NULL,
+            PRIMARY KEY (order_id, algo)
+        );
+        CREATE INDEX IF NOT EXISTS idx_open_orders_algo
+            ON open_orders(algo, paper);
+
         CREATE INDEX IF NOT EXISTS idx_trade_log_paper_ts
             ON trade_log(paper, ts);
         CREATE INDEX IF NOT EXISTS idx_trade_log_market

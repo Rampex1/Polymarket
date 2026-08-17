@@ -57,6 +57,25 @@ VARIANTS: dict[str, dict] = {
         "max_ask": 0.985,
         "max_ask_spread": 0.05,
     },
+    # The execution A/B. Identical screen, identical band, identical markets —
+    # the only difference is whether we cross the spread or rest at the bid.
+    #
+    # The control's +0.84% is measured net of taker costs, which at these
+    # prices are a 0.08% fee plus a 0.25% half-spread. A maker pays neither,
+    # so if it fills at the same rate this arm should earn roughly a third of
+    # a point more per trade. It will not fill at the same rate, and by how
+    # much less is the number this arm exists to produce: paper cannot answer
+    # it by assumption, so the order actually has to rest and be counted.
+    #
+    # Read it off `signals.skip_reason`: "maker: resting" is posted,
+    # "maker: unfilled" expired, and an executed row is a fill. Fill rate is
+    # fills / (fills + unfilled), and it is the whole result.
+    "resolution_carry_maker_paper": {
+        "entry_style": "maker",
+        # The band is open about a minute, so an order still resting after
+        # five is quoting a market that has moved on.
+        "maker_ttl_seconds": 300.0,
+    },
 }
 
 
@@ -189,6 +208,19 @@ class ResolutionCarryParams:
     # At 2% gross, one tick of slippage is a quarter of the return: this
     # strategy posts a limit and accepts non-fills rather than paying up.
     order_type: str = _doc("limit", "'limit' (GTC) or 'market' (FOK/FAK). Limit is deliberate here.")
+
+    # 'taker' is the measured configuration: the +0.84% in the band above is
+    # net of crossing the spread and paying theta*p*(1-p). Note `order_type =
+    # "limit"` does NOT make us a maker — a GTC posted at the ask crosses and
+    # takes. Only entry_style does, by resting at the bid under post_only.
+    #
+    # Maker is strictly cheaper (no fee, no half-spread — together ~0.33% at
+    # these prices) and strictly less certain: you fill only when someone
+    # sells to you, which selects for the moments the price is falling. That
+    # adverse selection is unmeasurable offline, which is why this is an arm
+    # rather than a default.
+    entry_style: str = _doc("taker", "'taker' crosses the spread; 'maker' rests at the bid under post_only and pays no fee.")
+    maker_ttl_seconds: float = _doc(300.0, "Cancel a resting maker order after this long. The band is open ~1 minute, so a stale order is a bet on a market that has moved on.")
     max_slippage: float = _doc(0.005, "Max drift from the signal ask before we skip. Half a cent is a quarter of the return.")
 
     # ── Screening + cadence ──────────────────────────────────────────────────
@@ -310,6 +342,21 @@ class ResolutionCarryParams:
             )
         if self.order_type not in ("market", "limit"):
             raise ValueError(f"order_type must be 'market' or 'limit', got '{self.order_type}'.")
+        if self.entry_style not in ("taker", "maker"):
+            raise ValueError(
+                f"entry_style must be 'taker' or 'maker', got '{self.entry_style}'."
+            )
+        if self.entry_style == "maker":
+            if self.order_type != "limit":
+                raise ValueError(
+                    "entry_style='maker' needs order_type='limit' — a market "
+                    "order crosses the book by definition and can only take."
+                )
+            if self.maker_ttl_seconds <= 0:
+                raise ValueError(
+                    "maker_ttl_seconds must be > 0 — an order with no expiry "
+                    "rests forever on a market that has already resolved."
+                )
         if self.bet_size_usdc > self.max_position_size_usdc:
             raise ValueError(
                 f"bet_size_usdc ${self.bet_size_usdc} exceeds max_position_size_usdc "

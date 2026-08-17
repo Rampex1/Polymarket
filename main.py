@@ -87,6 +87,11 @@ def _run_worker(
         consecutive_errors = 0
         while not stop_event.is_set():
             try:
+                # Book or cancel anything a maker entry left resting, before
+                # polling — a resting order is not a position, so until this
+                # runs the algorithm cannot see its own working capital.
+                # A no-op for any algorithm that enters as a taker.
+                runner.reconcile_open_orders(algo, ledger, client, paper)
                 for intent in algo.poll():
                     if stop_event.is_set():
                         break

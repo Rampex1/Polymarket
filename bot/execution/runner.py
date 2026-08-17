@@ -25,11 +25,13 @@ import logging
 from typing import Optional
 
 from py_clob_client_v2.client import ClobClient
-from py_clob_client_v2.clob_types import ApiCreds, MarketOrderArgs, OrderArgs, OrderType
+from py_clob_client_v2.clob_types import (
+    ApiCreds, MarketOrderArgs, OrderArgs, OrderPayload, OrderType,
+)
 from py_clob_client_v2.constants import POLYGON
 
 from .. import config
-from ..storage import signals
+from ..storage import orders, signals
 from ..discord import alerts
 from . import lots
 from ..domain.intents import CloseIntent, Intent, OpenIntent, SettleIntent
@@ -178,6 +180,12 @@ def _handle_open(
                        skip_reason="slippage")
         return
 
+    # A maker entry does not fill now, so it cannot be recorded now. It rests
+    # on the book and `reconcile_open_orders` books it later, or cancels it.
+    if _entry_style(algo) == "maker":
+        _rest_maker_buy(intent, trade, algo, client, paper)
+        return
+
     if paper:
         fill = _simulate_buy(intent.usdc_amount, current_price, algo.params.paper_fee_bps)
     else:
@@ -199,6 +207,13 @@ def _handle_open(
                        algo.name, (intent.question or intent.market_id)[:55])
         return
 
+    _book_fill(intent, trade, fill, algo, ledger, paper)
+
+
+def _book_fill(intent: OpenIntent, trade: Trade, fill: FillResult,
+               algo, ledger: Ledger, paper: bool) -> None:
+    """Record a BUY that actually filled. Shared by the taker and maker paths
+    so a maker fill can never drift from a taker one."""
     signals.record(algo.name, intent, paper, executed=True)
     ledger.record_buy(
         trade,
@@ -215,6 +230,218 @@ def _handle_open(
         )
     alerts.on_buy_executed(trade, fill.amount_usdc, paper, fill.fill_price, algo.display_name, webhook_url=algo.params.webhook_url)
     ledger.print_summary(paper=paper)
+
+
+# ---------------------------------------------------------------------------
+# OPEN as a maker — rest on the book instead of crossing it
+# ---------------------------------------------------------------------------
+#
+# Why this exists: Polymarket charges takers `shares * theta * p * (1-p)` and
+# charges makers nothing, on top of the half-spread a taker pays to cross.
+# Measured across 23,934 closed markets, every directional edge available is
+# ~1 point gross while taker drag runs 1-3 points — so the same trade that
+# loses as a taker can pay as a maker. The cost of finding out is non-fills,
+# which is exactly what this path has to model honestly rather than assume
+# away.
+
+def _entry_style(algo) -> str:
+    """'taker' unless the algorithm opts in. Absent knob → unchanged behaviour
+    for every algorithm that predates this."""
+    return str(getattr(algo.params, "entry_style", "taker") or "taker").lower()
+
+
+def _maker_limit(intent: OpenIntent, client: Optional[ClobClient],
+                 paper: bool) -> Optional[float]:
+    """The price to rest at: the best bid, improved by a tick when there is
+    room to do so and still not cross.
+
+    Resting at the bid is what makes us the maker. Improving by one tick buys
+    queue position without giving up that status; `post_only` on the order is
+    what actually guarantees it, so a stale book here costs a rejection rather
+    than a silent taker fill.
+    """
+    bid = ask = tick = None
+    if client is not None and intent.asset_id:
+        try:
+            book = client.get_order_book(intent.asset_id)
+            bids = getattr(book, "bids", None) or []
+            asks = getattr(book, "asks", None) or []
+            if bids:
+                bid = max(float(b.price) for b in bids)
+            if asks:
+                ask = min(float(a.price) for a in asks)
+            tick = float(client.get_tick_size(intent.asset_id))
+        except Exception as e:
+            logger.warning("Order book lookup failed for %s: %s",
+                           (intent.asset_id or "")[:16], e)
+
+    # Paper has no book to read, and a live lookup can fail. The screen already
+    # recorded both sides, so fall back to what it saw.
+    if bid is None:
+        try:
+            bid = float(intent.features.get("bid"))
+        except (TypeError, ValueError, AttributeError):
+            return None
+    if ask is None:
+        ask = float(intent.signal_price or 0.0) or None
+    if tick is None:
+        tick = 0.001
+
+    if bid <= 0 or bid >= 1:
+        return None
+    improved = round(bid + tick, 6)
+    if ask is not None and improved >= ask:
+        improved = bid
+    return improved
+
+
+def _rest_maker_buy(intent: OpenIntent, trade: Trade, algo,
+                    client: Optional[ClobClient], paper: bool) -> None:
+    price = _maker_limit(intent, client, paper)
+    if price is None or price <= 0:
+        logger.warning("[%s] No usable bid for a maker entry on %s — skipping.",
+                       algo.name, (intent.question or intent.market_id)[:50])
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason="maker: no bid")
+        return
+
+    size = intent.usdc_amount / price
+    order_id = None
+
+    if paper:
+        # No order is placed. The row is a claim that we *would* be resting at
+        # this price, and reconcile fills it only if the market actually trades
+        # there — an optimistic model (it ignores queue position) but a real
+        # one, unlike assuming the fill.
+        order_id = f"paper-{algo.name}-{intent.signal_id or intent.market_id}"
+    else:
+        if client is None:
+            logger.error("[%s] Live maker entry with no CLOB client.", algo.name)
+            return
+        try:
+            args = OrderArgs(token_id=trade.asset_id, price=price,
+                             size=size, side="BUY")
+            signed = client.create_order(args)
+            # post_only is the whole point: the exchange rejects the order
+            # outright if it would cross and take, so maker status is
+            # guaranteed by the venue rather than inferred from our price.
+            resp = client.post_order(signed, OrderType.GTC, post_only=True)
+            logger.info("RAW maker BUY response: %r", resp)
+        except Exception as e:
+            logger.error("[%s] Maker BUY failed to post: %s", algo.name, e)
+            signals.record(algo.name, intent, paper, executed=False,
+                           skip_reason=f"maker: post failed: {e}")
+            return
+
+        if isinstance(resp, dict):
+            order_id = resp.get("orderID") or resp.get("order_id")
+            status = (resp.get("status") or "").lower()
+            if status in ("rejected", "unmatched", "expired") or resp.get("success") is False:
+                # Usually post_only refusing to let us take. Not a failure
+                # worth suspending the market over — the book simply moved.
+                logger.info("[%s] Maker BUY not accepted (%s) — book moved.",
+                            algo.name, status or "rejected")
+                signals.record(algo.name, intent, paper, executed=False,
+                               skip_reason=f"maker: {status or 'rejected'}")
+                return
+        if not order_id:
+            logger.warning("[%s] Maker BUY accepted but returned no order id.",
+                           algo.name)
+            signals.record(algo.name, intent, paper, executed=False,
+                           skip_reason="maker: no order id")
+            return
+
+    orders.record(order_id, algo.name, paper, intent, price, size)
+    signals.record(algo.name, intent, paper, executed=False,
+                   skip_reason="maker: resting")
+    logger.info("[%s] Resting %.4f shares @ %.4f (ask was %.4f) on %s",
+                algo.name, size, price, intent.signal_price or 0.0,
+                (intent.question or intent.market_id)[:50])
+
+
+def reconcile_open_orders(algo, ledger: Ledger, client: Optional[ClobClient],
+                          paper: bool) -> None:
+    """Book maker fills, and cancel orders that have gone stale.
+
+    Called once per poll from the worker loop. A no-op for any algorithm that
+    has not opted into maker entry, so this costs a dict lookup for everyone
+    else.
+    """
+    if _entry_style(algo) != "maker":
+        return
+    ttl = float(getattr(algo.params, "maker_ttl_seconds", 300.0))
+    for order in orders.resting(algo.name, paper):
+        try:
+            _reconcile_one(order, algo, ledger, client, paper, ttl)
+        except Exception:
+            logger.exception("[%s] Reconcile failed for order %s",
+                             algo.name, order.order_id[:20])
+
+
+def _reconcile_one(order, algo, ledger: Ledger, client: Optional[ClobClient],
+                   paper: bool, ttl: float) -> None:
+    intent = order.intent
+    trade = _intent_to_trade(intent, action="BUY")
+    expired = order.age_seconds() > ttl
+
+    if paper:
+        # Filled only if the market has actually traded at or through our
+        # limit since we posted.
+        price = _get_current_price(trade, client)
+        if price and price <= order.limit_price:
+            fill = FillResult(True, order.size, order.size * order.limit_price,
+                              order.limit_price, fee_usdc=0.0)
+            orders.drop(order.order_id, algo.name)
+            _book_fill(intent, trade, fill, algo, ledger, paper)
+            return
+        if expired:
+            orders.drop(order.order_id, algo.name)
+            signals.record(algo.name, intent, paper, executed=False,
+                           skip_reason="maker: unfilled")
+            logger.info("[%s] Maker order expired unfilled @ %.4f on %s",
+                        algo.name, order.limit_price,
+                        (intent.question or intent.market_id)[:50])
+        return
+
+    if client is None:
+        return
+    matched_shares = matched_usdc = 0.0
+    status = ""
+    try:
+        row = client.get_order(order.order_id)
+        if isinstance(row, dict):
+            status = (row.get("status") or "").lower()
+            matched_shares = float(row.get("size_matched") or 0.0)
+            fill_price = float(row.get("price") or order.limit_price)
+            matched_usdc = matched_shares * fill_price
+    except Exception as e:
+        logger.warning("[%s] get_order(%s) failed: %s",
+                       algo.name, order.order_id[:16], e)
+        return
+
+    done = status in ("matched", "filled", "cancelled", "canceled", "expired")
+    if expired and not done:
+        try:
+            client.cancel_order(OrderPayload(orderID=order.order_id))
+            logger.info("[%s] Cancelled stale maker order %s (%.0fs old)",
+                        algo.name, order.order_id[:16], order.age_seconds())
+        except Exception as e:
+            logger.warning("[%s] cancel_order(%s) failed: %s",
+                           algo.name, order.order_id[:16], e)
+            return
+        done = True
+
+    if matched_shares > 0 and (done or matched_shares >= order.size - 1e-9):
+        fill_price = matched_usdc / matched_shares if matched_shares else order.limit_price
+        orders.drop(order.order_id, algo.name)
+        _book_fill(intent, trade,
+                   FillResult(True, matched_shares, matched_usdc, fill_price,
+                              fee_usdc=0.0),
+                   algo, ledger, paper)
+    elif done:
+        orders.drop(order.order_id, algo.name)
+        signals.record(algo.name, intent, paper, executed=False,
+                       skip_reason=f"maker: {status or 'cancelled'} unfilled")
 
 
 # ---------------------------------------------------------------------------

@@ -4,9 +4,26 @@
 # resolution_carry only, deliberately. insider_flow and both arms of the
 # copy_trade sports A/B were removed rather than paused — a block is the only
 # thing that makes an algorithm run, so deleting it stops the worker while
-# leaving every row it wrote in place, partitioned by `algo`. Restoring any of
-# them is re-adding the three lines; the names are the DB partition keys, so
-# they must come back spelled exactly as they were:
+# leaving every row it wrote in place, partitioned by `algo`.
+#
+# They should stay out. Both rest on the claim that somebody else's position
+# predicts an outcome the price has not already absorbed, and that claim was
+# measured on 2026-08-17 against every closed moneyline in a 25-day window
+# (17,557 markets, 3.55M trades) rather than against the whale-selected
+# archive that originally motivated them:
+#
+#   copying a large buy (>=$5k)      -3.6% per trade  (-1.8% at zero slippage)
+#   ... at every size from $1k-$25k  negative at all five thresholds
+#   order-flow imbalance             no information beyond the price; every
+#                                    bucket negative, best of them -2.1%
+#
+# The archive said the opposite (+30% on the same rule) because markets enter
+# it when a whale trades them, and upsets are what generate large trades — so
+# the selection conditions on the future. See algorithms/resolution_carry/
+# calibration.py for both traps written up.
+#
+# Restoring any of them is re-adding the three lines; the names are the DB
+# partition keys, so they must come back spelled exactly as they were:
 #
 #   insider_flow / insider_flow_paper
 #   copy_trade   / copy_trade_paper          (sports excluded — control)
@@ -34,4 +51,22 @@ mode = "paper"
 [[algorithm]]
 type = "resolution_carry"
 name = "resolution_carry_underdog_paper"
+mode = "paper"
+
+# The execution A/B: does resting on the book beat crossing it?
+#
+# Identical screen, identical band, identical markets — the only difference is
+# `entry_style`, set per-name in VARIANTS. The control crosses the spread and
+# pays theta*p*(1-p); this arm posts at the bid under post_only and pays
+# neither, which is worth ~0.33% a trade at these prices against a measured
+# +0.84% for the control.
+#
+# What it cannot inherit is the fill. A maker only trades when someone sells
+# to it, which selects for the moments the price is falling, and no amount of
+# offline data answers how often that happens. This arm exists to count it:
+# `signals.skip_reason` reads "maker: resting" when posted and "maker:
+# unfilled" when it expires, so the fill rate is fills / (fills + unfilled).
+[[algorithm]]
+type = "resolution_carry"
+name = "resolution_carry_maker_paper"
 mode = "paper"
