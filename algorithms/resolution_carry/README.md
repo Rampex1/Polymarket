@@ -385,8 +385,21 @@ Tuning is a code edit in `params.py` and a redeploy — profile TOMLs declare
 only what runs. The DB partition key is `resolution_carry_paper`; renaming it
 orphans the history.
 
-The archive is the only unbiased calibration source available, because the
-CLOB drops price history at resolution: anything not archived before a market
-settles is gone permanently. The archiver must run with `--fidelity 1`, which
-`setup_vm.sh` passes — the default of 60 stores hourly bars, in which a
-one-minute transit is invisible.
+**The archive is not an unbiased calibration source**, which this section used
+to claim. 626 of its 750 resolved tokens entered it because the firehose saw a
+>=$10k trade, and upsets are what generate large trades — so conditioning on it
+conditions on the future. Buying underdogs scores +30% ROI on the archive and
+-9% on every closed moneyline in the same window. It is still the right tool
+for *staleness*, which is a property of the price series, and the wrong one for
+*calibration*, which is a property of the universe.
+
+For calibration, build the universe from Gamma by end date (`closed=true` +
+`sports_market_types` + `end_date_min`/`end_date_max`, sliced by hour, because a
+whole day exceeds the 2100-offset ceiling and truncates silently), and take the
+liquidity filter from `/trades?market=<conditionId>`, which serves a market's
+entire trade history. The CLOB keeps price history for roughly 30 days past
+resolution, which is long enough to rebuild a month of universe on demand — the
+archive's real job is the older history that is gone permanently.
+
+The archiver must run with `--fidelity 1`, which `setup_vm.sh` passes — the
+default of 60 stores hourly bars, in which a one-minute transit is invisible.

@@ -26,6 +26,30 @@ Two measurement traps this is careful about:
      reduced to one per (token, horizon band), and `n` counts tokens.
   * **Scheduled vs actual end.** Horizons use the market's *scheduled* end
      date, because that is all a live strategy would know at entry time.
+
+**And two it does not — read this before believing a number it prints.**
+
+  * **The archive is a selected universe, not a random one.** 626 of its 750
+    resolved tokens entered it because the firehose saw a >=$10k trade. Upsets
+    are what generate large trades, so conditioning on "a whale traded it"
+    conditions on the future. Measured 2026-08-17: buying underdogs scores
+    **+30% ROI** on this archive and **-9%** on every closed moneyline in the
+    same window. Same rule, opposite sign. Any directional edge this script
+    reports is contaminated the same way.
+  * **A price is not a trade.** CLOB `/prices-history` returns a midpoint even
+    for a book that never traded — a seeded placeholder nobody could transact
+    on. In-play favourites near 0.91 "won" 98.0% against a 0.906 mid here;
+    requiring any USDC traded *before* entry drops that to 93.6%. Roughly 85%
+    of archived observations had never traded at the moment they were sampled.
+
+So this script is sound for **staleness**, which is a property of the price
+series itself, and unsound for **calibration**, which is a property of the
+universe. For calibration, build the universe from Gamma by end date instead
+(`closed=true` + `sports_market_types` + `end_date_min/max`, sliced by hour —
+a whole day exceeds the 2100-offset ceiling and truncates silently), and take
+the liquidity filter from `/trades?market=<conditionId>`, which serves a
+market's full history. That is how the band in params.py was set; the archive
+disagreed with the answer by several points in both directions.
 """
 
 import argparse
