@@ -15,5 +15,12 @@ positions.db
 
 # Discovery price-history archive (regenerable, can grow large)
 discovery_archive.db*
-data/
+# Contents of data/ are ignored, except the forecast log: it is the durable
+# record of a forward test, and the cloud routine that appends to it starts
+# from a fresh checkout every week. Tracking it also makes the write-once
+# property auditable — a commit timestamp proves a prediction predates its
+# market's resolution. `data/*` rather than `data/` because git cannot
+# re-include a file whose parent directory is itself excluded.
+data/*
+!data/forecast_log.db
 logs/
