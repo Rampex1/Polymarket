@@ -168,6 +168,8 @@ algorithms/
     screen.py             # Pure: market rows → ranked, diversified candidates. No I/O, so the funnel sweeps offline
     seed.py               # `python -m` job: seed the price archive with markets resolving soon
     calibration.py        # `python -m` backtest of the calibration curve against discovery_archive.db
+  forecast_edge/          # Forward-test a forecaster against the market price. Registers no algorithm, places no orders
+    harness.py            # `python -m` job: --ask / --record / --resolve / --score. Predictions are write-once and refused once a market closes — a retrieval-capable forecaster scored on resolved markets returns skill ~+1.0 and looks exactly like alpha
   insider_flow/           # Copy suspicious fresh-wallet whale buys (no known target)
     algorithm.py          # InsiderFlowAlgorithm: /trades firehose → freshness filter → intents
     params.py             # InsiderFlowParams — pure schema
@@ -468,6 +470,12 @@ column so multiple algorithms share one DB without collisions.
 Schema is created by `CREATE TABLE IF NOT EXISTS` on every connect. There
 is no migration path — a database predating the multi-algorithm layout
 (`algo` columns, `(market_id, paper, algo)` PKs) will not work.
+
+`data/forecast_log.db` is likewise separate, and holds one row per asked
+market: the question, the **market price frozen at ask time** (the benchmark),
+the prediction, and the outcome backfilled at resolution. `model_p` is
+write-once and cannot be set once Gamma reports the market closed — those two
+rules are the only thing separating a forward test from a backtest.
 
 The archiver uses a **separate** DB (`data/discovery_archive.db`):
 `price_history` and `tracked_markets`, both with natural PKs.
