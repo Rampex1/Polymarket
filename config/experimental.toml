@@ -38,20 +38,28 @@ type = "resolution_carry"
 name = "resolution_carry_paper"
 mode = "paper"
 
-# A/B on which side of the same trade to take. Identical screen, identical
-# ranking, identical markets — the only difference is the token bought, set
-# per-name in algorithms/resolution_carry/params.py VARIANTS. Split realized
-# P&L by the signals table's `side` to settle it.
+# resolution_carry_underdog_paper was RETIRED on 2026-08-17, negative EV.
 #
-# The control buys the favourite at ~0.97 and must be right 97% of the time.
-# The treatment buys the same market's underdog at ~0.04 and needs 4%. Over
-# the control's first 33 settlements it went 30-3 for -$2.15, while the mirror
-# of those exact trades would have made +$40.05 — on three events, which
-# proves nothing. ~200 settlements separate the two.
-[[algorithm]]
-type = "resolution_carry"
-name = "resolution_carry_underdog_paper"
-mode = "paper"
+# It bought the mirror of the control's trades — the underdog at ~0.04-0.06
+# instead of the favourite at ~0.97 — on the theory that a 97% market winning
+# only 90% of the time makes the other side cheap. The 17,557-market
+# measurement answered it: across n=1,529 in that band the favourite failed
+# 3.01% against a 3.15% break-even, so the mirror hits 3.01% against a
+# break-even of its own ask (~4-5%, since the underdog pays 1 - favourite
+# *bid*). That is negative before variance, and more negative the wider the
+# book.
+#
+# Its live record said the opposite — 1W/5L for +$27.33 — because the single
+# winner paid 28x. n=6 with one 28x winner is noise, and the whole reason the
+# arm existed was that three such events had already fooled us once.
+#
+# Restoring it is re-adding the three lines below; VARIANTS still carries its
+# knobs. The name is the DB partition key, so it must come back exactly:
+#
+#   [[algorithm]]
+#   type = "resolution_carry"
+#   name = "resolution_carry_underdog_paper"
+#   mode = "paper"
 
 # The execution A/B: does resting on the book beat crossing it?
 #

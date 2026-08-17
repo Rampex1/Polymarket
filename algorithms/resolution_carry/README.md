@@ -278,7 +278,7 @@ So this strategy trades the **transit** — the ~1 minute a game spends crossing
 0.980→0.990 as it becomes decided. Expect a quiet funnel punctuated by bursts
 as games finish, not a steady stream.
 
-## The underdog A/B
+## The underdog A/B — retired
 
 `config/experimental.toml` runs two blocks over the same screen, differing
 only in `buy_underdog` via `VARIANTS`:
@@ -294,11 +294,18 @@ control's new floor would have moved it from buying 0.04–0.06 underdogs to
 buying 0.01–0.02 ones — a different experiment from the one that was started,
 and a worse one. Pinning keeps the arm comparable to its own history.
 
-**The measurement has largely answered its question.** Across n=1,529 in that
-old band the favourite failed 3.01% of the time against a 3.15% break-even, so
-the mirror is a break-even-to-negative trade, not the 9.1% hit rate the first
-33 settlements suggested. The arm is worth leaving on only long enough for its
-own sample to agree; it is not worth waiting 200 settlements for.
+**Retired 2026-08-17 — negative EV.** Across n=1,529 in that old band the
+favourite failed 3.01% of the time against a 3.15% break-even, so the mirror
+hits 3.01% against a break-even of its own ask (~4–5%, since the underdog
+pays `1 - favourite bid`). That is negative before variance, and more
+negative the wider the book.
+
+Its live record disagreed — **1W/5L for +$27.33** — because the one winner
+paid 28×. That is exactly the shape of evidence that created the arm: three
+lucky events at n=33. Six trades with one 28× winner is not a refutation of
+n=1,529, and treating it as one would repeat the original error. The block is
+out of `experimental.toml`; `VARIANTS` still carries its knobs, so restoring
+it is three lines.
 
 Every gate and the ranking run on the favourite regardless of side, so the
 arms select the same markets and differ only in the token bought. Two knobs

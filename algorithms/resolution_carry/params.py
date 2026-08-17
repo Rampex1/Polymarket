@@ -18,15 +18,12 @@ def _doc(default, doc: str):
 # type, keyed by the `name` a profile declares. Values still live in this file,
 # so there is still exactly one place to look up what a knob is set to.
 #
-# The A/B: identical screen, identical ranking, identical markets — only the
-# side traded differs. The control buys the favourite at ~0.97 and needs to be
-# right 97% of the time; the treatment buys the same market's underdog at
-# ~0.04 and needs 4%. Over the first 33 settlements the control went 30-3 for
-# -$2.15 while the mirror of those same trades would have made +$40.05, on a
-# 9.1% hit rate against a 4.1% break-even. That is 3 events and proves
-# nothing: the 95% interval on 9.1% is [3.1%, 23.6%], which contains
-# break-even, and a fair market throws 3+ winners 15% of the time. ~200
-# settlements separate the two.
+# An entry here does not make an arm run — a [[algorithm]] block in the
+# profile does. Knobs are kept for retired arms so restoring one is three
+# lines of TOML, and so the reason it was retired stays next to its settings.
+#
+# Live: resolution_carry_maker_paper (execution A/B, open question).
+# Retired: resolution_carry_underdog_paper (negative EV, see below).
 VARIANTS: dict[str, dict] = {
     "resolution_carry_underdog_paper": {
         "buy_underdog": True,
@@ -48,11 +45,13 @@ VARIANTS: dict[str, dict] = {
         # experiment from the one that was started, and a worse one. Holding
         # the band here keeps the arms comparable to their own history.
         #
-        # Note the measurement has largely answered this arm's question
-        # already: across n=1529 in the old band the favourite failed 3.01% of
-        # the time against a 3.15% break-even, so the underdog mirror is a
-        # ~break-even-to-negative trade, not the 9.1% hit rate the first 33
-        # settlements suggested. Retire it once the sample agrees.
+        # RETIRED 2026-08-17. Across n=1529 in this band the favourite
+        # failed 3.01% against a 3.15% break-even, so the mirror hits 3.01%
+        # against a break-even of its own ask (~4-5%: the underdog pays
+        # 1 - favourite *bid*). Negative before variance. Its own live record
+        # read 1W/5L for +$27.33, but that is one 28x winner in six trades —
+        # the same shape of evidence that motivated the arm in the first
+        # place. The knobs stay so re-adding the TOML block restores it.
         "min_ask": 0.955,
         "max_ask": 0.985,
         "max_ask_spread": 0.05,
