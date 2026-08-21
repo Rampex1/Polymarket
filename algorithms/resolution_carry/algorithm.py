@@ -59,6 +59,12 @@ from .params import ResolutionCarryParams
 
 logger = logging.getLogger(__name__)
 
+# This process runs for weeks, so every dict keyed by market id is a slow leak
+# unless something bounds it. The box has ~500MB and hosts two other Python
+# processes, so "small and unbounded" is still unbounded.
+BUCKET_CACHE_MAX = 500
+SIGNALLED_CACHE_MAX = 500
+
 
 class ResolutionCarryAlgorithm(Algorithm):
     """Buy the top of the book and get paid to wait for settlement."""
@@ -170,7 +176,7 @@ class ResolutionCarryAlgorithm(Algorithm):
 
         events, categories = self._held_buckets(held)
         for cand in screen.select(candidates, events, categories, slots, p):
-            self._buckets[cand.market_id] = (cand.event_id, cand.category)
+            self._remember_bucket(cand.market_id, (cand.event_id, cand.category))
             self._mark_signalled(cand.market_id, now)
             yield self._open(cand)
 
@@ -182,7 +188,7 @@ class ResolutionCarryAlgorithm(Algorithm):
         becomes a position and is deduped by `held_ids` forever, so the
         cooldown only ever governs the rejected case.
         """
-        if len(self._signalled) > 500:
+        if len(self._signalled) > SIGNALLED_CACHE_MAX:
             self._signalled = {
                 m: exp for m, exp in self._signalled.items() if exp > now
             }
@@ -221,8 +227,21 @@ class ResolutionCarryAlgorithm(Algorithm):
             screen.event_id(market),
             labels.split(",")[0] if labels else None,
         )
-        self._buckets[market_id] = bucket
+        self._remember_bucket(market_id, bucket)
         return bucket
+
+    def _remember_bucket(self, market_id: str, bucket: tuple) -> None:
+        """Cache a market's (event, category), bounded.
+
+        Insertion-ordered, so this drops the least recently added fifth when
+        full. Evicting is safe rather than merely cheap: a miss re-fetches
+        from Gamma, so the cache is an optimisation and never a source of
+        truth.
+        """
+        if len(self._buckets) >= BUCKET_CACHE_MAX:
+            for stale in list(self._buckets)[: BUCKET_CACHE_MAX // 5]:
+                del self._buckets[stale]
+        self._buckets[market_id] = bucket
 
     # ── Entry ────────────────────────────────────────────────────────────────
 
@@ -311,6 +330,12 @@ class ResolutionCarryAlgorithm(Algorithm):
         are at max positions, stops being sampled. Persist to `signals` if
         the drawdown question ever needs to be answered precisely.
         """
+        # Drop marks for anything no longer held. A settled position's low
+        # water is not evidence, and without this the dict grows for every
+        # market the strategy has ever been in.
+        for gone in [m for m in self._low_water if m not in held_ids]:
+            del self._low_water[gone]
+
         for market_id in held_ids:
             ask = asks.get(market_id)
             if ask is None or ask >= self._low_water.get(market_id, 1.01):

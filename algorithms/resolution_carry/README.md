@@ -393,6 +393,24 @@ Read the result off `signals.skip_reason`: `maker: resting` when posted,
 which at +0.84% means it needs to fill roughly **72%** of the time to break even
 against simply crossing the spread.
 
+## Long-running state
+
+The worker is a thread that runs for weeks, so every dict keyed by market id
+is a slow leak unless something bounds it — and this runs on a ~500MB box
+alongside the archiver and the Discord bot, where "small and unbounded" is
+still unbounded.
+
+| cache | bound | why that bound |
+|---|---|---|
+| `_buckets` (market → event, category) | 500, oldest fifth evicted | a miss re-fetches from Gamma, so the cache is an optimisation and never a source of truth |
+| `_signalled` (re-signal cooldown) | 500, expired entries dropped | |
+| `_low_water` (drawdown marks) | pruned to currently-held markets | a settled position's low water is not evidence |
+
+Measured over 5,000 distinct markets: 71 KB of heap growth, with `_buckets`
+pinned at its cap and `_low_water` at the number of open positions. Note
+`_remember_bucket` exists so both writers go through the cap — `poll()` used
+to insert directly and bypassed it.
+
 ## How it loses money
 
 In rough order of expected damage:

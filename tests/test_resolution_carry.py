@@ -608,3 +608,36 @@ def test_the_variant_wires_the_underdog_arm():
     assert p.max_slippage * 0.04 == pytest.approx(0.005 * 0.97, abs=0.002)
     assert ResolutionCarryParams(name="resolution_carry_paper").buy_underdog is False
     assert "resolution_carry_underdog_paper" in VARIANTS
+
+
+# ── Nothing keyed by market id may grow forever ──────────────────────────────
+
+def test_bucket_cache_is_bounded(ledger):
+    """This process runs for weeks; a per-market dict with no cap is a leak."""
+    from algorithms.resolution_carry.algorithm import BUCKET_CACHE_MAX
+
+    algo = _algo(ledger, [market()])
+    for i in range(BUCKET_CACHE_MAX * 2):
+        algo._remember_bucket(f"0x{i}", ("ev", "sports"))
+    assert len(algo._buckets) <= BUCKET_CACHE_MAX
+    # The most recent writes survive; eviction takes the oldest.
+    assert f"0x{BUCKET_CACHE_MAX * 2 - 1}" in algo._buckets
+
+
+def test_a_bucket_miss_refetches_rather_than_going_wrong(ledger):
+    """Eviction must be an optimisation, never a source of truth."""
+    rows = [market(conditionId="0xm1", events=[{"id": "ev9"}])]
+    algo = _algo(ledger, rows)
+    assert algo._bucket_of("0xm1") == ("ev9", "sports")
+    algo._buckets.clear()
+    assert algo._bucket_of("0xm1") == ("ev9", "sports")
+
+
+def test_low_water_only_tracks_what_is_still_held(ledger):
+    """A settled position's low water is not evidence, and keeping it means
+    the dict grows for every market the strategy has ever been in."""
+    algo = _algo(ledger, [market()])
+    algo._low_water = {"0xold": 0.4, "0xheld": 0.9}
+    algo._note_lows({"0xheld": 0.5}, {"0xheld"})
+    assert set(algo._low_water) == {"0xheld"}
+    assert algo._low_water["0xheld"] == 0.5      # still records the new low
